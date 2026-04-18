@@ -528,6 +528,7 @@ dependencies = [
  "pdf-extract",
  "tantivy",
  "tantivy-jieba",
+ "tempfile",
  "walkdir",
 ]
 
