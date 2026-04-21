@@ -1,0 +1,88 @@
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+
+/// 落盘在 `%LOCALAPPDATA%\dowse\config.json`，独立于索引目录。
+/// 设计文档明确本里程碑不做设置界面——所有配置走托盘菜单和这个文件。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    /// 上一次成功建索引的目标目录，托盘"重建索引"复用这个。
+    pub target_dir: Option<PathBuf>,
+    /// 玻璃效果开关，对应托盘菜单"关闭透明效果"。
+    #[serde(default = "default_true")]
+    pub transparency_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            target_dir: None,
+            transparency_enabled: true,
+        }
+    }
+}
+
+fn config_path() -> Result<PathBuf> {
+    let dirs =
+        directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
+    Ok(dirs.data_local_dir().join("config.json"))
+}
+
+/// 索引目录固定放在 `%LOCALAPPDATA%\dowse\index`，跟被索引的目录无关，
+/// 和 dowse-cli 的约定保持一致，这样 CLI 建的索引浮窗也能直接用。
+pub fn index_dir() -> Result<PathBuf> {
+    let dirs =
+        directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
+    Ok(dirs.data_local_dir().join("index"))
+}
+
+pub fn load() -> AppConfig {
+    let Ok(path) = config_path() else {
+        return AppConfig::default();
+    };
+    let Ok(bytes) = std::fs::read(&path) else {
+        return AppConfig::default();
+    };
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+pub fn save(cfg: &AppConfig) -> Result<()> {
+    let path = config_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(cfg)?;
+    std::fs::write(&path, bytes).context("写配置文件失败")?;
+    Ok(())
+}
+
+/// 进程内的配置缓存，避免每次读写都打开文件。
+pub struct ConfigState(pub Mutex<AppConfig>);
+
+impl ConfigState {
+    pub fn new() -> Self {
+        Self(Mutex::new(load()))
+    }
+
+    pub fn get(&self) -> AppConfig {
+        self.0.lock().expect("config mutex poisoned").clone()
+    }
+
+    pub fn set_target_dir(&self, dir: PathBuf) -> Result<()> {
+        let mut guard = self.0.lock().expect("config mutex poisoned");
+        guard.target_dir = Some(dir);
+        save(&guard)
+    }
+
+    pub fn set_transparency_enabled(&self, enabled: bool) -> Result<()> {
+        let mut guard = self.0.lock().expect("config mutex poisoned");
+        guard.transparency_enabled = enabled;
+        save(&guard)
+    }
+}
