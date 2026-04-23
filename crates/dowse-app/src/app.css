@@ -1,0 +1,116 @@
+/* dowse 浮窗视觉基调：Win11 原生玻璃 + 苹果式克制。
+   窗口本体透明，真正的模糊由 DWM 的 Acrylic/Mica 供给——这层 CSS 只负责
+   在玻璃上叠一层极薄的中性色调（不是自己画假磨砂），以及"关闭透明效果"
+   或降级到纯色时的兜底背景。
+
+   品牌色：很淡的水蓝（呼应"探水杖"的意象），只用在活跃元素上——
+   选中态背景/描边、输入框光标与聚焦态、命中词高亮。大面积的玻璃和
+   底色始终保持中性，不做成蓝色主题。 */
+
+:root {
+	--font-ui:
+		'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI',
+		'Microsoft YaHei', sans-serif;
+
+	/* 浅色（跟随系统） */
+	--fg-primary: #1b1b1f;
+	--fg-secondary: #6b6b75;
+	--fg-tertiary: #9494a0;
+	--divider: rgba(0, 0, 0, 0.08);
+	--glass-tint: rgba(255, 255, 255, 0.46);
+	--solid-bg: #f3f3f6;
+	--row-hover: rgba(0, 0, 0, 0.035);
+	--scrollbar-thumb: rgba(0, 0, 0, 0.16);
+
+	--accent-soft: rgba(58, 154, 194, 0.14);
+	--accent-border: rgba(58, 154, 194, 0.4);
+	--accent-strong: #1e7da6;
+	--accent-caret: #2a8cba;
+
+	--shortcut-chip-bg: rgba(0, 0, 0, 0.055);
+	--shortcut-chip-fg: var(--fg-secondary);
+
+	--toast-bg: rgba(28, 28, 32, 0.92);
+	--toast-fg: #f1f1f4;
+
+	--radius-window: 14px;
+	--radius-row: 9px;
+	--radius-chip: 5px;
+}
+
+:root[data-effect='solid'] {
+	--glass-tint: var(--solid-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--fg-primary: #f1f1f4;
+		--fg-secondary: #9d9da6;
+		--fg-tertiary: #77777f;
+		--divider: rgba(255, 255, 255, 0.09);
+		--glass-tint: rgba(24, 24, 28, 0.5);
+		--solid-bg: #1c1c20;
+		--row-hover: rgba(255, 255, 255, 0.045);
+		--scrollbar-thumb: rgba(255, 255, 255, 0.18);
+
+		/* 暗色下水蓝提亮一档，保证在深色玻璃上仍然够清楚 */
+		--accent-soft: rgba(112, 199, 232, 0.16);
+		--accent-border: rgba(112, 199, 232, 0.45);
+		--accent-strong: #7fcbe8;
+		--accent-caret: #7fcbe8;
+
+		--shortcut-chip-bg: rgba(255, 255, 255, 0.07);
+
+		--toast-bg: rgba(241, 241, 244, 0.94);
+		--toast-fg: #1c1c20;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	background: transparent;
+	overflow: hidden;
+}
+
+body {
+	font-family: var(--font-ui);
+	color: var(--fg-primary);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	user-select: none;
+	cursor: default;
+}
+
+::selection {
+	background: var(--accent-soft);
+}
+
+::-webkit-scrollbar {
+	width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--scrollbar-thumb);
+	border-radius: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+input {
+	font-family: inherit;
+	color: inherit;
+}
+
+mark.hl {
+	background: transparent;
+	color: var(--accent-strong);
+	font-weight: 600;
+}
