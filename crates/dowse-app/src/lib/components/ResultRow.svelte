@@ -55,6 +55,9 @@
 		text-align: left;
 		cursor: default;
 		color: var(--fg-primary);
+		transition:
+			background-color 0.09s ease-out,
+			border-color 0.09s ease-out;
 	}
 
 	.row:hover {
