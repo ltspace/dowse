@@ -1,45 +1,100 @@
 # dowse
 
-Windows 原生的全盘搜索。名字取自 dowsing rod（探水杖）——找出藏在地表之下的东西。
+Windows 本地全文搜索。索引文件名、文档内容和截图中的文字，快捷键呼出，毫秒级返回。
 
-> 文件名秒出，文档内容能搜，截图里的字能搜。快捷键呼出浮窗，结果可预览、
-> 可跳转到所在文件夹。同一索引服务同时暴露 MCP，给 AI agent 当本地检索工具。
+名字取自 dowsing rod（探水杖）。
 
-## 为什么造这个轮子
+<!-- 【图位 1：浮窗操作 GIF——呼出、输入、结果上屏、跳转文件夹】 -->
 
-- Everything 只搜文件名，不搜内容。
-- Windows 自带搜索慢、不搜图片里的字、界面没法快捷键呼出。
-- sist2 是最接近的开源实现，但它是 Linux 系的（Windows 只能跑 Docker）、
-  界面糙、中文按 trigram 糊弄、项目已停滞。
-- macOS 用户有 Spotlight（原生 OCR 图片文字），Windows 用户没有对等品。
+## 动机
 
-## 设计要点
+Windows 上没有同时满足以下三点的工具：
 
-- **三层索引，逐层变重**：文件名层（秒级建成，毫秒响应）→ 文档内容层
-  （后台首建，增量维护）→ 图片 OCR 层（低优先级慢慢消化）。用户第一分钟
-  就能搜文件名，内容搜索随索引推进逐渐长出来。
-- **一个索引服务，两个前端**：浮窗 UI 给人用，MCP server 给 AI agent 用。
-- **全程本地**：OCR 用 Windows 自带 OCR API（离线、免费、支持中文），
-  不依赖任何云端模型和 token。
-- **中文搜索质量是护城河**：tantivy + jieba 分词，认真做相关性排序，
-  中英混排不打折。
+- 搜索文件内容而不只是文件名（Everything 只做后者）
+- 识别并索引图片中的文字（macOS Spotlight 有，Windows 没有对等实现）
+- 一个快捷键呼出、键盘完成全部操作、不引入可感知的延迟
 
-## 里程碑
+最接近的开源实现是 sist2，但它面向 Linux，Windows 下只能通过 Docker 运行，
+中文按 trigram 处理，项目已停止维护。dowse 是针对这三点的 Windows 原生实现。
 
-| # | 交付物 | 状态 |
-|---|--------|------|
-| 1 | CLI：索引一个目录（txt/md/pdf），命令行搜索带高亮 | 未开始 |
-| 2 | 浮窗：全局快捷键呼出，即打即搜，预览 + 跳转到所在文件夹 | 未开始 |
-| 3 | 文件监听：增量更新索引，告别手动重扫 | 未开始 |
-| 4 | OCR 管线：截图里的字进索引 | 未开始 |
-| 5 | MCP server：AI agent 可调用的本地检索工具 | 未开始 |
-| 6 | 文件名快速层：NTFS MFT 直读 + USN Journal 监听 | 未开始 |
+## 中文处理
+
+- jieba 分词，BM25 排序（tantivy 引擎）。不使用 trigram。
+- 自动探测文件编码（chardetng）。GBK 文件正确解码后入索引。
+- 多词查询默认 AND 语义。引号短语查询按位置精确匹配。
+- OCR 使用 Windows 自带引擎（Windows.Media.Ocr），离线运行，
+  zh-Hans 语言包同时覆盖中英混排，无需配置。
+
+## 性能
+
+设计目标，超出即视为缺陷：
+
+| 指标 | 目标 | 说明 |
+|------|------|------|
+| 快捷键到窗口可见 | < 50ms | 进程常驻，呼出为 show + focus |
+| 键入到结果上屏 | < 80ms | UI 与索引同进程，无 IPC |
+| OCR | ~112ms / 1080p 截图 | 实测中位数，后台线程池处理 |
+| 常驻内存 | < 150MB | 含索引 reader |
+| 安装包 | < 15MB | Tauri，非 Electron |
+| 文件名索引构建（规划） | 秒级 | NTFS MFT 直读，同 Everything |
+
+## 使用
+
+```powershell
+git clone https://github.com/ltspace/dowse && cd dowse
+
+cargo run -p dowse -- index D:\docs      # 建索引
+cargo run -p dowse -- search 限流         # 搜索
+cargo run -p dowse -- search "精确短语"   # 短语查询
+```
+
+浮窗应用（开发中）：Alt+Space 呼出，`↑↓` 选择，`Enter` 打开，
+`Ctrl+Enter` 在资源管理器中定位，`Ctrl+C` 复制路径，`Esc` 隐藏。
+
+<!-- 【图位 2：亮/暗主题 + 预览区截图】 -->
+
+## 架构
+
+```
+                 ┌─────────────────────────────────────────┐
+                 │              dowse-core                  │
+                 │  tantivy 索引 · jieba 分词 · 编码探测      │
+                 │  文本抽取(txt/md/pdf/代码) · OCR 管线*     │
+                 └──────┬──────────┬──────────┬────────────┘
+                        │          │          │
+                 ┌──────┴───┐ ┌────┴─────┐ ┌──┴───────────┐
+                 │ dowse-app │ │ dowse-cli │ │ MCP server*  │
+                 └──────────┘ └──────────┘ └──────────────┘
+                                               * 规划中
+```
+
+单一索引核心，三个消费端。dowse-app 是 Tauri 2 + Svelte 5 的常驻浮窗；
+CLI 用于脚本和调试；MCP server 将本地索引暴露给 AI agent。
+
+索引更新采用监听 + 对账两级机制：运行期间由文件系统事件驱动增量更新
+（500ms 防抖窗口合并，批量提交）；启动时按 mtime/size 比对补齐停机期间的变更。
+
+## 路线图
+
+| # | 内容 | 状态 |
+|---|------|------|
+| 1 | CLI 索引与搜索：中文分词、GBK 探测、高亮 | 完成 |
+| 2 | 浮窗：全局快捷键、Acrylic 材质、键盘导航 | 开发中 |
+| 3 | 增量索引：文件监听、启动对账 | 设计完成 |
+| 4 | OCR 管线：截图文字入索引 | 技术验证完成 |
+| 5 | MCP server | 规划 |
+| 6 | NTFS MFT / USN Journal 快速路径 | 规划 |
 
 ## 技术栈
 
-Rust（核心 + 索引）· tantivy + jieba（全文检索）· Tauri 2（浮窗 UI）·
-pdfium（PDF 抽文本）· Windows.Media.Ocr（图片文字）· rmcp（MCP server）
+Rust · [tantivy](https://github.com/quickwit-oss/tantivy) · jieba ·
+Tauri 2 · Svelte 5 · Windows.Media.Ocr · notify
 
-## 验收标准
+## 设计文档
 
-只有一条：里程碑 2 落地后的两周里，我自己按快捷键的次数。
+- [docs/DESIGN-M2-浮窗.md](docs/DESIGN-M2-浮窗.md)
+- [docs/DESIGN-M3-增量索引.md](docs/DESIGN-M3-增量索引.md)
+
+## 隐私
+
+索引存储在本地（`%LOCALAPPDATA%\dowse`）。不联网，无遥测。
