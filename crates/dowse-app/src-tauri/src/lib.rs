@@ -13,14 +13,24 @@ use config::ConfigState;
 use state::SearchState;
 use window_fx::EffectLevelState;
 
-/// 全局呼出快捷键：Alt+Space。已跟用户确认过，不做成可配置项（M2 范围内）。
-fn toggle_shortcut() -> Shortcut {
-    Shortcut::new(Some(Modifiers::ALT), Code::Space)
+/// 默认全局呼出快捷键：Alt+`（反引号）。原先是 Alt+Space，跟部分用户机器上的
+/// PowerToys Run 冲突，改成配置项后这个只是兜底默认值和解析失败时的回退。
+fn default_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::ALT), Code::Backquote)
+}
+
+/// 从配置里的字符串解析快捷键，解析失败（比如手改配置文件写错了格式）
+/// 就回退到默认值，不能让整个应用起不来。
+fn parse_shortcut(hotkey: &str) -> Shortcut {
+    hotkey.parse().unwrap_or_else(|err| {
+        eprintln!("解析快捷键配置 \"{hotkey}\" 失败，回退到默认值: {err}");
+        default_shortcut()
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let toggle = toggle_shortcut();
+    let toggle = parse_shortcut(&config::load().hotkey);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -53,10 +63,13 @@ pub fn run() {
             commands::get_effect_level,
         ])
         .setup(move |app| {
-            // 快捷键抢注册失败（常见原因：被输入法或别的常驻工具占用了 Alt+Space）
+            // 快捷键抢注册失败（常见原因：被输入法或别的常驻工具占用了）
             // 不该让整个应用起不来——托盘的"呼出"菜单项还能用，把错误打到日志就行。
-            if let Err(err) = app.global_shortcut().register(toggle) {
-                eprintln!("注册 Alt+Space 全局快捷键失败，可能被别的程序占用了: {err}");
+            match app.global_shortcut().register(toggle) {
+                Ok(()) => eprintln!("已注册全局呼出快捷键: {toggle}"),
+                Err(err) => {
+                    eprintln!("注册 {toggle} 全局快捷键失败，可能被别的程序占用了: {err}")
+                }
             }
 
             let window = app
