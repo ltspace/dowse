@@ -38,8 +38,24 @@
 	--radius-chip: 5px;
 }
 
+/* 纯色降级档（玻璃申请失败，或系统/用户关掉了透明效果）：设计文档要的是
+   "纯色深灰"——不分明暗主题都用同一块深灰，不能让亮色主题下退成发虚的
+   浅灰白（之前 --solid-bg 在亮色主题下是 #f3f3f6，退化后跟"深灰"完全对不上）。
+   这里连前景色一起换成暗色那一套，保证文字在深灰底上依然可读。 */
 :root[data-effect='solid'] {
-	--glass-tint: var(--solid-bg);
+	--glass-tint: #1c1c20;
+	--solid-bg: #1c1c20;
+	--fg-primary: #f1f1f4;
+	--fg-secondary: #9d9da6;
+	--fg-tertiary: #77777f;
+	--divider: rgba(255, 255, 255, 0.09);
+	--row-hover: rgba(255, 255, 255, 0.045);
+	--scrollbar-thumb: rgba(255, 255, 255, 0.18);
+	--accent-soft: rgba(112, 199, 232, 0.16);
+	--accent-border: rgba(112, 199, 232, 0.45);
+	--accent-strong: #7fcbe8;
+	--accent-caret: #7fcbe8;
+	--shortcut-chip-bg: rgba(255, 255, 255, 0.07);
 }
 
 @media (prefers-color-scheme: dark) {
