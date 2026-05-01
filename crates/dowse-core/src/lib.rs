@@ -1,24 +1,33 @@
 mod extract;
 mod indexer;
+mod meta;
 mod searcher;
 
 pub use indexer::{rebuild_index, IndexStats};
+pub use meta::registered_roots;
 pub use searcher::{PreviewHit, SearchHit, Searcher};
 
 use tantivy::schema::{
     IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, STORED, STRING,
 };
 
-/// 索引里每篇文档的四个字段。
+/// 索引里每篇文档的字段。
 /// tantivy 的 Field 只是个轻量句柄（本质是个编号），到处复制无所谓。
+///
+/// mtime/size 是里程碑 3 新加的 STORED 数值字段：既给启动对账做 (path, mtime, size)
+/// 三元组比对，也顺手给搜索结果展示用。加了字段就是不兼容变更，schema 版本随之从
+/// 里程碑 1 的隐式 v1 升到 v2（见 meta.rs）。
 pub(crate) struct Fields {
     pub path: tantivy::schema::Field,
     pub name: tantivy::schema::Field,
     pub ext: tantivy::schema::Field,
     pub content: tantivy::schema::Field,
+    pub mtime: tantivy::schema::Field,
+    pub size: tantivy::schema::Field,
 }
 
-/// 定义 schema：path/ext 原样存（不分词），name/content 走 jieba 分词。
+/// 定义 schema：path/ext 原样存（不分词），name/content 走 jieba 分词，
+/// mtime/size 只存不索引（对账遍历时读回来比对）。
 /// content 必须 STORED，否则搜索命中后没有原文可做摘要高亮。
 pub(crate) fn build_schema() -> (Schema, Fields) {
     let mut builder: SchemaBuilder = Schema::builder();
@@ -35,6 +44,8 @@ pub(crate) fn build_schema() -> (Schema, Fields) {
         name: builder.add_text_field("name", jieba_text.clone()),
         ext: builder.add_text_field("ext", STRING | STORED),
         content: builder.add_text_field("content", jieba_text),
+        mtime: builder.add_i64_field("mtime", STORED),
+        size: builder.add_u64_field("size", STORED),
     };
     (builder.build(), fields)
 }

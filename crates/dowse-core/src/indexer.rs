@@ -1,12 +1,13 @@
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use tantivy::{doc, Index, IndexWriter};
 use walkdir::WalkDir;
 
 use crate::extract::extract_text;
-use crate::{build_schema, register_tokenizers};
+use crate::meta::{save_meta, IndexMeta, SCHEMA_VERSION};
+use crate::{build_schema, register_tokenizers, Fields};
 
 /// 一次重建索引的统计结果，CLI 拿去打报告。
 pub struct IndexStats {
@@ -17,6 +18,48 @@ pub struct IndexStats {
 
 /// 这些目录整棵跳过：要么是依赖/构建产物，要么是仓库内部数据。
 const SKIP_DIRS: &[&str] = &["node_modules", "target", ".git", ".venv", "__pycache__"];
+
+/// 读文件的 (mtime 毫秒, size 字节)，喂给 schema 的 mtime/size 字段和启动对账。
+/// 取毫秒而不是秒：同一秒内内容变了但字节数没变的编辑，秒级 mtime 会漏掉。
+/// 拿不到元数据（文件刚被删等）返回 None，调用方自己决定当 (0,0) 还是跳过。
+pub(crate) fn file_stat(path: &Path) -> Option<(i64, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    Some((mtime, meta.len()))
+}
+
+/// 抽取一个文件并写进索引（不 commit）。返回 true=收录、false=没有可索引文本被跳过。
+/// 全量重建和增量更新共用这一处建文档逻辑，保证两条路径写进去的字段完全一致。
+pub(crate) fn add_file_document(writer: &IndexWriter, fields: &Fields, path: &Path) -> Result<bool> {
+    let Some(content) = extract_text(path) else {
+        return Ok(false);
+    };
+    let (mtime, size) = file_stat(path).unwrap_or((0, 0));
+
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    writer.add_document(doc!(
+        fields.path => path.to_string_lossy().into_owned(),
+        fields.name => name,
+        fields.ext => ext,
+        fields.content => content,
+        fields.mtime => mtime,
+        fields.size => size,
+    ))?;
+    Ok(true)
+}
 
 /// v0 策略：全量重建。删掉旧索引目录，从头扫一遍。
 /// 增量更新是里程碑 3 的事，现在先把"能搜"跑通。
@@ -55,31 +98,25 @@ pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> 
         }
         let path = entry.path();
 
-        let Some(content) = extract_text(path) else {
+        if add_file_document(&writer, &fields, path)? {
+            indexed += 1;
+        } else {
             skipped += 1;
-            continue;
-        };
-
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-
-        writer.add_document(doc!(
-            fields.path => path.to_string_lossy().into_owned(),
-            fields.name => name,
-            fields.ext => ext,
-            fields.content => content,
-        ))?;
-        indexed += 1;
+        }
     }
 
     // commit 才是真正落盘的时刻；之前 add_document 都只进内存缓冲
     writer.commit().context("索引提交失败")?;
+
+    // 全量重建后重写 meta.json：记下当前 schema 版本和这次索引的根目录。
+    // 索引根列表是启动对账和监听要监视哪些目录的依据。
+    save_meta(
+        index_dir,
+        &IndexMeta {
+            schema_version: SCHEMA_VERSION,
+            roots: vec![target_dir.to_path_buf()],
+        },
+    )?;
 
     Ok(IndexStats {
         indexed,

@@ -1160,6 +1160,8 @@ dependencies = [
  "chardetng",
  "encoding_rs",
  "pdf-extract",
+ "serde",
+ "serde_json",
  "tantivy",
  "tantivy-jieba",
  "tempfile",
