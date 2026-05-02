@@ -1,23 +1,31 @@
-/* dowse 浮窗视觉基调：Win11 原生玻璃 + 苹果式克制。
+/* dowse 浮窗视觉基调：Raycast 量级的玻璃透明度 + 苹果式克制。
    窗口本体透明，真正的模糊由 DWM 的 Acrylic/Mica 供给——这层 CSS 只负责
-   在玻璃上叠一层极薄的中性色调（不是自己画假磨砂），以及"关闭透明效果"
-   或降级到纯色时的兜底背景。
+   在玻璃上叠一层薄的中性色调（不是自己画假磨砂），以及"关闭透明效果"
+   或降级到纯色时的兜底背景。面板底色刻意留得比较透——背景大片透进来，
+   可读性靠 Acrylic 的重度模糊 + 前景色对比度撑住，不是靠堆高底色不透明度。
 
    品牌色：很淡的水蓝（呼应"探水杖"的意象），只用在活跃元素上——
    选中态背景/描边、输入框光标与聚焦态、命中词高亮。大面积的玻璃和
-   底色始终保持中性，不做成蓝色主题。 */
+   底色始终保持中性，不做成蓝色主题。
+
+   字体：Inter（拉丁，OFL-1.1）+ MiSans（中文，Xiaomi 开源免费商用，经
+   dsrkafuu/misans 打包再分发，Apache-2.0）。字体文件与各自 LICENSE 见
+   ./assets/fonts/，Inter 排在字体栈最前面吃掉拉丁字形，中文自然落到 MiSans；
+   两者都没装上/加载失败时再退到系统字体。 */
+
+@import url('./assets/fonts/fonts.css');
 
 :root {
 	--font-ui:
-		'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI',
-		'Microsoft YaHei', sans-serif;
+		'Inter', 'MiSans', 'HarmonyOS Sans SC', 'Segoe UI Variable Text', 'Segoe UI Variable',
+		'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
 
 	/* 浅色（跟随系统） */
-	--fg-primary: #1b1b1f;
+	--fg-primary: #101014;
 	--fg-secondary: #6b6b75;
 	--fg-tertiary: #9494a0;
 	--divider: rgba(0, 0, 0, 0.08);
-	--glass-tint: rgba(255, 255, 255, 0.46);
+	--glass-tint: rgba(255, 255, 255, 0.65);
 	--solid-bg: #f3f3f6;
 	--row-hover: rgba(0, 0, 0, 0.035);
 	--scrollbar-thumb: rgba(0, 0, 0, 0.16);
@@ -33,7 +41,10 @@
 	--toast-bg: rgba(28, 28, 32, 0.92);
 	--toast-fg: #f1f1f4;
 
-	--radius-window: 14px;
+	/* Win11 系统原生窗口圆角半径，跟 DWM 的 DWMWCP_ROUND 裁切对齐——
+	   面板自己的圆角和窗口本体被裁掉的形状必须是同一个数，否则四角
+	   会露出"玻璃直角 - 面板圆角"的三角形缝隙。 */
+	--radius-window: 8px;
 	--radius-row: 9px;
 	--radius-chip: 5px;
 }
@@ -60,11 +71,11 @@
 
 @media (prefers-color-scheme: dark) {
 	:root {
-		--fg-primary: #f1f1f4;
+		--fg-primary: #f5f5f7;
 		--fg-secondary: #9d9da6;
 		--fg-tertiary: #77777f;
 		--divider: rgba(255, 255, 255, 0.09);
-		--glass-tint: rgba(24, 24, 28, 0.5);
+		--glass-tint: rgba(20, 20, 24, 0.55);
 		--solid-bg: #1c1c20;
 		--row-hover: rgba(255, 255, 255, 0.045);
 		--scrollbar-thumb: rgba(255, 255, 255, 0.18);
@@ -99,6 +110,9 @@ body {
 	color: var(--fg-primary);
 	-webkit-font-smoothing: antialiased;
 	text-rendering: optimizeLegibility;
+	/* 等宽数字：路径里的文件大小、行号、修改时间这些数字场景对齐更整齐 */
+	font-feature-settings: 'tnum' 1;
+	font-variant-numeric: tabular-nums;
 	user-select: none;
 	cursor: default;
 }
