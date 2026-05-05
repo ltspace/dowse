@@ -13,7 +13,7 @@ pub use meta::registered_roots;
 pub use reconcile::{reconcile, ReconcileStats};
 pub use searcher::{PreviewHit, SearchHit, Searcher};
 pub use updater::{BatchOutcome, IndexUpdater};
-pub use watch::{EventSource, NotifyEventSource, WatchGuard};
+pub use watch::{run_watch, EventSource, NotifyEventSource, WatchGuard, WatchProgress};
 
 use tantivy::schema::{
     IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, STORED, STRING,
