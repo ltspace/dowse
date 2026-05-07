@@ -7,6 +7,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::config::ConfigState;
 use crate::highlight::{highlight_name, segments_from_ranges, TextSegment};
 use crate::state::SearchState;
+use crate::watcher::WatchController;
 use crate::window_fx::{EffectLevel, EffectLevelState};
 
 #[derive(Serialize)]
@@ -160,17 +161,25 @@ pub fn reveal_in_folder(_path: String) -> Result<(), String> {
 pub fn rebuild_index(
     search: State<SearchState>,
     config: State<ConfigState>,
+    watch: State<WatchController>,
     dir: String,
 ) -> Result<IndexStatsDto, String> {
     let target = PathBuf::from(&dir);
     let target = target.canonicalize().map_err(|_| "目录不存在".to_string())?;
 
     let index_dir = crate::config::index_dir().map_err(|e| e.to_string())?;
+
+    // 重建前先停监听：放掉旧索引的写锁和文件句柄，否则 Windows 删不掉旧索引目录。
+    watch.stop();
+
     let stats = dowse_core::rebuild_index(&index_dir, &target).map_err(|e| e.to_string())?;
 
     let new_searcher = dowse_core::Searcher::open(&index_dir).map_err(|e| e.to_string())?;
     search.replace(new_searcher);
-    let _ = config.set_target_dir(target);
+    let _ = config.set_target_dir(target.clone());
+
+    // 重建完盯住新索引根，重新挂上"对账 + 实时监听"。
+    watch.start(index_dir, vec![target]);
 
     Ok(IndexStatsDto {
         indexed: stats.indexed,
