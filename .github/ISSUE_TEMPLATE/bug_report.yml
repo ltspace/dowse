@@ -1,0 +1,41 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: dowse version
+      description: Output of `cargo run -p dowse -- --version`, or the release/commit you built from
+      placeholder: v0.2.1 / commit abc1234
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Windows version
+      description: e.g. Windows 11 23H2, Windows 10 22H2
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, and what happened instead of what you expected?
+      placeholder: |
+        1. cargo run -p dowse -- index D:\docs
+        2. cargo run -p dowse -- search 限流
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Logs / screenshots (optional)
+      description: Any relevant error output or screenshots
+    validations:
+      required: false
