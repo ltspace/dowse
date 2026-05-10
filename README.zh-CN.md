@@ -1,3 +1,5 @@
+[English](README.md) | 简体中文
+
 # dowse
 
 Windows 本地全文搜索。索引文件名、文档内容和截图中的文字，快捷键呼出，毫秒级返回。
@@ -48,7 +50,7 @@ cargo run -p dowse -- search 限流         # 搜索
 cargo run -p dowse -- search "精确短语"   # 短语查询
 ```
 
-浮窗应用（开发中）：Alt+` 呼出，`↑↓` 选择，`Enter` 打开，
+浮窗应用（已发布，当前 v0.2.1，即将发布 v0.3.0）：Alt+` 呼出，`↑↓` 选择，`Enter` 打开，
 `Ctrl+Enter` 在资源管理器中定位，`Ctrl+C` 复制路径，`Esc` 隐藏。
 
 <!-- 【图位 2：亮/暗主题 + 预览区截图】 -->
@@ -94,6 +96,8 @@ Tauri 2 · Svelte 5 · Windows.Media.Ocr · notify
 
 - [docs/DESIGN-M2-浮窗.md](docs/DESIGN-M2-浮窗.md)
 - [docs/DESIGN-M3-增量索引.md](docs/DESIGN-M3-增量索引.md)
+- [docs/DESIGN-M4-OCR管线.md](docs/DESIGN-M4-OCR管线.md)
+- [docs/DESIGN-M5-MCP.md](docs/DESIGN-M5-MCP.md)
 
 ## 隐私
 
