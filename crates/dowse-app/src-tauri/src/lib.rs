@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod file_icons;
 mod highlight;
 mod state;
 mod tray;
@@ -11,6 +12,7 @@ use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 use config::ConfigState;
+use file_icons::FileIconCache;
 use state::SearchState;
 use watcher::WatchController;
 use window_fx::EffectLevelState;
@@ -56,6 +58,7 @@ pub fn run() {
         .manage(ConfigState::new())
         .manage(SearchState::load_initial())
         .manage(WatchController::new())
+        .manage(FileIconCache::new())
         .invoke_handler(tauri::generate_handler![
             commands::index_status,
             commands::search,
@@ -64,6 +67,7 @@ pub fn run() {
             commands::reveal_in_folder,
             commands::rebuild_index,
             commands::get_effect_level,
+            commands::file_icon,
         ])
         .setup(move |app| {
             // 快捷键抢注册失败（常见原因：被输入法或别的常驻工具占用了）
