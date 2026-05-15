@@ -20,6 +20,11 @@
 		'Inter', 'MiSans', 'HarmonyOS Sans SC', 'Segoe UI Variable Text', 'Segoe UI Variable',
 		'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
 
+	/* 等宽场景（结果行路径、预览区代码正文）用系统自带的 Cascadia Mono——
+	   Win11 装机自带，零内嵌成本；中文字符不在等宽字体的覆盖范围内，
+	   自然回落到上面 --font-ui 的 MiSans。 */
+	--font-mono: 'Cascadia Mono', Consolas, monospace;
+
 	/* 浅色（跟随系统） */
 	--fg-primary: #101014;
 	--fg-secondary: #6b6b75;
@@ -121,17 +126,32 @@ body {
 	background: var(--accent-soft);
 }
 
+/* 悬浮 overlay 式滚动条：细、圆角、半透明，不滚动/不悬停时几乎看不见——
+   不占版面宽度（track 始终透明，内容不用为滚动条让出空间），只在真的要用
+   的时候才现身。WebView2 是 Chromium 内核，-webkit-scrollbar 这套在这里
+   直接生效，不需要额外的 JS 方案。 */
 ::-webkit-scrollbar {
-	width: 8px;
+	width: 6px;
+	height: 6px;
 }
 
 ::-webkit-scrollbar-thumb {
-	background: var(--scrollbar-thumb);
-	border-radius: 8px;
+	background: transparent;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	background-clip: padding-box;
+	transition: background-color 0.15s ease-out;
 }
 
 ::-webkit-scrollbar-track {
 	background: transparent;
+}
+
+/* 只有正在悬停"这个具体的滚动容器"时才淡入 thumb——避免全局一把梭导致
+   任何带 overflow 的元素都常驻一根若隐若现的滚动条。 */
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+	background-color: var(--scrollbar-thumb);
 }
 
 input {
@@ -139,8 +159,20 @@ input {
 	color: inherit;
 }
 
+/* 命中词高亮：两种做法都留着，用 html[data-highlight] 切换，默认淡底方案。
+   黄色系不用——高亮色跟品牌水蓝走同一套变量（--accent-soft/--accent-strong），
+   跟选中态、聚焦态是同一个色系，视觉上克制，不抢戏。 */
 mark.hl {
-	background: transparent;
+	background: var(--accent-soft);
 	color: var(--accent-strong);
 	font-weight: 600;
+	border-radius: 3px;
+	box-decoration-break: clone;
+	-webkit-box-decoration-break: clone;
+}
+
+:root[data-highlight='underline'] mark.hl {
+	background: transparent;
+	border-bottom: 1.5px solid var(--accent-border);
+	border-radius: 0;
 }
