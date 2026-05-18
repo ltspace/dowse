@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use dowse_core::{reconcile, run_watch, IndexUpdater, NotifyEventSource};
+use dowse_core::{IndexUpdater, NotifyEventSource, reconcile, run_watch};
 
 /// 常驻文件监听的启停控制器。托盘常驻程序启动时先对账、再挂实时监听。
 ///

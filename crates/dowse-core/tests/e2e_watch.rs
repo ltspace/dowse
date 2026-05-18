@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use dowse_core::{rebuild_index, run_watch, IndexUpdater, NotifyEventSource, Searcher};
+use dowse_core::{IndexUpdater, NotifyEventSource, Searcher, rebuild_index, run_watch};
 
 /// 单文件修改到可搜索的性能预算：< 3s（含 500ms 防抖）。
 const BUDGET: Duration = Duration::from_secs(3);
@@ -27,7 +27,11 @@ fn target_dir() -> tempfile::TempDir {
 }
 
 /// 反复开只读 Searcher 搜 query，直到命中数满足 predicate 或超时。返回耗时。
-fn wait_until(index_dir: &Path, query: &str, predicate: impl Fn(usize) -> bool) -> Option<Duration> {
+fn wait_until(
+    index_dir: &Path,
+    query: &str,
+    predicate: impl Fn(usize) -> bool,
+) -> Option<Duration> {
     let start = Instant::now();
     loop {
         // 每轮开新的 Searcher：reader 提交后自动重载有微小延迟，开新的最稳。
@@ -85,14 +89,13 @@ fn end_to_end_watch_add_delete_rename_latency() -> Result<()> {
     // —— 3) 重命名：旧名搜不到、新名能搜到（内容照常命中）——
     let old = target.path().join("beforerename.md");
     std::fs::write(&old, "改名前的正文 grapefruitword")?;
-    wait_until(index_dir.path(), "beforerename", |n| n == 1)
-        .expect("改名前文件应先可搜到");
+    wait_until(index_dir.path(), "beforerename", |n| n == 1).expect("改名前文件应先可搜到");
     let new = target.path().join("afterrename.md");
     std::fs::rename(&old, &new)?;
-    let t_rename_new = wait_until(index_dir.path(), "afterrename", |n| n == 1)
-        .expect("改名后新名字应变为可搜索");
-    let t_rename_old = wait_until(index_dir.path(), "beforerename", |n| n == 0)
-        .expect("改名后旧名字应搜不到");
+    let t_rename_new =
+        wait_until(index_dir.path(), "afterrename", |n| n == 1).expect("改名后新名字应变为可搜索");
+    let t_rename_old =
+        wait_until(index_dir.path(), "beforerename", |n| n == 0).expect("改名后旧名字应搜不到");
 
     // —— 停止监听 ——
     stop.store(true, Ordering::Relaxed);
@@ -107,8 +110,16 @@ fn end_to_end_watch_add_delete_rename_latency() -> Result<()> {
     println!("===============================================================\n");
 
     // 断言在预算内。留一点余量（BUDGET 是设计预算），主要防回归。
-    assert!(t_add <= BUDGET, "写入到可搜索 {}ms 超出 3s 预算", t_add.as_millis());
-    assert!(t_del <= BUDGET, "删除到搜不到 {}ms 超出 3s 预算", t_del.as_millis());
+    assert!(
+        t_add <= BUDGET,
+        "写入到可搜索 {}ms 超出 3s 预算",
+        t_add.as_millis()
+    );
+    assert!(
+        t_del <= BUDGET,
+        "删除到搜不到 {}ms 超出 3s 预算",
+        t_del.as_millis()
+    );
     assert!(
         t_rename_new <= BUDGET,
         "重命名新名可搜 {}ms 超出 3s 预算",

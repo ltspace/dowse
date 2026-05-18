@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use dowse_core::{
-    rebuild_index, registered_roots, run_watch, IndexUpdater, NotifyEventSource, Searcher,
-    WatchProgress,
+    IndexUpdater, NotifyEventSource, Searcher, WatchProgress, rebuild_index, registered_roots,
+    run_watch,
 };
 
 #[derive(Parser)]
@@ -40,8 +40,7 @@ enum Command {
 
 /// 索引统一放在 %LOCALAPPDATA%\dowse\index，跟被索引的目录无关
 fn index_dir() -> Result<PathBuf> {
-    let dirs = directories::ProjectDirs::from("", "", "dowse")
-        .context("拿不到用户数据目录")?;
+    let dirs = directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
     Ok(dirs.data_local_dir().join("index"))
 }
 
@@ -116,19 +115,25 @@ fn watch(dir: Option<PathBuf>) -> Result<()> {
         .context("安装 Ctrl+C 处理器失败")?;
     }
 
-    run_watch(NotifyEventSource, &roots, updater, stop, |progress| match progress {
-        WatchProgress::Received(ev) => println!("  事件  {ev:?}"),
-        WatchProgress::Committed {
-            batch_size,
-            outcome,
-        } => println!(
-            "提交一批：{batch_size} 项 → 收录 {} / 删除 {} / 跳过 {}",
-            outcome.upserted, outcome.removed, outcome.skipped
-        ),
-        WatchProgress::CommitFailed(err) => {
-            eprintln!("提交失败（已退回队列，下个窗口重试）：{err}")
-        }
-    })?;
+    run_watch(
+        NotifyEventSource,
+        &roots,
+        updater,
+        stop,
+        |progress| match progress {
+            WatchProgress::Received(ev) => println!("  事件  {ev:?}"),
+            WatchProgress::Committed {
+                batch_size,
+                outcome,
+            } => println!(
+                "提交一批：{batch_size} 项 → 收录 {} / 删除 {} / 跳过 {}",
+                outcome.upserted, outcome.removed, outcome.skipped
+            ),
+            WatchProgress::CommitFailed(err) => {
+                eprintln!("提交失败（已退回队列，下个窗口重试）：{err}")
+            }
+        },
+    )?;
 
     println!("监听已停止。");
     Ok(())

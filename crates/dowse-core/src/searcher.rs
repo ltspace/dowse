@@ -8,7 +8,7 @@ use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::snippet::SnippetGenerator;
 use tantivy::{Index, IndexReader, TantivyDocument, Term};
 
-use crate::{build_schema, register_tokenizers, Fields};
+use crate::{Fields, build_schema, register_tokenizers};
 
 /// 预览窗口目标字符数：命中词前后共约 1500 字，比搜索结果列表里的摘要长得多。
 const PREVIEW_MAX_CHARS: usize = 1500;
@@ -114,7 +114,8 @@ impl Searcher {
 
         let top_docs = searcher.search(&combined, &TopDocs::with_limit(1).order_by_score())?;
         if let Some((_, addr)) = top_docs.into_iter().next() {
-            let mut snippet_gen = SnippetGenerator::create(&searcher, &combined, self.fields.content)?;
+            let mut snippet_gen =
+                SnippetGenerator::create(&searcher, &combined, self.fields.content)?;
             snippet_gen.set_max_num_chars(PREVIEW_MAX_CHARS);
 
             let doc: TantivyDocument = searcher.doc(addr)?;
@@ -251,7 +252,12 @@ mod tests {
         // tantivy 默认词间是 OR，这里验证已经被 Searcher::open 显式改成 AND：
         // 两个词都出现的文档才应该命中。
         let hits = searcher.search("限流 中间件", 10)?;
-        assert_eq!(hits.len(), 1, "AND 语义下只有同时含两个词的文档命中: {hits:?}", hits = hits.iter().map(|h| &h.path).collect::<Vec<_>>());
+        assert_eq!(
+            hits.len(),
+            1,
+            "AND 语义下只有同时含两个词的文档命中: {hits:?}",
+            hits = hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
         assert!(hits[0].path.ends_with("both.md"));
         Ok(())
     }
