@@ -1,10 +1,17 @@
 /* dowse 浮窗视觉基调：Raycast 量级的玻璃透明度 + 苹果式克制。
    窗口本体透明，真正的模糊由 DWM 的 Acrylic/Mica 供给——这层 CSS 只负责
    在玻璃上叠一层薄的中性色调（不是自己画假磨砂），以及"关闭透明效果"
-   或降级到纯色时的兜底背景。面板底色刻意留得比较透——背景大片透进来，
-   可读性靠 Acrylic 的重度模糊 + 前景色对比度撑住，不是靠堆高底色不透明度。
-   实测过一版 alpha 0.55，糊成一片死灰——玻璃感是模糊本身做的功，这层
-   滤镜只该薄薄一层，压到 0.30～0.42 区间（参照 docs/DESIGN-UI-TOKENS.md 第一节）。
+   或降级到纯色时的兜底背景。
+
+   v0.4.1 之前的教训：面板背后其实叠着两层不透明度贡献者——这层 CSS 的
+   `--glass-tint`，和 Rust 侧 window_fx.rs 里 `neutral_acrylic_tint` 送给
+   DWM 合成器的 tint alpha。只调 CSS 这一层、DWM 那层焊死不动的话，用户
+   把这里的 alpha 从 0.55 调到 0.32 会"观感丝毫没变"——被焊死的那层盖过去
+   了。v0.4.1 把两层收拢到同一个入口：`--glass-alpha-light`/
+   `--glass-alpha-dark` 这两个数字由 Rust 侧 `TransparencyTier` 枚举统一
+   决定，托盘"透明度"三档一次性把两层一起搬，前端只管把这两个数字接进
+   `--glass-tint` 的 alpha 通道，不再自己另定一套。三档的具体数值表见
+   window_fx.rs 上 `TransparencyTier` 的文档注释。
 
    品牌色：很淡的水蓝（呼应"探水杖"的意象），只用在活跃元素上——
    选中态背景/描边、输入框光标与聚焦态、命中词高亮。大面积的玻璃和
@@ -27,15 +34,31 @@
 	   自然回落到上面 --font-ui 的 MiSans。 */
 	--font-mono: 'Cascadia Mono', Consolas, monospace;
 
+	/* 面板可视不透明度的单一控制点：托盘选了哪一档透明度，Rust 侧就把这
+	   两个数字通过 `dowse://glass-alpha` 事件（或启动时的 get_glass_alpha
+	   查询）写进这里的内联样式，覆盖下面的默认值。默认值对应"中"档，
+	   跟 v0.4.0 发布时的观感基本一致，纯前端开发（没有 Tauri 后端）时也
+	   能看到合理的效果。 */
+	--glass-alpha-light: 0.4;
+	--glass-alpha-dark: 0.28;
+
 	/* 浅色（跟随系统） */
 	--fg-primary: #101014;
 	--fg-secondary: #6b6b75;
 	--fg-tertiary: #9494a0;
 	--divider: rgba(0, 0, 0, 0.08);
-	--glass-tint: rgba(255, 255, 255, 0.42);
+	--glass-tint: rgba(255, 255, 255, var(--glass-alpha-light));
 	--solid-bg: #f3f3f6;
 	--row-hover: rgba(0, 0, 0, 0.035);
 	--scrollbar-thumb: rgba(0, 0, 0, 0.16);
+
+	/* 窗口本体是透明的，原生阴影关掉了（tauri.conf.json 里 shadow:
+	   false），悬浮感全靠这两个变量在 .panel 上补一圈细描边 + 一层深阴影——
+	   窗口比面板本身留出一圈 margin（见 .panel 的 inset），阴影才有地方画。 */
+	--panel-border: rgba(0, 0, 0, 0.07);
+	--panel-shadow:
+		0 16px 40px rgba(15, 15, 20, 0.16),
+		0 2px 8px rgba(15, 15, 20, 0.08);
 
 	--accent-soft: rgba(58, 154, 194, 0.14);
 	--accent-border: rgba(58, 154, 194, 0.4);
@@ -56,14 +79,21 @@
 	   面板自己的圆角和窗口本体被裁掉的形状必须是同一个数，否则四角
 	   会露出"玻璃直角 - 面板圆角"的三角形缝隙。 */
 	--radius-window: 8px;
-	--radius-row: 9px;
+	--radius-row: 8px;
 	--radius-chip: 5px;
+
+	/* .panel 相对窗口整体的内缩量——留出来给 --panel-shadow 画阴影用，
+	   窗口比视觉上的"卡片"大这一圈，呼出定位（Rust 侧 position_upper_center）
+	   算的是整个窗口，不受这个内缩影响。 */
+	--panel-margin: 16px;
 }
 
 /* 纯色降级档（玻璃申请失败，或系统/用户关掉了透明效果）：设计文档要的是
    "纯色深灰"——不分明暗主题都用同一块深灰，不能让亮色主题下退成发虚的
    浅灰白（之前 --solid-bg 在亮色主题下是 #f3f3f6，退化后跟"深灰"完全对不上）。
-   这里连前景色一起换成暗色那一套，保证文字在深灰底上依然可读。 */
+   这里连前景色一起换成暗色那一套，保证文字在深灰底上依然可读。
+   纯色档不受透明度三档影响——直接把 --glass-tint 钉死成不透明色，
+   --glass-alpha-* 这两个数字在这里根本用不上。 */
 :root[data-effect='solid'] {
 	--glass-tint: #1c1c20;
 	--solid-bg: #1c1c20;
@@ -71,6 +101,10 @@
 	--fg-secondary: #9d9da6;
 	--fg-tertiary: #77777f;
 	--divider: rgba(255, 255, 255, 0.09);
+	--panel-border: rgba(255, 255, 255, 0.09);
+	--panel-shadow:
+		0 16px 40px rgba(0, 0, 0, 0.45),
+		0 2px 8px rgba(0, 0, 0, 0.3);
 	--row-hover: rgba(255, 255, 255, 0.045);
 	--scrollbar-thumb: rgba(255, 255, 255, 0.18);
 	--accent-soft: rgba(112, 199, 232, 0.16);
@@ -86,8 +120,12 @@
 		--fg-secondary: #9d9da6;
 		--fg-tertiary: #77777f;
 		--divider: rgba(255, 255, 255, 0.1);
-		--glass-tint: rgba(18, 18, 22, 0.32);
+		--glass-tint: rgba(18, 18, 22, var(--glass-alpha-dark));
 		--solid-bg: #1c1c20;
+		--panel-border: rgba(255, 255, 255, 0.07);
+		--panel-shadow:
+			0 16px 40px rgba(0, 0, 0, 0.45),
+			0 2px 8px rgba(0, 0, 0, 0.3);
 		--row-hover: rgba(255, 255, 255, 0.045);
 		--scrollbar-thumb: rgba(255, 255, 255, 0.18);
 

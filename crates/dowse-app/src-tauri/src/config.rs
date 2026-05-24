@@ -4,6 +4,8 @@ use std::sync::Mutex;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::window_fx::TransparencyTier;
+
 /// 落盘在 `%LOCALAPPDATA%\dowse\config.json`，独立于索引目录。
 /// 设计文档明确本里程碑不做设置界面——所有配置走托盘菜单和这个文件。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +15,11 @@ pub struct AppConfig {
     /// 玻璃效果开关，对应托盘菜单"关闭透明效果"。
     #[serde(default = "default_true")]
     pub transparency_enabled: bool,
+    /// 透明度三档（低/中/高），对应托盘菜单"透明度"子菜单。只在
+    /// `transparency_enabled` 为真时才实际生效，但独立存储——用户在
+    /// 关闭透明效果期间也能预先选好档位，重新打开时直接生效。
+    #[serde(default)]
+    pub transparency_tier: TransparencyTier,
     /// 设计文档要求"开机自启（可在托盘菜单关掉）"——默认开，用户关掉之后
     /// 重启应用不该又被悄悄打开。这个字段只记"用户是否主动关过"，
     /// 跟 autostart 插件自己的系统态分开：插件那边问的是"现在是不是开着"，
@@ -39,6 +46,7 @@ impl Default for AppConfig {
         Self {
             target_dir: None,
             transparency_enabled: true,
+            transparency_tier: TransparencyTier::default(),
             autostart_user_disabled: false,
             hotkey: default_hotkey(),
         }
@@ -98,6 +106,12 @@ impl ConfigState {
     pub fn set_transparency_enabled(&self, enabled: bool) -> Result<()> {
         let mut guard = self.0.lock().expect("config mutex poisoned");
         guard.transparency_enabled = enabled;
+        save(&guard)
+    }
+
+    pub fn set_transparency_tier(&self, tier: TransparencyTier) -> Result<()> {
+        let mut guard = self.0.lock().expect("config mutex poisoned");
+        guard.transparency_tier = tier;
         save(&guard)
     }
 
