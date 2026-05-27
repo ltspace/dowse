@@ -8,7 +8,10 @@ export interface TextSegment {
 }
 
 export interface SearchHit {
+	/** 打开文件、跳转文件夹用这个——可能带 Windows 扩展长度路径的 `\\?\` 前缀，别拿去展示。 */
 	path: string;
+	/** 结果行、预览区展示路径文本用这个——`\\?\` 前缀已经剥掉。 */
+	display_path: string;
 	name: string;
 	name_segments: TextSegment[];
 	snippet_segments: TextSegment[];

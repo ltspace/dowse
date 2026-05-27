@@ -27,7 +27,7 @@
 			<FileIcon path={hit.path} />
 			<span class="name"><Segments segments={hit.name_segments} /></span>
 		</div>
-		<div class="path">{hit.path}</div>
+		<div class="path">{hit.display_path}</div>
 		<div class="body">
 			{#if loading}
 				<p class="hint">加载中…</p>

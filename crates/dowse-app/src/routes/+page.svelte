@@ -319,20 +319,25 @@
 </div>
 
 <style>
-	/* .panel 不再是 100vw/100vh 贴满整个窗口——窗口本体比它大一圈
-	   （inset: var(--panel-margin)），多出来的这一圈透明区域专门留给
-	   --panel-shadow 画阴影，窗口是透明的所以这圈边距不会露出任何东西。
-	   position: absolute 以窗口（初始包含块）为参照，而不是随便找一个
-	   祖先元素——html/body 都没有设 position，天然就是这个参照系。 */
+	/* v0.4.1 曾经让 .panel 内缩 16px（inset: var(--panel-margin)）给
+	   box-shadow 留渲染空间——结论错了，撤销，别再试：DWM 的 Acrylic/Mica
+	   是整个窗口生效的合成效果，不认 CSS 布局留出来的"空白"，缩出来的这一
+	   圈边距照样被渲染成玻璃，视觉上就成了"外面一圈裸玻璃画框、里面一个
+	   .panel 边框"的双框。整窗玻璃和"用内缩+CSS阴影模拟悬浮"这个方案在
+	   物理上不兼容，不是哪个数值没调对，任何再往这个方向调 inset 数值的
+	   尝试都会复现同一个问题。
+	   悬浮感的代价就此放弃——.panel 满铺整个窗口（inset: 0），只留一圈
+	   1px 半透明描边勾出边界，不再画阴影。position: absolute 以窗口
+	   （初始包含块）为参照，而不是随便找一个祖先元素——html/body 都没有
+	   设 position，天然就是这个参照系。 */
 	.panel {
 		position: absolute;
-		inset: var(--panel-margin);
+		inset: 0;
 		display: flex;
 		flex-direction: column;
 		background: var(--glass-tint);
 		border-radius: var(--radius-window);
 		border: 1px solid var(--panel-border);
-		box-shadow: var(--panel-shadow);
 		overflow: hidden;
 	}
 
