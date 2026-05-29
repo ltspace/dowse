@@ -4,10 +4,11 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 /// schema 版本号：字段定义每次不兼容变更就 +1。里程碑 3 给 schema 加了
-/// mtime/size 两个字段，从里程碑 1 的隐式 v1 升到 v2。打开索引时版本对不上
-/// 就要求重建，不做静默迁移、不做自动升级——旧字段布局搜出来的结果不可靠，
-/// 宁可让用户重建一次。
-pub(crate) const SCHEMA_VERSION: u32 = 2;
+/// mtime/size 两个字段，从里程碑 1 的隐式 v1 升到 v2。v0.5.0 给 mtime/size
+/// 补上 FAST 属性（排序器需要）、新增 kind 字段（为里程碑 4 OCR 预留），
+/// 再从 v2 升到 v3。打开索引时版本对不上就要求重建，不做静默迁移、不做
+/// 自动升级——旧字段布局搜出来的结果不可靠，宁可让用户重建一次。
+pub(crate) const SCHEMA_VERSION: u32 = 3;
 
 /// 索引目录旁的元数据：schema 版本号 + 已注册的索引根目录列表。
 /// 索引根列表是启动对账和托盘"重建索引"的依据。
