@@ -1,12 +1,26 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EffectLevel, GlassAlpha, IndexStats, IndexStatus, PreviewResult, SearchHit } from './types';
+import type {
+	EffectLevel,
+	ExtGroup,
+	GlassAlpha,
+	IndexStats,
+	IndexStatus,
+	PreviewResult,
+	SearchHit,
+	SortOption
+} from './types';
 
 export function indexStatus(): Promise<IndexStatus> {
 	return invoke('index_status');
 }
 
-export function search(query: string, limit = 30): Promise<SearchHit[]> {
-	return invoke('search', { query, limit });
+export function search(
+	query: string,
+	limit = 30,
+	extGroup: ExtGroup = 'all',
+	sort: SortOption = 'relevance'
+): Promise<SearchHit[]> {
+	return invoke('search', { query, limit, extGroup, sort });
 }
 
 export function preview(path: string, query: string): Promise<PreviewResult | null> {
@@ -37,4 +51,17 @@ export function getGlassAlpha(): Promise<GlassAlpha> {
 /// 取不到返回 null——由调用方（FileIcon 组件）回落到手绘图标。
 export function fileIcon(ext: string): Promise<string | null> {
 	return invoke('file_icon', { ext });
+}
+
+/// 图钉固定开关：会话级，不落盘。固定期间失焦不再自动隐藏浮窗
+/// （见 Rust 侧 autohide.rs 的 AutoHideSuppressor）。
+export function setPinned(pinned: boolean): Promise<void> {
+	return invoke('set_pinned', { pinned });
+}
+
+/// 结果行右键：在给定路径上弹出 Win32 原生上下文菜单（打开/打开所在
+/// 文件夹/复制路径/复制文件名），菜单本身由 Rust 侧构造和处理，这里只是
+/// 触发弹出，不需要等待用户选了哪一项。
+export function showResultContextMenu(path: string): Promise<void> {
+	return invoke('show_result_context_menu', { path });
 }
