@@ -6,9 +6,36 @@ use tantivy::collector::TopDocs;
 use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, TermQuery};
 use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::snippet::SnippetGenerator;
-use tantivy::{Index, IndexReader, TantivyDocument, Term};
+use tantivy::{DocAddress, Index, IndexReader, Order, TantivyDocument, Term};
 
 use crate::{Fields, build_schema, register_tokenizers};
+
+/// 结果排序方式。相关性是默认值——不传排序参数、或者从前端传来的字符串
+/// 没解析出已知档位时都落回这里。其余三档对应浮窗"排序器"下拉的三个非默认项，
+/// 底层用 tantivy `TopDocs::order_by_fast_field` 系列 API 在 mtime/size 这两个
+/// v0.5.0 补了 FAST 属性的字段上排（见 lib.rs 的 build_schema）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortMode {
+    #[default]
+    Relevance,
+    MtimeDesc,
+    MtimeAsc,
+    SizeDesc,
+}
+
+impl SortMode {
+    /// 从字符串解析——浮窗前端和未来的 CLI 参数都用这个入口。未知值/None
+    /// 一律落回相关性排序，不报错：排序档位是体验层面的偏好，不值得因为
+    /// 一个拼错的字符串让整次搜索失败。
+    pub fn parse(name: Option<&str>) -> Self {
+        match name {
+            Some("mtime_desc") => Self::MtimeDesc,
+            Some("mtime_asc") => Self::MtimeAsc,
+            Some("size_desc") => Self::SizeDesc,
+            _ => Self::Relevance,
+        }
+    }
+}
 
 /// 预览窗口目标字符数：命中词前后共约 1500 字，比搜索结果列表里的摘要长得多。
 const PREVIEW_MAX_CHARS: usize = 1500;
@@ -31,6 +58,8 @@ const SNIPPET_SCAN_MAX_BYTES: usize = 128 * 1024;
 
 pub struct SearchHit {
     pub path: String,
+    /// BM25 相关性分数。只在 `SortMode::Relevance`（默认排序）下有意义；
+    /// 按 mtime/size 排序时这里固定是 0.0，不要拿它做展示或二次排序。
     pub score: f32,
     /// 命中上下文片段，命中词的字节区间在 highlighted 里，渲染交给调用方
     pub snippet: String,
@@ -85,39 +114,97 @@ impl Searcher {
     }
 
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchHit>> {
-        self.search_filtered(query_str, limit, None)
+        self.search_advanced(query_str, limit, None, SortMode::Relevance)
     }
 
     /// 同 search()，多一个可选的扩展名过滤（不含点，大小写不敏感）。
-    /// 给 MCP 的 search 工具用：query AND ext 两个条件都在 tantivy 查询层合取，
-    /// 不是拿到结果后再筛——否则筛剩的数量会少于调用方要求的 limit。
+    /// 给 MCP 的 search 工具用；单个扩展名是分组过滤的特例（长度为 1 的集合）。
     pub fn search_filtered(
         &self,
         query_str: &str,
         limit: usize,
         ext: Option<&str>,
     ) -> Result<Vec<SearchHit>> {
+        let group: Option<&[&str]> = ext.as_ref().map(std::slice::from_ref);
+        self.search_advanced(query_str, limit, group, SortMode::Relevance)
+    }
+
+    /// 浮窗"筛选/排序器"两件套的核心入口：query AND ext 分组过滤在 tantivy
+    /// 查询层合取（分组内部是 Should 并集，跟 query 之间是 Must），排序按
+    /// `sort` 选相关性打分或者 mtime/size 的 fast field 排序——都在查询层
+    /// 完成，不是先拿结果再筛/再排，否则筛剩/排后的数量会少于调用方要求的 limit。
+    pub fn search_advanced(
+        &self,
+        query_str: &str,
+        limit: usize,
+        ext_group: Option<&[&str]>,
+        sort: SortMode,
+    ) -> Result<Vec<SearchHit>> {
         let text_query = self.parser.parse_query(query_str)?;
-        let query: Box<dyn Query> = match ext {
-            Some(ext) => {
-                let ext_term = Term::from_field_text(self.fields.ext, &ext.to_ascii_lowercase());
-                let ext_query = TermQuery::new(ext_term, IndexRecordOption::Basic);
+        let query: Box<dyn Query> = match ext_group {
+            Some(exts) if !exts.is_empty() => {
+                let ext_should: Vec<(Occur, Box<dyn Query>)> = exts
+                    .iter()
+                    .map(|ext| {
+                        let term =
+                            Term::from_field_text(self.fields.ext, &ext.to_ascii_lowercase());
+                        (
+                            Occur::Should,
+                            Box::new(TermQuery::new(term, IndexRecordOption::Basic))
+                                as Box<dyn Query>,
+                        )
+                    })
+                    .collect();
                 Box::new(BooleanQuery::new(vec![
                     (Occur::Must, text_query),
-                    (Occur::Must, Box::new(ext_query) as Box<dyn Query>),
+                    (
+                        Occur::Must,
+                        Box::new(BooleanQuery::new(ext_should)) as Box<dyn Query>,
+                    ),
                 ]))
             }
-            None => text_query,
+            _ => text_query,
         };
         let searcher = self.reader.searcher();
 
         let mut snippet_gen = SnippetGenerator::create(&searcher, &query, self.fields.content)?;
         snippet_gen.set_max_num_chars(SNIPPET_MAX_CHARS);
 
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
+        // 相关性排序保留真实 BM25 分数；其余三档按 fast field 排，doc 顺序
+        // 就是最终顺序，score 字段填 0.0——非相关性排序下这个分数没有意义，
+        // 调用方（前端/MCP）不应该拿它做展示或二次排序。
+        let addrs: Vec<(f32, DocAddress)> = match sort {
+            SortMode::Relevance => {
+                searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?
+            }
+            SortMode::MtimeDesc => searcher
+                .search(
+                    &query,
+                    &TopDocs::with_limit(limit).order_by_fast_field::<i64>("mtime", Order::Desc),
+                )?
+                .into_iter()
+                .map(|(_, addr)| (0.0, addr))
+                .collect(),
+            SortMode::MtimeAsc => searcher
+                .search(
+                    &query,
+                    &TopDocs::with_limit(limit).order_by_fast_field::<i64>("mtime", Order::Asc),
+                )?
+                .into_iter()
+                .map(|(_, addr)| (0.0, addr))
+                .collect(),
+            SortMode::SizeDesc => searcher
+                .search(
+                    &query,
+                    &TopDocs::with_limit(limit).order_by_fast_field::<u64>("size", Order::Desc),
+                )?
+                .into_iter()
+                .map(|(_, addr)| (0.0, addr))
+                .collect(),
+        };
 
-        let mut hits = Vec::with_capacity(top_docs.len());
-        for (score, addr) in top_docs {
+        let mut hits = Vec::with_capacity(addrs.len());
+        for (score, addr) in addrs {
             let doc: TantivyDocument = searcher.doc(addr)?;
             let path = doc
                 .get_first(self.fields.path)
@@ -419,6 +506,118 @@ mod tests {
         // 不传 ext 过滤，两篇都应该命中
         let unfiltered = searcher.search("限流", 10)?;
         assert_eq!(unfiltered.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn search_advanced_ext_group_matches_only_group_members() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("note.md"), "限流方案")?;
+        std::fs::write(target_dir.path().join("main.rs"), "限流方案 fn main")?;
+        std::fs::write(target_dir.path().join("note.txt"), "限流方案")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        // 代码分组（BooleanQuery Should 并集）应该只命中 .rs，md/txt 都不在这组里。
+        let code_hits = searcher.search_advanced(
+            "限流",
+            10,
+            Some(crate::ext_groups::CODE),
+            SortMode::Relevance,
+        )?;
+        assert_eq!(
+            code_hits.len(),
+            1,
+            "代码分组应该只命中 .rs: {:?}",
+            code_hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        assert!(code_hits[0].path.ends_with("main.rs"));
+
+        // 文档分组同时含 md 和 txt，验证并集确实取的是"任意一个成员命中"。
+        let doc_hits = searcher.search_advanced(
+            "限流",
+            10,
+            Some(crate::ext_groups::DOC),
+            SortMode::Relevance,
+        )?;
+        assert_eq!(
+            doc_hits.len(),
+            2,
+            "文档分组应该命中 .md 和 .txt 两篇: {:?}",
+            doc_hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn search_sorted_by_mtime_desc_orders_newest_first() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("old.md"), "笔记 alpha")?;
+        // 相邻写入间隔一小段时间，保证两篇的 mtime 毫秒级可区分。
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(target_dir.path().join("new.md"), "笔记 beta")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        let hits = searcher.search_advanced("笔记", 10, None, SortMode::MtimeDesc)?;
+        assert_eq!(hits.len(), 2);
+        assert!(
+            hits[0].path.ends_with("new.md"),
+            "mtime 降序，最新的应排第一: {:?}",
+            hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        assert!(hits[1].path.ends_with("old.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn search_sorted_by_mtime_asc_orders_oldest_first() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("old.md"), "笔记 alpha")?;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(target_dir.path().join("new.md"), "笔记 beta")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        let hits = searcher.search_advanced("笔记", 10, None, SortMode::MtimeAsc)?;
+        assert_eq!(hits.len(), 2);
+        assert!(
+            hits[0].path.ends_with("old.md"),
+            "mtime 升序，最旧的应排第一: {:?}",
+            hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        assert!(hits[1].path.ends_with("new.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn search_sorted_by_size_desc_orders_largest_first() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("small.md"), "笔记")?;
+        std::fs::write(target_dir.path().join("big.md"), "笔记".repeat(500))?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        let hits = searcher.search_advanced("笔记", 10, None, SortMode::SizeDesc)?;
+        assert_eq!(hits.len(), 2);
+        assert!(
+            hits[0].path.ends_with("big.md"),
+            "size 降序，最大的应排第一: {:?}",
+            hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        assert!(hits[1].path.ends_with("small.md"));
         Ok(())
     }
 
