@@ -2,6 +2,9 @@ mod events;
 mod extract;
 mod indexer;
 mod meta;
+mod ocr;
+mod ocr_queue;
+mod ocr_worker;
 mod reconcile;
 mod searcher;
 mod status;
@@ -11,6 +14,11 @@ mod watch;
 pub use events::{Debouncer, PendingChange, PendingOp, QUIET_WINDOW_MS, WATER_LEVEL, WatchEvent};
 pub use indexer::{IndexStats, rebuild_index};
 pub use meta::registered_roots;
+pub use ocr::is_available;
+pub use ocr_queue::OcrQueue;
+pub use ocr_worker::{
+    DEFAULT_WORKERS, MAX_WORKERS, MIN_WORKERS, OcrDrainStats, OcrPipeline, drain_ocr_queue,
+};
 pub use reconcile::{ReconcileStats, reconcile};
 pub use searcher::{PreviewHit, SearchHit, Searcher};
 pub use status::{IndexStatus, index_status};
