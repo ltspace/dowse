@@ -12,12 +12,19 @@
   复制文件名；菜单弹出期间自动隐藏被临时抑制，不会出现"刚右键窗口自己先收起"
 - v0.5.0：输入条新增图钉固定按钮，固定后失焦不再自动隐藏浮窗（会话级，不落盘，
   Esc/全局快捷键的主动收起不受影响）
+- M4：OCR 管线——截图/图片里的文字进索引可搜索。Windows 自带 OCR 引擎
+  （Windows.Media.Ocr），独立于文本管线的低优先级队列 + 2~4 线程 worker 池
+  （各自持有独立 OcrEngine，不跨线程共享）；队列持久化在
+  `<index_dir>-ocr-queue.json`，程序中途退出重启不重复识别；双形态入索引
+  （OCR 原始输出 + 去 CJK 间空格拼接），对冲拆字误差与分词间隙；范围
+  png/jpg/jpeg/webp/bmp，20MB 上限；无 OCR 语言包时管线整体停用、打一行日志，
+  不崩溃。浮窗预览区新增图片原图展示（Tauri asset 协议）+ 命中的 OCR 文本段
 - M5：MCP server——`dowse mcp` 子命令，stdio 传输，只读暴露 search/preview/index_status 三个工具给 AI agent
 
 ### 变更
 
 - **schema 升级到 v3**：mtime/size 补上 FAST 属性（排序器的前提），新增 kind 字段
-  （为里程碑 4 OCR 预留，本版一律写 "text"）——**升级后需要重建索引**，旧索引会
+  （文本文档写 "text"，OCR 图片文档写 "image"）——**升级后需要重建索引**，旧索引会
   按既有机制报错并引导重建，不做静默兼容
 
 ## [0.4.0]

@@ -3,6 +3,9 @@ mod ext_groups;
 mod extract;
 mod indexer;
 mod meta;
+mod ocr;
+mod ocr_queue;
+mod ocr_worker;
 mod reconcile;
 mod searcher;
 mod status;
@@ -13,6 +16,11 @@ pub use events::{Debouncer, PendingChange, PendingOp, QUIET_WINDOW_MS, WATER_LEV
 pub use ext_groups::by_name as ext_group_by_name;
 pub use indexer::{IndexStats, rebuild_index};
 pub use meta::registered_roots;
+pub use ocr::is_available;
+pub use ocr_queue::OcrQueue;
+pub use ocr_worker::{
+    DEFAULT_WORKERS, MAX_WORKERS, MIN_WORKERS, OcrDrainStats, OcrPipeline, drain_ocr_queue,
+};
 pub use reconcile::{ReconcileStats, reconcile};
 pub use searcher::{PreviewHit, SearchHit, Searcher, SortMode};
 pub use status::{IndexStatus, index_status};

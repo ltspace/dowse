@@ -1,5 +1,5 @@
 use std::ops::Bound;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use tantivy::collector::DocSetCollector;
@@ -8,7 +8,9 @@ use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 use crate::events::{PendingChange, PendingOp};
-use crate::indexer::add_file_document;
+use crate::indexer::{add_file_document, add_image_document_with_content};
+use crate::ocr::is_image;
+use crate::ocr_queue::OcrQueue;
 use crate::{Fields, build_schema, register_tokenizers};
 
 /// 一批增量更新的处理结果，给日志/调试看。
@@ -33,6 +35,7 @@ pub struct IndexUpdater {
     index: Index,
     writer: IndexWriter,
     fields: Fields,
+    index_dir: PathBuf,
 }
 
 impl IndexUpdater {
@@ -48,6 +51,7 @@ impl IndexUpdater {
             index,
             writer,
             fields,
+            index_dir: index_dir.to_path_buf(),
         })
     }
 
@@ -55,13 +59,18 @@ impl IndexUpdater {
     /// commit 失败返回 Err，调用方（run_watch）负责把这批退回队列下轮重试。
     pub fn apply(&mut self, batch: &[PendingChange]) -> Result<BatchOutcome> {
         let mut outcome = BatchOutcome::default();
+        let mut touched_image = false;
         for change in batch {
             match change.op {
                 PendingOp::Upsert => {
                     // 先删后加，天然幂等：同一 path 无论之前有没有、内容变没变，
                     // 结果都是"索引里恰好有这一篇的最新版本"。
                     self.delete_exact(&change.path);
-                    if add_file_document(&self.writer, &self.fields, &change.path)? {
+                    if is_image(&change.path) {
+                        touched_image = true;
+                    }
+                    if add_file_document(&self.writer, &self.fields, &change.path, &self.index_dir)?
+                    {
                         outcome.upserted += 1;
                     } else {
                         // 抽不出文本（不支持的格式/损坏/文件已消失）：先删的动作已生效，
@@ -79,7 +88,32 @@ impl IndexUpdater {
             }
         }
         self.writer.commit().context("增量提交失败")?;
+        if touched_image {
+            // 这一批里确实有图片新增/变更被塞进了 OCR 队列的内存态，落一次盘——
+            // 没有图片的批次（大多数文本编辑场景）不用为这个多写一次文件。
+            OcrQueue::for_index_dir(&self.index_dir)
+                .save()
+                .context("保存 OCR 队列状态失败")?;
+        }
         Ok(outcome)
+    }
+
+    /// OCR worker 写回一张图片的最终识别结果：先删旧文档、写入新内容、立刻单独
+    /// 提交。commit 粒度是"每张图片一次"，不跟主更新批次共用节奏——两者本来就是
+    /// 独立的管线（设计文档"独立于文本管线"一节）。单文档的 commit 在 tantivy 里
+    /// 很轻，OCR 识别本身（百毫秒级）远比它慢，不会成为瓶颈；换来的是实现简单、
+    /// 每识别完一张就立刻可搜，不会因为 worker 中途崩溃丢掉一整批还没提交的结果。
+    pub(crate) fn stage_and_commit_ocr_result(
+        &mut self,
+        path: &Path,
+        mtime: i64,
+        size: u64,
+        content: &str,
+    ) -> Result<()> {
+        self.delete_exact(path);
+        add_image_document_with_content(&self.writer, &self.fields, path, mtime, size, content)?;
+        self.writer.commit().context("OCR 结果提交失败")?;
+        Ok(())
     }
 
     /// 内部索引句柄，供启动对账枚举当前所有文档时开只读 reader 用。
