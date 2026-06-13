@@ -1,0 +1,13 @@
+[package]
+name = "dowse-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+chardetng = "1.0.0"
+encoding_rs = "0.8.35"
+pdf-extract = "0.12.0"
+tantivy = "0.26.1"
+tantivy-jieba = "0.20.0"
+walkdir = "2.5.0"
