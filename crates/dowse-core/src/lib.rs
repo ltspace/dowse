@@ -3,7 +3,7 @@ mod indexer;
 mod searcher;
 
 pub use indexer::{rebuild_index, IndexStats};
-pub use searcher::{SearchHit, Searcher};
+pub use searcher::{PreviewHit, SearchHit, Searcher};
 
 use tantivy::schema::{
     IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, STORED, STRING,
