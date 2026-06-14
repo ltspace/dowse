@@ -39,6 +39,11 @@ pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> 
     let mut skipped = 0usize;
 
     let walker = WalkDir::new(target_dir).into_iter().filter_entry(|e| {
+        // 根目录是用户显式指定的扫描起点，跳过规则不适用于它——
+        // 否则 filter_entry 会让 walkdir 连根目录都不下钻，整棵树静默扫出 0 个文件。
+        if e.depth() == 0 {
+            return true;
+        }
         let name = e.file_name().to_string_lossy();
         !(e.file_type().is_dir() && (SKIP_DIRS.contains(&name.as_ref()) || name.starts_with('.')))
     });
@@ -81,4 +86,24 @@ pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> 
         skipped,
         seconds: start.elapsed().as_secs_f64(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebuild_index_root_dot_prefixed_dir_is_not_skipped() -> Result<()> {
+        // 根目录本身以 "." 开头时，不应触发 dot-prefix 跳过规则——
+        // 用户显式指定的扫描起点必须被下钻，否则整棵树静默扫出 0 个文件。
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix(".dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("note.txt"), "hello dowse")?;
+
+        let stats = rebuild_index(index_dir.path(), target_dir.path())?;
+
+        assert_eq!(stats.indexed, 1);
+        Ok(())
+    }
 }
