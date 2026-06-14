@@ -85,11 +85,11 @@ Index updates run on a two-tier scheme: while running, file system events drive 
 | 3 | Incremental indexing: file watching, startup reconciliation | Done |
 | 4 | OCR pipeline: screenshot text into the index | Done |
 | 5 | MCP server | Done |
-| 6 | NTFS MFT / USN Journal fast path | Planned |
+| 6 | NTFS MFT / USN Journal fast path | Done (the admin-only fast path itself is not yet verified on real hardware — see the design doc's implementation notes) |
 
 ## Stack
 
-Rust · [tantivy](https://github.com/quickwit-oss/tantivy) · jieba · Tauri 2 · Svelte 5 · Windows.Media.Ocr · notify
+Rust · [tantivy](https://github.com/quickwit-oss/tantivy) · jieba · Tauri 2 · Svelte 5 · Windows.Media.Ocr · notify · Win32 (MFT/USN Journal)
 
 ## Design docs
 
@@ -97,6 +97,7 @@ Rust · [tantivy](https://github.com/quickwit-oss/tantivy) · jieba · Tauri 2 �
 - [docs/DESIGN-M3-增量索引.md](docs/DESIGN-M3-增量索引.md) (incremental indexing design, Chinese)
 - [docs/DESIGN-M4-OCR管线.md](docs/DESIGN-M4-OCR管线.md) (OCR pipeline design, Chinese)
 - [docs/DESIGN-M5-MCP.md](docs/DESIGN-M5-MCP.md) (MCP server design, Chinese)
+- [docs/DESIGN-M6-NTFS快速层.md](docs/DESIGN-M6-NTFS快速层.md) (NTFS fast path design, Chinese)
 
 ## Privacy
 

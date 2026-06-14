@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+
+use crate::cursor::{UsnCursor, VolumeKey};
 
 /// schema 版本号：字段定义每次不兼容变更就 +1。里程碑 3 给 schema 加了
 /// mtime/size 两个字段，从里程碑 1 的隐式 v1 升到 v2。v0.5.0 给 mtime/size
@@ -10,12 +13,19 @@ use serde::{Deserialize, Serialize};
 /// 自动升级——旧字段布局搜出来的结果不可靠，宁可让用户重建一次。
 pub(crate) const SCHEMA_VERSION: u32 = 3;
 
-/// 索引目录旁的元数据：schema 版本号 + 已注册的索引根目录列表。
-/// 索引根列表是启动对账和托盘"重建索引"的依据。
+/// 索引目录旁的元数据：schema 版本号 + 已注册的索引根目录列表 + 每个卷的
+/// USN 游标（里程碑 6）。
+///
+/// `usn_cursors` 特意不参与 schema 版本号——它是"能不能走快速追平"的可选
+/// 优化信息，不是索引字段布局，读不到/读到旧格式（没这个字段）都不该逼用户
+/// 重建索引，`#[serde(default)]` 让旧 meta.json 静默补一个空表，退回到
+/// mtime 全扫对账，行为上等价于这个卷从来没走过快速路径。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexMeta {
     pub schema_version: u32,
     pub roots: Vec<PathBuf>,
+    #[serde(default)]
+    pub usn_cursors: HashMap<VolumeKey, UsnCursor>,
 }
 
 /// meta.json 放在索引目录的**兄弟**位置（`<index_dir>-meta.json`），不是塞进
@@ -47,6 +57,32 @@ pub(crate) fn save_meta(index_dir: &Path, meta: &IndexMeta) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(meta)?;
     std::fs::write(&path, bytes).context("写索引元数据失败")?;
     Ok(())
+}
+
+/// 读出已注册的 USN 游标（里程碑 6，按卷）。纯粹是"能不能走快速追平"的
+/// 优化信号，读不到就当没有——不返回 Err、不影响调用方的主流程（对照
+/// `usn_cursors` 字段本身"可选优化信息"的定位）。
+pub(crate) fn load_usn_cursors(index_dir: &Path) -> HashMap<VolumeKey, UsnCursor> {
+    load_meta(index_dir)
+        .map(|meta| meta.usn_cursors)
+        .unwrap_or_default()
+}
+
+/// 更新单个卷的 USN 游标，其余字段原样保留。读不到现有 meta（索引还没建过、
+/// 或者刚好在被并发重建）就放弃，只打日志——游标持久化失败最多导致下次
+/// 启动退回 mtime 全扫对账，不是数据安全问题，不值得把调用方搞挂。
+pub(crate) fn save_usn_cursor(index_dir: &Path, volume: &VolumeKey, cursor: UsnCursor) {
+    let mut meta = match load_meta(index_dir) {
+        Ok(meta) => meta,
+        Err(err) => {
+            eprintln!("持久化 USN 游标失败（读不到索引元数据，{volume}）: {err}");
+            return;
+        }
+    };
+    meta.usn_cursors.insert(volume.clone(), cursor);
+    if let Err(err) = save_meta(index_dir, &meta) {
+        eprintln!("持久化 USN 游标失败（{volume}）: {err}");
+    }
 }
 
 /// 打开索引前校验 schema 版本。不匹配就报明确错误、提示重建，不静默兼容。
@@ -104,6 +140,7 @@ mod tests {
             &IndexMeta {
                 schema_version: SCHEMA_VERSION + 1,
                 roots: vec![target_dir.path().to_path_buf()],
+                usn_cursors: HashMap::new(),
             },
         )?;
 
@@ -131,5 +168,49 @@ mod tests {
 
         assert!(crate::Searcher::open(index_dir.path()).is_err());
         Ok(())
+    }
+
+    /// 旧版 meta.json（里程碑 6 之前写的，没有 usn_cursors 字段）应该照常解析
+    /// 成功，`usn_cursors` 静默补成空表——不能因为字段升级就让老索引读不动。
+    #[test]
+    fn meta_without_usn_cursors_field_deserializes_with_empty_default() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let path = meta_path(index_dir.path());
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(&path, r#"{"schema_version":3,"roots":["C:\\watch"]}"#)?;
+
+        let meta = load_meta(index_dir.path())?;
+        assert!(meta.usn_cursors.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn save_and_load_usn_cursor_round_trips() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("note.md"), "内容")?;
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+
+        let cursor = UsnCursor {
+            journal_id: 12345,
+            next_usn: 6789,
+        };
+        save_usn_cursor(index_dir.path(), &"C:".to_string(), cursor);
+
+        let cursors = load_usn_cursors(index_dir.path());
+        assert_eq!(cursors.get("C:"), Some(&cursor));
+
+        // roots/schema_version 不应该被这次更新动到
+        let meta = load_meta(index_dir.path())?;
+        assert_eq!(meta.schema_version, SCHEMA_VERSION);
+        assert_eq!(meta.roots, vec![target_dir.path().to_path_buf()]);
+        Ok(())
+    }
+
+    #[test]
+    fn load_usn_cursors_on_missing_index_returns_empty_not_error() {
+        let index_dir = tempfile::tempdir().unwrap();
+        // 从没建过索引：不应该 panic，也不应该把错误传染给调用方。
+        assert!(load_usn_cursors(index_dir.path()).is_empty());
     }
 }
