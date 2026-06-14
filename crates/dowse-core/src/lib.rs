@@ -24,6 +24,7 @@ pub use events::{Debouncer, PendingChange, PendingOp, QUIET_WINDOW_MS, WATER_LEV
 pub use ext_groups::by_name as ext_group_by_name;
 pub use indexer::{
     IndexProgress, IndexStats, PROGRESS_INTERVAL, rebuild_index, rebuild_index_with_progress,
+    remove_dir_all_retrying,
 };
 pub use meta::registered_roots;
 pub use ocr::is_available;
