@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use serde::Serialize;
 use tauri::window::{Effect, EffectsBuilder};
 use tauri::{Emitter, PhysicalPosition, WebviewWindow};
@@ -9,6 +11,24 @@ pub enum EffectLevel {
     Acrylic,
     Mica,
     Solid,
+}
+
+/// 当前生效的材质级别，进程内常驻一份供前端启动时查询
+/// （启动阶段 emit 的事件前端不一定来得及监听到，State 查询更可靠）。
+pub struct EffectLevelState(pub Mutex<EffectLevel>);
+
+impl EffectLevelState {
+    pub fn new(level: EffectLevel) -> Self {
+        Self(Mutex::new(level))
+    }
+
+    pub fn get(&self) -> EffectLevel {
+        *self.0.lock().expect("effect level mutex poisoned")
+    }
+
+    pub fn set(&self, level: EffectLevel) {
+        *self.0.lock().expect("effect level mutex poisoned") = level;
+    }
 }
 
 /// 材质降级链：Acrylic → Mica → 纯色。玻璃效果是锦上添花，
