@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { tick } from 'svelte';
+	import { animate, stagger } from 'motion';
 	import type { SearchHit } from '../types';
 	import ResultRow from './ResultRow.svelte';
 
@@ -23,6 +25,25 @@
 		if (!listEl) return;
 		const row = listEl.querySelector<HTMLElement>(`[data-idx="${selectedIndex}"]`);
 		row?.scrollIntoView({ block: 'nearest' });
+	});
+
+	// 新的一批结果上屏时做极短的错峰滑入——只给前 10 行做，结果多时不能让
+	// 用户等一串错峰跑完才看到东西；弹簧动画本身也要控制在 150ms 内。
+	let lastRevealKey = '';
+	$effect(() => {
+		const key = hits.map((h) => h.path).join('|');
+		if (key === lastRevealKey || !listEl) return;
+		lastRevealKey = key;
+		tick().then(() => {
+			if (!listEl) return;
+			const rows = Array.from(listEl.querySelectorAll<HTMLElement>('.row')).slice(0, 10);
+			if (rows.length === 0) return;
+			animate(
+				rows,
+				{ opacity: [0, 1], y: [6, 0] },
+				{ type: 'spring', bounce: 0.15, duration: 0.12, delay: stagger(0.012) }
+			);
+		});
 	});
 </script>
 
