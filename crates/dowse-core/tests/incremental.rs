@@ -31,6 +31,13 @@ fn remove(path: &Path) -> PendingChange {
     }
 }
 
+fn upsert_tree(path: &Path) -> PendingChange {
+    PendingChange {
+        path: path.to_path_buf(),
+        op: PendingOp::UpsertTree,
+    }
+}
+
 /// 每次断言都开一个新的 Searcher：Searcher 的 reader 虽然会在 commit 后自动重载，
 /// 但重载有微小延迟，测试里直接开新的最稳妥、无时序假设。
 fn count_hits(index_dir: &Path, query: &str) -> usize {
@@ -168,6 +175,42 @@ fn remove_tree_prefix_deletes_whole_subdirectory() -> Result<()> {
     );
     assert_eq!(count_hits(index_dir.path(), "顶层"), 1, "顶层文件不受影响");
     assert_eq!(count_hits(index_dir.path(), "甲"), 0, "sub 下文件已删");
+
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
+    Ok(())
+}
+
+/// 目录整体新增/移入的展开：notify 回调线程只发一个 UpsertTree 标记（不带
+/// 展开后的文件列表），真正"这个目录下有哪些文件"的 walk 挪到消费侧
+/// （`IndexUpdater::apply`）做——这里直接构造 UpsertTree 变更验证展开结果，
+/// 不依赖真实的 notify 事件触发时序。
+#[test]
+fn upsert_tree_expands_directory_into_every_file_inside() -> Result<()> {
+    let index_dir = tempfile::tempdir()?;
+    let target = target_dir();
+
+    // 先建一个空索引（没有任何文件），模拟"目录是之后才整体移入监听范围的"。
+    rebuild_index(index_dir.path(), target.path())?;
+    assert_eq!(count_hits(index_dir.path(), "watermelon"), 0);
+
+    let moved_in = target.path().join("moved-in");
+    std::fs::create_dir(&moved_in)?;
+    std::fs::write(moved_in.join("a.md"), "子文件甲 watermelon")?;
+    std::fs::write(moved_in.join("b.md"), "子文件乙 watermelon")?;
+    std::fs::create_dir(moved_in.join("nested"))?;
+    std::fs::write(moved_in.join("nested").join("c.md"), "嵌套子文件 watermelon")?;
+
+    let mut updater = IndexUpdater::open(index_dir.path())?;
+    let outcome = updater.apply(&[upsert_tree(&moved_in)])?;
+    assert_eq!(outcome.upserted, 3, "目录下三个文件（含嵌套）都应被展开收录");
+
+    assert_eq!(
+        count_hits(index_dir.path(), "watermelon"),
+        3,
+        "整个移入目录下的文件都应变为可搜索"
+    );
 
     drop(updater);
     common::close_tempdir_retrying(index_dir);
