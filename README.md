@@ -48,7 +48,7 @@ cargo run -p dowse -- search 限流         # 搜索
 cargo run -p dowse -- search "精确短语"   # 短语查询
 ```
 
-浮窗应用（开发中）：Alt+Space 呼出，`↑↓` 选择，`Enter` 打开，
+浮窗应用（开发中）：Alt+` 呼出，`↑↓` 选择，`Enter` 打开，
 `Ctrl+Enter` 在资源管理器中定位，`Ctrl+C` 复制路径，`Esc` 隐藏。
 
 <!-- 【图位 2：亮/暗主题 + 预览区截图】 -->
