@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -18,6 +18,27 @@ pub struct IndexStats {
 
 /// 这些目录整棵跳过：要么是依赖/构建产物，要么是仓库内部数据。
 const SKIP_DIRS: &[&str] = &["node_modules", "target", ".git", ".venv", "__pycache__"];
+
+/// 遍历 root 下所有该收录的文件路径，统一应用跳过规则（依赖/构建产物目录、
+/// 隐藏目录）。全量重建、启动对账、监听时目录整体移入都共用这一处遍历逻辑，
+/// 保证三条路径"哪些文件算数"的判断完全一致。
+pub(crate) fn walk_index_files(root: &Path) -> impl Iterator<Item = PathBuf> {
+    WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|e| {
+            // 根目录是显式指定的扫描起点，跳过规则不适用于它——否则 filter_entry
+            // 会让 walkdir 连根都不下钻，整棵树静默扫出 0 个文件。
+            if e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            !(e.file_type().is_dir()
+                && (SKIP_DIRS.contains(&name.as_ref()) || name.starts_with('.')))
+        })
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+}
 
 /// 读文件的 (mtime 毫秒, size 字节)，喂给 schema 的 mtime/size 字段和启动对账。
 /// 取毫秒而不是秒：同一秒内内容变了但字节数没变的编辑，秒级 mtime 会漏掉。
@@ -81,24 +102,8 @@ pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> 
     let mut indexed = 0usize;
     let mut skipped = 0usize;
 
-    let walker = WalkDir::new(target_dir).into_iter().filter_entry(|e| {
-        // 根目录是用户显式指定的扫描起点，跳过规则不适用于它——
-        // 否则 filter_entry 会让 walkdir 连根目录都不下钻，整棵树静默扫出 0 个文件。
-        if e.depth() == 0 {
-            return true;
-        }
-        let name = e.file_name().to_string_lossy();
-        !(e.file_type().is_dir() && (SKIP_DIRS.contains(&name.as_ref()) || name.starts_with('.')))
-    });
-
-    for entry in walker {
-        let Ok(entry) = entry else { continue };
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let path = entry.path();
-
-        if add_file_document(&writer, &fields, path)? {
+    for path in walk_index_files(target_dir) {
+        if add_file_document(&writer, &fields, &path)? {
             indexed += 1;
         } else {
             skipped += 1;
