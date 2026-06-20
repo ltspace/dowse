@@ -1,2 +1,9 @@
 /target
 /testdata
+
+# 打包/构建过程遗留的临时产物，别提交进仓库
+/build_*.log
+/build_pid.txt
+/release_staging/
+/release_notes.txt
+/dowse-cli-windows-x64.zip
