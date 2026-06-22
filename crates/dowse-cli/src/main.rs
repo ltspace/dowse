@@ -1,8 +1,13 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use dowse_core::{rebuild_index, Searcher};
+use dowse_core::{
+    rebuild_index, registered_roots, run_watch, IndexUpdater, NotifyEventSource, Searcher,
+    WatchProgress,
+};
 
 #[derive(Parser)]
 #[command(name = "dowse", about = "探水杖：Windows 本地全盘搜索", version)]
@@ -25,6 +30,11 @@ enum Command {
         /// 最多返回几条
         #[arg(short = 'n', long, default_value_t = 10)]
         limit: usize,
+    },
+    /// 前台运行文件监听，实时打印收到的事件和防抖后提交的批次（调试用），Ctrl+C 退出
+    Watch {
+        /// 要监听的目录；不给就用上次建索引时注册的根目录
+        dir: Option<PathBuf>,
     },
 }
 
@@ -62,7 +72,65 @@ fn main() -> Result<()> {
                 println!("  {}", render_snippet(&hit.snippet, &hit.highlighted));
             }
         }
+        Command::Watch { dir } => watch(dir)?,
     }
+    Ok(())
+}
+
+/// `dowse watch`：挂上文件监听，把事件和提交批次实时打到终端，Ctrl+C 退出。
+/// 纯调试用途——托盘常驻程序才是监听的正式宿主。
+fn watch(dir: Option<PathBuf>) -> Result<()> {
+    let index = index_dir()?;
+
+    // 监听哪些根：显式给了目录就用它，否则用索引里注册的根。
+    let roots: Vec<PathBuf> = match dir {
+        Some(d) => vec![d.canonicalize().context("目标目录不存在")?],
+        None => {
+            let roots = registered_roots(&index)
+                .context("读不到已注册的索引根，先跑 `dowse index <目录>` 建一次索引")?;
+            if roots.is_empty() {
+                anyhow::bail!("索引里没有已注册的根目录，先跑 `dowse index <目录>`");
+            }
+            roots
+        }
+    };
+
+    println!("监听目录：");
+    for r in &roots {
+        println!("  {}", r.display());
+    }
+    println!("按 Ctrl+C 退出。\n");
+
+    let updater = Arc::new(Mutex::new(
+        IndexUpdater::open(&index).context("打不开索引写入端，先建一次索引")?,
+    ));
+    let stop = Arc::new(AtomicBool::new(false));
+
+    // Ctrl+C：置停止位，run_watch 下个窗口 tick（≤500ms）看到后干净退出。
+    {
+        let stop = stop.clone();
+        ctrlc::set_handler(move || {
+            eprintln!("\n收到 Ctrl+C，正在停止监听…");
+            stop.store(true, Ordering::Relaxed);
+        })
+        .context("安装 Ctrl+C 处理器失败")?;
+    }
+
+    run_watch(NotifyEventSource, &roots, updater, stop, |progress| match progress {
+        WatchProgress::Received(ev) => println!("  事件  {ev:?}"),
+        WatchProgress::Committed {
+            batch_size,
+            outcome,
+        } => println!(
+            "提交一批：{batch_size} 项 → 收录 {} / 删除 {} / 跳过 {}",
+            outcome.upserted, outcome.removed, outcome.skipped
+        ),
+        WatchProgress::CommitFailed(err) => {
+            eprintln!("提交失败（已退回队列，下个窗口重试）：{err}")
+        }
+    })?;
+
+    println!("监听已停止。");
     Ok(())
 }
 
