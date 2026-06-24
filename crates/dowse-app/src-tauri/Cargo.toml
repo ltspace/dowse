@@ -1,9 +1,11 @@
 [package]
 name = "dowse-app"
-version = "0.6.0"
+version = "0.6.1"
 description = "Tauri App"
 authors = ["you"]
 edition = "2024"
+# GUI 应用不发布到 crates.io（走 GitHub Releases 分发安装包），显式禁止误发。
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -29,6 +31,6 @@ serde_json = "1"
 anyhow.workspace = true
 directories = "6.0.0"
 dowse-core = { path = "../../dowse-core" }
-windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_Foundation", "Win32_System_LibraryLoader"] }
+windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_Console"] }
 png = "0.18.1"
 

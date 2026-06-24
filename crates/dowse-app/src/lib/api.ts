@@ -3,6 +3,7 @@ import type {
 	EffectLevel,
 	ExtGroup,
 	GlassAlpha,
+	IndexingSnapshot,
 	IndexStats,
 	IndexStatus,
 	PreviewResult,
@@ -12,6 +13,13 @@ import type {
 
 export function indexStatus(): Promise<IndexStatus> {
 	return invoke('index_status');
+}
+
+/// 建索引进度的当前快照——窗口每次呼出都应该拉一次，跟事件流（
+/// `dowse://rebuild-progress`/`dowse://ocr-progress`）接续起来，见 +page.svelte
+/// 的 `dowse://shown` 处理。
+export function indexingStatus(): Promise<IndexingSnapshot> {
+	return invoke('indexing_status');
 }
 
 export function search(

@@ -4,6 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use dowse_core::{DEFAULT_WORKERS, IndexUpdater, OcrPipeline, watch_roots_auto};
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::indexing_status::IndexingStatus;
 
 /// 常驻文件监听的启停控制器。托盘常驻程序启动时先对账、再挂实时监听。
 ///
@@ -28,7 +31,10 @@ impl WatchController {
     }
 
     /// 启动"对账 + 实时监听"后台线程。已在跑就先停旧的（幂等）；roots 为空则什么都不做。
-    pub fn start(&self, index_dir: PathBuf, roots: Vec<PathBuf>) {
+    /// `app` 用来把 OCR 后台管线的进度往外报——事件推给前端（症状 3：完成报告
+    /// 那行"另有 N 张图片在后台识别"要能动起来）、状态写进 `IndexingStatus`
+    /// （窗口重新呼出时可拉取的快照）、顺手刷新托盘 tooltip。
+    pub fn start(&self, app: AppHandle, index_dir: PathBuf, roots: Vec<PathBuf>) {
         self.stop();
         if roots.is_empty() {
             return;
@@ -36,7 +42,7 @@ impl WatchController {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_for_thread = stop.clone();
         let handle = std::thread::spawn(move || {
-            watch_thread(index_dir, roots, stop_for_thread);
+            watch_thread(app, index_dir, roots, stop_for_thread);
         });
         *self.inner.lock().expect("watch controller mutex poisoned") =
             Some(Running { stop, handle });
@@ -64,25 +70,47 @@ impl WatchController {
 /// `watch_roots_auto` 内部——它对每个根按卷判定快慢车道，快车道走 MFT
 /// 重建路径表 + 游标补账，慢车道还是老的 mtime 全扫，两条路径产出的效果
 /// 对调用方是一样的，这个函数不用再关心"该对账还是该补账"这种细节。
-fn watch_thread(index_dir: PathBuf, roots: Vec<PathBuf>, stop: Arc<AtomicBool>) {
+fn watch_thread(app: AppHandle, index_dir: PathBuf, roots: Vec<PathBuf>, stop: Arc<AtomicBool>) {
+    crate::logging::log_line(
+        "watch",
+        &format!(
+            "启动常驻监听: roots={:?}",
+            roots
+                .iter()
+                .map(|r| r.display().to_string())
+                .collect::<Vec<_>>()
+        ),
+    );
     let updater = match IndexUpdater::open(&index_dir) {
         Ok(updater) => Arc::new(Mutex::new(updater)),
         Err(err) => {
             // 索引不存在/schema 需重建时开不了写入端：不启动监听，等用户重建后
             // 由 rebuild 流程再挂上。前端此时也会因 Searcher 打不开而引导重建。
-            eprintln!("打开索引写入端失败，未启动监听（索引可能需要重建）: {err}");
+            crate::logging::log_line(
+                "watch",
+                &format!("打开索引写入端失败，未启动监听（索引可能需要重建）: {err}"),
+            );
             return;
         }
     };
 
     // 常驻程序不赶时间：图片交给独立的后台 worker 池慢慢消化，跟文本监听并行
     // 跑、互不阻塞。没有可用语言包时返回 None，只打一行日志，不影响文本监听。
-    let ocr_pipeline = OcrPipeline::start(updater.clone(), index_dir.clone(), DEFAULT_WORKERS);
+    let ocr_app = app.clone();
+    let ocr_pipeline = OcrPipeline::start(
+        updater.clone(),
+        index_dir.clone(),
+        DEFAULT_WORKERS,
+        move |pending| report_ocr_progress(&ocr_app, pending),
+    );
+    if ocr_pipeline.is_none() {
+        crate::logging::log_line("ocr", "未检测到可用的 OCR 语言包，OCR 管线已停用");
+    }
 
     // 挂实时监听，阻塞到 stop 置位。提交后 Searcher 的 reader 自动重载，
     // 所以不用往前端推事件，搜索结果自然就追上了。
     if let Err(err) = watch_roots_auto(&index_dir, &roots, updater, stop, |_progress| {}) {
-        eprintln!("文件监听退出: {err}");
+        crate::logging::log_line("watch", &format!("文件监听退出: {err}"));
     }
 
     // 文本监听停了，OCR 管线也跟着收尾——两者共用同一个后台线程的生命周期，
@@ -91,4 +119,15 @@ fn watch_thread(index_dir: PathBuf, roots: Vec<PathBuf>, stop: Arc<AtomicBool>) 
     if let Some(pipeline) = ocr_pipeline {
         pipeline.stop();
     }
+    crate::logging::log_line("watch", "常驻监听已停止");
+}
+
+/// OCR worker 池每写回一批结果就调一次：更新 `IndexingStatus`（窗口下次呼出
+/// 拉取用）、推一个事件给前端（窗口开着时实时刷新用）、顺手刷新托盘 tooltip
+/// （窗口不开也能瞟一眼进度）——三处状态在这一个函数里一起同步，不会漏更新
+/// 某一处。
+fn report_ocr_progress(app: &AppHandle, pending: usize) {
+    app.state::<IndexingStatus>().set_ocr_pending(pending);
+    let _ = app.emit("dowse://ocr-progress", pending);
+    crate::tray::refresh_tooltip(app);
 }

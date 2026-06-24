@@ -4,6 +4,9 @@ mod config;
 mod context_menu;
 mod file_icons;
 mod highlight;
+mod indexing_status;
+mod logging;
+mod rebuild;
 mod state;
 mod tray;
 mod watcher;
@@ -17,6 +20,8 @@ use autohide::AutoHideSuppressor;
 use config::ConfigState;
 use context_menu::ContextMenuTarget;
 use file_icons::FileIconCache;
+use indexing_status::IndexingStatus;
+use rebuild::RebuildGuard;
 use state::SearchState;
 use watcher::WatchController;
 use window_fx::EffectLevelState;
@@ -38,6 +43,11 @@ fn parse_shortcut(hotkey: &str) -> Shortcut {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 越早越好：这一步之后所有的 eprintln!/println!（包括 dowse-core 内部
+    // 各处排障日志）才会落进 `%LOCALAPPDATA%\dowse\logs\dowse.log`，
+    // 而不是消失在 GUI 子系统没有控制台的黑洞里（见 logging.rs 的文档）。
+    logging::init();
+
     let toggle = parse_shortcut(&config::load().hotkey);
 
     tauri::Builder::default()
@@ -66,8 +76,11 @@ pub fn run() {
         .manage(FileIconCache::new())
         .manage(AutoHideSuppressor::new())
         .manage(ContextMenuTarget::new())
+        .manage(IndexingStatus::new())
+        .manage(RebuildGuard::new())
         .invoke_handler(tauri::generate_handler![
             commands::index_status,
+            commands::indexing_status,
             commands::search,
             commands::preview,
             commands::open_file,
@@ -84,10 +97,11 @@ pub fn run() {
             // 快捷键抢注册失败（常见原因：被输入法或别的常驻工具占用了）
             // 不该让整个应用起不来——托盘的"呼出"菜单项还能用，把错误打到日志就行。
             match app.global_shortcut().register(toggle) {
-                Ok(()) => eprintln!("已注册全局呼出快捷键: {toggle}"),
-                Err(err) => {
-                    eprintln!("注册 {toggle} 全局快捷键失败，可能被别的程序占用了: {err}")
-                }
+                Ok(()) => logging::log_line("startup", &format!("已注册全局呼出快捷键: {toggle}")),
+                Err(err) => logging::log_line(
+                    "startup",
+                    &format!("注册 {toggle} 全局快捷键失败，可能被别的程序占用了: {err}"),
+                ),
             }
 
             let window = app
@@ -127,7 +141,8 @@ pub fn run() {
             if let Ok(index_dir) = config::index_dir()
                 && let Ok(roots) = dowse_core::registered_roots(&index_dir)
             {
-                app.state::<WatchController>().start(index_dir, roots);
+                app.state::<WatchController>()
+                    .start(app.handle().clone(), index_dir, roots);
             }
 
             Ok(())
