@@ -1,3 +1,4 @@
+use tauri::image::Image;
 use tauri::menu::{CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager};
@@ -7,6 +8,79 @@ use crate::config::ConfigState;
 use crate::state::SearchState;
 use crate::watcher::WatchController;
 use crate::window_fx::{self, EffectLevelState};
+
+/// 任务栏是浅色还是深色，决定托盘剪影用哪一版（见图标说明第 4 节）。只在
+/// 托盘图标构建时读一次，不做动态监听——运行中途切系统主题需要重启应用
+/// 才能换剪影，这是本轮明确的取舍（任务书原话："动态监听不做"）。
+#[cfg(target_os = "windows")]
+fn taskbar_uses_light_theme() -> bool {
+    use windows::core::w;
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+
+    let mut value: u32 = 0;
+    let mut size: u32 = std::mem::size_of::<u32>() as u32;
+    // 任务栏（不是应用）的明暗跟的是 SystemUsesLightTheme，跟应用整体明暗的
+    // AppsUseLightTheme 是两个独立的键——Win11 允许任务栏和应用窗口分别设置。
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("SystemUsesLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut core::ffi::c_void),
+            Some(&mut size),
+        )
+    };
+    // 键不存在（老版本 Windows）就落到"默认用 tray-dark"这条规则，
+    // 跟第 4 节文档写的默认一致：Win11 开箱默认任务栏是深色。
+    status == ERROR_SUCCESS && value != 0
+}
+
+#[cfg(not(target_os = "windows"))]
+fn taskbar_uses_light_theme() -> bool {
+    false
+}
+
+/// 剪影版没有底板，纯图形 + 透明背景。浅色任务栏配深色剪影（tray-light.png），
+/// 深色任务栏配浅色剪影（tray-dark.png）——命名以"配哪种任务栏"而不是"剪影本身
+/// 的颜色"为准，跟设计稿 icon-usage.md 第 4 节的文件命名保持一致。
+///
+/// `tauri::image::Image` 只接受已解码的 RGBA 像素，没有直接吃 PNG 字节的构造
+/// 函数，这里用 `png` crate 手动解码内嵌的托盘图。
+fn tray_icon_image() -> Image<'static> {
+    let bytes: &[u8] = if taskbar_uses_light_theme() {
+        include_bytes!("../icons/tray-light.png")
+    } else {
+        include_bytes!("../icons/tray-dark.png")
+    };
+    let (rgba, width, height) = decode_rgba_png(bytes);
+    Image::new_owned(rgba, width, height)
+}
+
+/// 解码内嵌 PNG 为 RGBA8 像素。这两张图是打包进二进制的固定资源（不是运行时
+/// 用户输入），解码失败说明打包本身出了问题，直接 panic 比悄悄显示空托盘图标
+/// 更容易在开发阶段暴露——跟这个文件里其它内嵌资源的 `.expect()` 风格一致。
+fn decode_rgba_png(bytes: &[u8]) -> (Vec<u8>, u32, u32) {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder.read_info().expect("内嵌托盘 PNG 应该是合法文件");
+    let mut buf = vec![0u8; reader.output_buffer_size().expect("PNG 应该带有明确的帧尺寸")];
+    let info = reader
+        .next_frame(&mut buf)
+        .expect("内嵌托盘 PNG 应该能正常解码首帧");
+    buf.truncate(info.buffer_size());
+
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => buf
+            .chunks_exact(3)
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect(),
+        other => panic!("内嵌托盘 PNG 颜色类型不受支持: {other:?}（导出时应固定为 RGBA）"),
+    };
+    (rgba, info.width, info.height)
+}
 
 const MENU_SHOW: &str = "show";
 const MENU_REBUILD: &str = "rebuild";
@@ -43,10 +117,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .expect("打包时应该内嵌了默认图标");
+    let icon = tray_icon_image();
 
     TrayIconBuilder::new()
         .icon(icon)
