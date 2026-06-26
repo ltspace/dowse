@@ -5,6 +5,7 @@ use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::config::ConfigState;
+use crate::file_icons::FileIconCache;
 use crate::highlight::{highlight_name, segments_from_ranges, TextSegment};
 use crate::state::SearchState;
 use crate::watcher::WatchController;
@@ -123,6 +124,15 @@ pub fn preview(
     Ok(Some(PreviewDto {
         segments: segments_from_ranges(&hit.snippet, &hit.highlighted),
     }))
+}
+
+/// 按扩展名取系统关联图标（PNG base64 data URI），取不到返回 `None`——前端据此
+/// 回落到手绘的通用图标，不把"系统没有这个图标"当错误处理。`ext` 不带点，
+/// 空字符串代表无扩展名文件。结果按扩展名缓存在 `FileIconCache` 里，
+/// 一屏结果里一堆同后缀的文件只问系统一次。
+#[tauri::command]
+pub fn file_icon(cache: State<FileIconCache>, ext: String) -> Option<String> {
+    cache.get(&ext)
 }
 
 /// 用系统默认程序打开文件。
