@@ -15,7 +15,7 @@ use crate::indexer::{
 };
 use crate::ocr::is_image;
 use crate::ocr_queue::OcrQueue;
-use crate::{Fields, build_schema, register_tokenizers};
+use crate::{Fields, IndexProgress, PROGRESS_INTERVAL, build_schema, register_tokenizers};
 
 /// 长驻写入端（`IndexUpdater`）撞上杀软扫描瞬时冲突时的重试参数。判据复用
 /// `indexer::is_transient_writer_killed`——跟全量重建是同一个根因（见
@@ -75,13 +75,32 @@ impl IndexUpdater {
     /// 处理一批防抖合并后的变更，最后 commit 一次。
     /// commit 失败返回 Err，调用方（run_watch）负责把这批退回队列下轮重试。
     ///
+    /// 不需要进度直播的调用方走这个薄封装，回调是空操作——真正的实现和进度
+    /// 上报都在 `apply_with_progress`，跟 `rebuild_index`/`rebuild_index_with_progress`
+    /// 是同一套"薄封装 + 带进度实现"的分工。
+    pub fn apply(&mut self, batch: &[PendingChange]) -> Result<BatchOutcome> {
+        self.apply_with_progress(batch, |_| {})
+    }
+
+    /// 同 `apply`，多一个进度回调：`PendingOp::UpsertTree` 展开成具体文件后，
+    /// 每处理 `PROGRESS_INTERVAL` 个文件就报一次累计处理数和当前文件路径——
+    /// 多根索引（里程碑 7）"添加根"操作本质就是对新根整目录做一次 UpsertTree，
+    /// 复用这条路径的同时需要把过程直播给前端（设计文档"进度直播复用现有
+    /// 整套"），单文件的 `Upsert`/删除类操作数量级小，不单独计进度。
+    ///
     /// 撞上杀软扫描瞬时冲突（见 `commit_with_retry` 文档）时整批重做——
     /// `upsert_one`/`delete_exact`/`delete_tree` 全部是"先删后加"或者按 term
-    /// 精确删除，同一批重复应用结果不变，重做无害。
-    pub fn apply(&mut self, batch: &[PendingChange]) -> Result<BatchOutcome> {
+    /// 精确删除，同一批重复应用结果不变，重做无害；进度计数在重做时会从头
+    /// 重新累计，跟 `rebuild_index_with_progress` 重试时的行为一致。
+    pub fn apply_with_progress(
+        &mut self,
+        batch: &[PendingChange],
+        mut on_progress: impl FnMut(IndexProgress),
+    ) -> Result<BatchOutcome> {
         self.commit_with_retry(|this| {
             let mut outcome = BatchOutcome::default();
             let mut touched_image = false;
+            let mut processed = 0usize;
             for change in batch {
                 match change.op {
                     PendingOp::Upsert => {
@@ -95,6 +114,13 @@ impl IndexUpdater {
                         // `Upsert` 完全一样的先删后加逻辑。
                         for file in walk_index_files(&change.path) {
                             this.upsert_one(&file, &mut outcome, &mut touched_image)?;
+                            processed += 1;
+                            if processed.is_multiple_of(PROGRESS_INTERVAL) {
+                                on_progress(IndexProgress {
+                                    processed,
+                                    path: file.clone(),
+                                });
+                            }
                         }
                     }
                     PendingOp::Remove => {
