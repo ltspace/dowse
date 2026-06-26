@@ -16,6 +16,7 @@
 	let hits = $state<SearchHit[]>([]);
 	let selectedIndex = $state(0);
 	let hasIndex = $state<boolean | null>(null);
+	let numDocs = $state(0);
 	let previewSegments = $state<TextSegment[] | null>(null);
 	let previewLoading = $state(false);
 	let rebuildState = $state<'idle' | 'rebuilding' | 'error'>('idle');
@@ -24,6 +25,7 @@
 
 	let inputEl: HTMLInputElement | undefined = $state();
 	let panelEl: HTMLDivElement | undefined = $state();
+	let caretFlourishEl: HTMLSpanElement | undefined = $state();
 
 	let selectedHit = $derived(hits[selectedIndex] ?? null);
 
@@ -41,8 +43,10 @@
 		try {
 			const status = await api.indexStatus();
 			hasIndex = status.has_index;
+			numDocs = status.num_docs;
 		} catch {
 			hasIndex = false;
+			numDocs = 0;
 		}
 	}
 
@@ -115,7 +119,8 @@
 			const stats = await api.rebuildIndex(dir);
 			rebuildState = 'idle';
 			hasIndex = true;
-			showToast(`建好了，共收录 ${stats.indexed} 个文件`);
+			showToast(`索引建立完成，收录 ${stats.indexed} 个文件。`);
+			refreshIndexStatus();
 		} catch (err) {
 			rebuildState = 'error';
 			rebuildError = String(err);
@@ -124,20 +129,20 @@
 
 	function openSelected() {
 		if (!selectedHit) return;
-		api.openFile(selectedHit.path).catch((err) => showToast(`打开失败：${err}`));
+		api.openFile(selectedHit.path).catch((err) => showToast(`文件打开失败：${err}`));
 	}
 
 	function revealSelected() {
 		if (!selectedHit) return;
-		api.revealInFolder(selectedHit.path).catch((err) => showToast(`跳转失败：${err}`));
+		api.revealInFolder(selectedHit.path).catch((err) => showToast(`定位文件夹失败：${err}`));
 	}
 
 	function copySelectedPath() {
 		if (!selectedHit) return;
 		navigator.clipboard
 			.writeText(selectedHit.path)
-			.then(() => showToast('路径已复制'))
-			.catch(() => showToast('复制失败'));
+			.then(() => showToast('路径已复制。'))
+			.catch(() => showToast('复制失败。'));
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -189,6 +194,24 @@
 			{ opacity: [0, 1], scale: [0.98, 1] },
 			{ type: 'spring', bounce: 0.2, duration: 0.12 }
 		);
+		playCaretFlourish();
+	}
+
+	// 呼出瞬间的光标手感：一根装饰性的竖条从 0 高度弹到全高，跟输入框呼出
+	// 动画同一时刻起播。呼出时上次查询词会被全选（focusAndSelectAll），
+	// 原生光标本来就被选区盖住看不见，这根竖条负责传达"已经就绪、可以打字
+	// 了"的瞬时反馈；短暂停留后自己收回去，交回给原生光标，不留一根常驻的
+	// 假光标在那里。
+	function playCaretFlourish() {
+		if (!caretFlourishEl) return;
+		animate(
+			caretFlourishEl,
+			{ height: ['0px', '17px'] },
+			{ type: 'spring', bounce: 0.15, duration: 0.1 }
+		).then(() => {
+			if (!caretFlourishEl) return;
+			animate(caretFlourishEl, { height: '0px' }, { duration: 0.08, ease: 'easeIn', delay: 0.1 });
+		});
 	}
 
 	onMount(() => {
@@ -209,10 +232,10 @@
 		});
 		const unlistenRebuildDone = listen<number>('dowse://rebuild-done', (evt) => {
 			refreshIndexStatus();
-			showToast(`托盘重建索引完成，共收录 ${evt.payload} 个文件`);
+			showToast(`索引重建完成，收录 ${evt.payload} 个文件。`);
 		});
 		const unlistenRebuildError = listen<string>('dowse://rebuild-error', (evt) => {
-			showToast(`托盘重建索引失败：${evt.payload}`);
+			showToast(`索引重建失败：${evt.payload}`);
 		});
 
 		return () => {
@@ -230,21 +253,30 @@
 			<circle cx="8" cy="8" r="5.4" stroke="currentColor" stroke-width="1.4" />
 			<path d="M12.2 12.2 16 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
 		</svg>
-		<input
-			bind:this={inputEl}
-			type="text"
-			class="search-input"
-			placeholder="搜文件名或内容…"
-			bind:value={query}
-			onkeydown={handleKeydown}
-			autocomplete="off"
-			spellcheck="false"
-		/>
+		<div class="input-wrap">
+			<input
+				bind:this={inputEl}
+				type="text"
+				class="search-input"
+				placeholder="搜文件名或内容…"
+				bind:value={query}
+				onkeydown={handleKeydown}
+				autocomplete="off"
+				spellcheck="false"
+			/>
+			<span class="caret-flourish" bind:this={caretFlourishEl} aria-hidden="true"></span>
+		</div>
 	</div>
 
 	<div class="body">
 		{#if showGuidance}
-			<EmptyState kind={guidanceKind} {query} errorMessage={rebuildError} onpick={pickDirectoryAndRebuild} />
+			<EmptyState
+				kind={guidanceKind}
+				{query}
+				{numDocs}
+				errorMessage={rebuildError}
+				onpick={pickDirectoryAndRebuild}
+			/>
 		{:else}
 			<div class="results">
 				<ResultList
@@ -298,6 +330,13 @@
 		flex-shrink: 0;
 	}
 
+	.input-wrap {
+		position: relative;
+		flex: 1;
+		display: flex;
+		align-items: center;
+	}
+
 	.search-input {
 		flex: 1;
 		border: none;
@@ -310,6 +349,20 @@
 
 	.search-input::placeholder {
 		color: var(--fg-tertiary);
+	}
+
+	/* 装饰性光标：呼出瞬间从 0 高度弹到全高的那一下手感，见 playCaretFlourish。
+	   平时高度是 0（不可见），不跟原生光标打架。 */
+	.caret-flourish {
+		position: absolute;
+		left: 0;
+		top: 50%;
+		width: 2px;
+		height: 0px;
+		transform: translateY(-50%);
+		background: var(--accent-caret);
+		border-radius: 1px;
+		pointer-events: none;
 	}
 
 	.body {

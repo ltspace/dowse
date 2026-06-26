@@ -93,7 +93,8 @@
 	}
 
 	.row-path {
-		font-size: 11.5px;
+		font-family: var(--font-mono);
+		font-size: 11px;
 		color: var(--fg-tertiary);
 		line-height: 1.3;
 		white-space: nowrap;
