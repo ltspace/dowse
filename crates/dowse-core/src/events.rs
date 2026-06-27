@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 /// 静默窗口（毫秒）：编辑器保存一次会连发写临时文件/改名/改属性等好几个事件，
 /// 编译或下载一秒能产出几百个。攒够这段时间没有新事件，再把这一批一起处理。
 /// 这个常量给宿主的事件循环设 recv 超时用——防抖队列本身不碰时钟，方便纯逻辑测试。
-pub const QUIET_WINDOW_MS: u64 = 500;
+pub(crate) const QUIET_WINDOW_MS: u64 = 500;
 
 /// 水位阈值：待处理的 path 攒到这么多就立刻刷一批，不再等静默窗口，防内存膨胀。
-pub const WATER_LEVEL: usize = 5000;
+pub(crate) const WATER_LEVEL: usize = 5000;
 
 /// 文件系统监听的原始事件。事件源（notify，或将来里程碑 6 的 USN Journal）
 /// 把各平台的原生事件归一成这几类再喂进防抖队列。刻意只带路径、不带时间戳/inode
