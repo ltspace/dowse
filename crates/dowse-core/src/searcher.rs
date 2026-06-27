@@ -365,7 +365,10 @@ impl Searcher {
 /// SnippetGenerator 按 token 逐个给区间，顺序和是否重叠都不保证。
 /// 这里按起点排序，再把重叠或相邻（下一个的 start <= 当前的 end）的区间合并，
 /// 让调用方可以假设区间有序不重叠、按顺序切片渲染。
-fn normalize_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+///
+/// 对外暴露：dowse-app 的文件名高亮（highlight.rs）自己算出的匹配区间也要走
+/// 同一套归并，两处共用这一份而不是各留一份。
+pub fn normalize_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
     ranges.sort_by_key(|r| r.start);
 
     let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
