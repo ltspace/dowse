@@ -1,6 +1,6 @@
 # 里程碑 5 设计说明：MCP server
 
-目标一句话：AI agent 能把 dowse 的本地索引当检索工具用——"帮我找找上个月那份限流方案"这类请求，agent 调 dowse 而不是全盘 grep。
+目标一句话：AI agent 能把 dowse 的本地索引当检索工具用，比如"帮我找找上个月那份限流方案"这类请求，agent 调 dowse 而不是全盘 grep。
 
 ## 一、形态决策
 
@@ -15,7 +15,7 @@ claude mcp add dowse -- dowse mcp
 ## 二、并发模型（关键约束）
 
 浮窗应用（dowse-app）常驻并持有索引的**写**权；MCP server 是独立进程，
-**只读**打开同一份索引。tantivy 的段文件不可变、读写可跨进程共存——
+**只读**打开同一份索引。tantivy 的段文件不可变、读写可跨进程共存，
 但有两条纪律：
 
 - MCP 进程绝不碰 IndexWriter（rebuild 之类的变更操作不提供，见工具清单）；
@@ -30,7 +30,7 @@ claude mcp add dowse -- dowse mcp
 | index_status | 无 | 文档总数、已注册索引根、索引落盘体积、最近一次更新时间 |
 
 **不提供**：rebuild_index、add_root 等一切变更操作。变更是人的决策，
-留在浮窗和 CLI 里；agent 只读——这条是安全边界，不是功能取舍。
+留在浮窗和 CLI 里；agent 只读，这条是安全边界，不是功能取舍。
 
 返回一律结构化 JSON；snippet 的高亮用前后缀标记（不是字节区间），
 agent 直接可读。
