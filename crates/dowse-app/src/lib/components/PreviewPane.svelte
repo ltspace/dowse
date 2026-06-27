@@ -2,6 +2,7 @@
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import type { SearchHit, TextSegment } from '../types';
 	import { kindOf } from '$lib/fileKind';
+	import { middleEllipsis } from '../pathTruncate';
 	import FileIcon from './FileIcon.svelte';
 	import Segments from './Segments.svelte';
 
@@ -35,7 +36,7 @@
 			<FileIcon path={hit.path} />
 			<span class="name"><Segments segments={hit.name_segments} /></span>
 		</div>
-		<div class="path">{hit.display_path}</div>
+		<div class="path">{middleEllipsis(hit.display_path)}</div>
 		<div class="body">
 			{#if isImage}
 				{#if imageSrc}
@@ -44,8 +45,10 @@
 				{#if loading}
 					<p class="hint">识别文字加载中…</p>
 				{:else if segments && segments.length > 0}
-					<p class="context ocr-caption">图中文字（OCR 识别）：</p>
-					<p class="context"><Segments {segments} /></p>
+					<p class="ocr-caption">图中文字（OCR 识别）</p>
+					<div class="ocr-text-wrap">
+						<p class="context ocr-text"><Segments {segments} /></p>
+					</div>
 				{:else}
 					<p class="hint">没有识别到文字，或者还在后台排队处理。</p>
 				{/if}
@@ -88,7 +91,9 @@
 		font-family: var(--font-mono);
 		font-size: 11px;
 		color: var(--fg-tertiary);
-		word-break: break-all;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 		padding-bottom: 8px;
 		border-bottom: 1px solid var(--divider);
 	}
@@ -122,9 +127,26 @@
 		margin-bottom: 10px;
 	}
 
+	/* 分区小标题规格：跟 +page.svelte 的 .results-heading 同一档——11px、
+	   微字距、三级灰，跟正文（.context）明确区分出"这是个标签，不是正文"。 */
 	.ocr-caption {
+		margin: 0 0 4px;
+		font-size: 11px;
+		letter-spacing: 0.04em;
 		color: var(--fg-tertiary);
-		margin-bottom: 2px;
+	}
+
+	/* OCR 文字段限高约 6~8 行，超出内部滚动——手机截图的状态栏文字、大段
+	   OCR 误识别是常态，不能让预览区被一张图的识别结果撑到没法看别的信息。 */
+	.ocr-text-wrap {
+		max-height: 200px;
+		overflow-y: auto;
+	}
+
+	/* 对比度比普通正文提一档：OCR 识别本身就有噪声，用更高对比度的主文字色
+	   帮助辨认，跟旁边的 .hint/.ocr-caption 三级灰形成清楚的层次。 */
+	.ocr-text {
+		color: var(--fg-primary);
 	}
 
 	.hint {
