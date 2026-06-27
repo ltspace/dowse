@@ -14,9 +14,9 @@ use crate::window_fx::{self, EffectLevelState};
 /// 才能换剪影，这是本轮明确的取舍（任务书原话："动态监听不做"）。
 #[cfg(target_os = "windows")]
 fn taskbar_uses_light_theme() -> bool {
-    use windows::core::w;
     use windows::Win32::Foundation::ERROR_SUCCESS;
-    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    use windows::core::w;
 
     let mut value: u32 = 0;
     let mut size: u32 = std::mem::size_of::<u32>() as u32;
@@ -65,7 +65,12 @@ fn tray_icon_image() -> Image<'static> {
 fn decode_rgba_png(bytes: &[u8]) -> (Vec<u8>, u32, u32) {
     let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let mut reader = decoder.read_info().expect("内嵌托盘 PNG 应该是合法文件");
-    let mut buf = vec![0u8; reader.output_buffer_size().expect("PNG 应该带有明确的帧尺寸")];
+    let mut buf = vec![
+        0u8;
+        reader
+            .output_buffer_size()
+            .expect("PNG 应该带有明确的帧尺寸")
+    ];
     let info = reader
         .next_frame(&mut buf)
         .expect("内嵌托盘 PNG 应该能正常解码首帧");

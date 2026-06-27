@@ -46,16 +46,14 @@ impl Default for AppConfig {
 }
 
 fn config_path() -> Result<PathBuf> {
-    let dirs =
-        directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
+    let dirs = directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
     Ok(dirs.data_local_dir().join("config.json"))
 }
 
 /// 索引目录固定放在 `%LOCALAPPDATA%\dowse\index`，跟被索引的目录无关，
 /// 和 dowse-cli 的约定保持一致，这样 CLI 建的索引浮窗也能直接用。
 pub fn index_dir() -> Result<PathBuf> {
-    let dirs =
-        directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
+    let dirs = directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
     Ok(dirs.data_local_dir().join("index"))
 }
 

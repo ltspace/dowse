@@ -6,7 +6,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::config::ConfigState;
 use crate::file_icons::FileIconCache;
-use crate::highlight::{highlight_name, segments_from_ranges, TextSegment};
+use crate::highlight::{TextSegment, highlight_name, segments_from_ranges};
 use crate::state::SearchState;
 use crate::watcher::WatchController;
 use crate::window_fx::{EffectLevel, EffectLevelState};
@@ -58,10 +58,7 @@ pub fn get_effect_level(state: State<EffectLevelState>) -> EffectLevel {
 
 /// 前端打开浮窗/挂载时调用一次，用来决定空输入/无索引/有索引三种引导状态。
 #[tauri::command]
-pub fn index_status(
-    search: State<SearchState>,
-    config: State<ConfigState>,
-) -> IndexStatusDto {
+pub fn index_status(search: State<SearchState>, config: State<ConfigState>) -> IndexStatusDto {
     let guard = search.0.lock().expect("search state mutex poisoned");
     let (has_index, num_docs) = match guard.as_ref() {
         Some(s) => (true, s.num_docs()),
@@ -175,7 +172,9 @@ pub fn rebuild_index(
     dir: String,
 ) -> Result<IndexStatsDto, String> {
     let target = PathBuf::from(&dir);
-    let target = target.canonicalize().map_err(|_| "目录不存在".to_string())?;
+    let target = target
+        .canonicalize()
+        .map_err(|_| "目录不存在".to_string())?;
 
     let index_dir = crate::config::index_dir().map_err(|e| e.to_string())?;
 

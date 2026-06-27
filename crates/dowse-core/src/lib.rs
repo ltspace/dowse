@@ -7,16 +7,16 @@ mod searcher;
 mod updater;
 mod watch;
 
-pub use events::{Debouncer, PendingChange, PendingOp, WatchEvent, QUIET_WINDOW_MS, WATER_LEVEL};
-pub use indexer::{rebuild_index, IndexStats};
+pub use events::{Debouncer, PendingChange, PendingOp, QUIET_WINDOW_MS, WATER_LEVEL, WatchEvent};
+pub use indexer::{IndexStats, rebuild_index};
 pub use meta::registered_roots;
-pub use reconcile::{reconcile, ReconcileStats};
+pub use reconcile::{ReconcileStats, reconcile};
 pub use searcher::{PreviewHit, SearchHit, Searcher};
 pub use updater::{BatchOutcome, IndexUpdater};
-pub use watch::{run_watch, EventSource, NotifyEventSource, WatchGuard, WatchProgress};
+pub use watch::{EventSource, NotifyEventSource, WatchGuard, WatchProgress, run_watch};
 
 use tantivy::schema::{
-    IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, STORED, STRING,
+    IndexRecordOption, STORED, STRING, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
 };
 
 /// 索引里每篇文档的字段。

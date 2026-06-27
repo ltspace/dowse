@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use notify::event::{ModifyKind, RemoveKind, RenameMode};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 
-use crate::events::{Debouncer, WatchEvent, QUIET_WINDOW_MS};
+use crate::events::{Debouncer, QUIET_WINDOW_MS, WatchEvent};
 use crate::indexer::walk_index_files;
 use crate::updater::{BatchOutcome, IndexUpdater};
 
@@ -29,12 +29,13 @@ pub struct NotifyEventSource;
 
 impl EventSource for NotifyEventSource {
     fn watch(&self, roots: &[PathBuf], tx: Sender<WatchEvent>) -> Result<Box<dyn WatchGuard>> {
-        let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| match res {
-            Ok(event) => translate_event(&event, &tx),
-            // 单个监听错误（某个子目录权限变化等）不该掀翻整条流水线，记日志继续。
-            Err(err) => eprintln!("文件监听回调出错: {err}"),
-        })
-        .context("创建文件监听器失败")?;
+        let mut watcher =
+            notify::recommended_watcher(move |res: notify::Result<Event>| match res {
+                Ok(event) => translate_event(&event, &tx),
+                // 单个监听错误（某个子目录权限变化等）不该掀翻整条流水线，记日志继续。
+                Err(err) => eprintln!("文件监听回调出错: {err}"),
+            })
+            .context("创建文件监听器失败")?;
 
         for root in roots {
             watcher
