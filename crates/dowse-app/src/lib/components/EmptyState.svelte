@@ -52,7 +52,7 @@
 	.title {
 		margin: 0;
 		font-size: 14px;
-		font-weight: 600;
+		font-weight: 500;
 		color: var(--fg-primary);
 	}
 
@@ -68,7 +68,7 @@
 		margin-top: 10px;
 		font: inherit;
 		font-size: 12px;
-		font-weight: 600;
+		font-weight: 500;
 		padding: 8px 16px;
 		border-radius: 8px;
 		border: 1px solid var(--accent-border);

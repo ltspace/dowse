@@ -58,7 +58,7 @@
 
 	.name {
 		font-size: 13.5px;
-		font-weight: 600;
+		font-weight: 500;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
