@@ -22,9 +22,7 @@
 
 名字取自 dowsing rod（探水杖）。
 
-<!-- 截图位：hero.png — 主界面搜索中途的截图，输入框有查询词，下方是若干条排好序的
-     结果，摘要里命中词高亮。亮色或暗色主题均可，可见的文件路径里不要带真实隐私信息。
-     存到 docs/screenshots/hero.png。 -->
+![dowse 浮窗搜索中途，查询词"sql"，下方是排好序的文件结果，右侧是预览区](docs/screenshots/hero.png)
 
 ## 动机
 
@@ -123,8 +121,7 @@ cargo tauri build      # 安装包产出在 target/release/bundle 下
 原生上下文菜单（打开/打开所在文件夹/复制完整路径/复制文件名）。输入条最右端的图钉按钮
 可以固定窗口。固定后失焦不再自动隐藏，会话级状态，重启应用后回到未固定。
 
-<!-- 截图位：ocr-preview.png — 预览区展示一条图片类结果，原图内嵌显示，旁边是
-     OCR 识别出的文字及其命中/高亮的片段。存到 docs/screenshots/ocr-preview.png。 -->
+![预览区展示一条图片类结果：原图内嵌显示，旁边是 OCR 识别出的文字及命中词高亮](docs/screenshots/ocr-preview.png)
 
 ## MCP 接入
 
@@ -140,8 +137,7 @@ claude mcp add dowse -- dowse mcp
 调用前只做一次 reader reload，所以可以和浮窗应用或正在跑的 `dowse watch` 同时存在，
 不会有写入冲突。
 
-<!-- 截图位：actions.png — 类型筛选/排序下拉展开（Ctrl+P / Ctrl+S）的状态，或者结果行
-     右键菜单展开、能看到全部菜单项的状态，二选一。存到 docs/screenshots/actions.png。 -->
+![浮窗空闲态，后台正在对截图做 OCR 索引，底部是进度条](docs/screenshots/actions.png)
 
 ## 架构
 
