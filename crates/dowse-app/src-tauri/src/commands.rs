@@ -11,7 +11,7 @@ use crate::highlight::{TextSegment, highlight_name, segments_from_ranges};
 use crate::indexing_status::{IndexingSnapshot, IndexingStatus};
 use crate::rebuild::{IndexStatsDto, RebuildGuard};
 use crate::state::SearchState;
-use crate::window_fx::{EffectLevel, EffectLevelState, GlassAlpha};
+use crate::window_fx::{self, EffectLevel, EffectLevelState, GlassAlpha};
 
 #[derive(Serialize)]
 pub struct SearchHitDto {
@@ -267,4 +267,15 @@ pub fn add_root(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto, Str
 #[tauri::command]
 pub fn set_pinned(suppressor: State<AutoHideSuppressor>, pinned: bool) {
     suppressor.set_pinned(pinned);
+}
+
+/// Esc 收起浮窗。前端原先直接调 JS 侧 `getCurrentWindow().hide()`，那是
+/// Tauri core 插件的 `window|hide` 权限点，默认 capability（`core:default`）
+/// 不包含它，真机上被 ACL 拒绝、Esc 按了没反应。这里改成走自定义命令，
+/// 复用全局呼出快捷键同一条 `window_fx::hide_window` 路径——自定义命令不受
+/// ACL 权限点约束，比在 capabilities 里放开 `core:window:allow-hide`
+/// 权限面更小。
+#[tauri::command]
+pub fn hide_window(window: tauri::WebviewWindow) {
+    window_fx::hide_window(&window);
 }

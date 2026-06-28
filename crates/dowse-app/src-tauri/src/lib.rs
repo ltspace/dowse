@@ -92,6 +92,7 @@ pub fn run() {
             commands::get_hotkey,
             commands::file_icon,
             commands::set_pinned,
+            commands::hide_window,
             context_menu::show_result_context_menu,
         ])
         .setup(move |app| {
