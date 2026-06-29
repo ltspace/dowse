@@ -45,7 +45,7 @@
 		height: 100%;
 		display: flex;
 		flex-direction: column;
-		padding: 16px;
+		padding: 20px;
 		gap: 8px;
 		overflow: hidden;
 	}
@@ -69,7 +69,7 @@
 		font-size: 11px;
 		color: var(--fg-tertiary);
 		word-break: break-all;
-		padding-bottom: 6px;
+		padding-bottom: 8px;
 		border-bottom: 1px solid var(--divider);
 	}
 
@@ -81,7 +81,7 @@
 	.context {
 		margin: 0;
 		font-size: 12.5px;
-		line-height: 1.75;
+		line-height: 2;
 		color: var(--fg-secondary);
 		white-space: pre-wrap;
 		word-break: break-word;

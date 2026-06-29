@@ -67,6 +67,7 @@ pub fn run() {
             commands::reveal_in_folder,
             commands::rebuild_index,
             commands::get_effect_level,
+            commands::get_glass_alpha,
             commands::file_icon,
         ])
         .setup(move |app| {
@@ -84,7 +85,11 @@ pub fn run() {
                 .expect("tauri.conf.json 里定义的 main 窗口应该存在");
 
             let cfg = app.state::<ConfigState>().get();
-            let level = window_fx::apply_with_fallback(&window, cfg.transparency_enabled);
+            let level = window_fx::apply_with_fallback(
+                &window,
+                cfg.transparency_enabled,
+                cfg.transparency_tier,
+            );
             app.manage(EffectLevelState::new(level));
             let _ = window_fx::position_upper_center(&window);
 

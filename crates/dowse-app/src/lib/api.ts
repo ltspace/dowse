@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EffectLevel, IndexStats, IndexStatus, PreviewResult, SearchHit } from './types';
+import type { EffectLevel, GlassAlpha, IndexStats, IndexStatus, PreviewResult, SearchHit } from './types';
 
 export function indexStatus(): Promise<IndexStatus> {
 	return invoke('index_status');
@@ -27,6 +27,10 @@ export function rebuildIndex(dir: string): Promise<IndexStats> {
 
 export function getEffectLevel(): Promise<EffectLevel> {
 	return invoke('get_effect_level');
+}
+
+export function getGlassAlpha(): Promise<GlassAlpha> {
+	return invoke('get_glass_alpha');
 }
 
 /// 按扩展名（不带点，小写与否都行）取系统关联图标的 PNG data URI，
