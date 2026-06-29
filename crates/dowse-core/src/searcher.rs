@@ -13,6 +13,22 @@ use crate::{Fields, build_schema, register_tokenizers};
 /// 预览窗口目标字符数：命中词前后共约 1500 字，比搜索结果列表里的摘要长得多。
 const PREVIEW_MAX_CHARS: usize = 1500;
 
+/// 搜索结果列表里单条摘要的目标字符数（跟 tantivy `SnippetGenerator::set_max_num_chars` 对齐）。
+const SNIPPET_MAX_CHARS: usize = 160;
+
+/// 摘要生成的扫描窗口上限（字节）。
+///
+/// tantivy `SnippetGenerator` 的 `max_num_chars` 只决定“挑多长的片段来展示”，
+/// 不决定“喂给分词器扫描的输入范围”——`search_fragments` 内部会把传入的整段
+/// 文本从头到尾分词一遍，不会因为已经凑够展示长度就提前退出。如果直接把
+/// 整篇 STORED content（可能几 MB）交给它，扫描耗时会随文档体积线性增长；
+/// 短语/多词 AND 查询命中巨型文档时，单条摘要可能要花几百毫秒。更麻烦的是
+/// BM25 打分偏爱词频更高的大文档，短语/多词查询恰好更容易把这类大文档挤进
+/// Top-10，于是这个开销会稳定复现在整页结果上，不是个例。这里在调用
+/// `snippet()`/`snippet_from_doc()` 之前手动把扫描输入截到这个字节数以内，
+/// 把“分词扫描量”和“最终展示长度”解耦，从根上避免整篇重新分词。
+const SNIPPET_SCAN_MAX_BYTES: usize = 128 * 1024;
+
 pub struct SearchHit {
     pub path: String,
     pub score: f32,
@@ -65,7 +81,7 @@ impl Searcher {
         let searcher = self.reader.searcher();
 
         let mut snippet_gen = SnippetGenerator::create(&searcher, &query, self.fields.content)?;
-        snippet_gen.set_max_num_chars(160);
+        snippet_gen.set_max_num_chars(SNIPPET_MAX_CHARS);
 
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
 
@@ -77,13 +93,18 @@ impl Searcher {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_owned();
+            let content = doc
+                .get_first(self.fields.content)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
 
-            let snippet = snippet_gen.snippet_from_doc(&doc);
+            let (snippet, highlighted) =
+                snippet_with_fallback(&snippet_gen, content, SNIPPET_MAX_CHARS);
             hits.push(SearchHit {
                 path,
                 score,
-                snippet: snippet.fragment().to_owned(),
-                highlighted: normalize_ranges(snippet.highlighted().to_vec()),
+                snippet,
+                highlighted,
             });
         }
         Ok(hits)
@@ -119,10 +140,15 @@ impl Searcher {
             snippet_gen.set_max_num_chars(PREVIEW_MAX_CHARS);
 
             let doc: TantivyDocument = searcher.doc(addr)?;
-            let snippet = snippet_gen.snippet_from_doc(&doc);
+            let content = doc
+                .get_first(self.fields.content)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let (snippet, highlighted) =
+                snippet_with_fallback(&snippet_gen, content, PREVIEW_MAX_CHARS);
             return Ok(Some(PreviewHit {
-                snippet: snippet.fragment().to_owned(),
-                highlighted: normalize_ranges(snippet.highlighted().to_vec()),
+                snippet,
+                highlighted,
             }));
         }
 
@@ -166,6 +192,41 @@ fn normalize_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
         }
     }
     merged
+}
+
+/// 把 content 截到不超过 `SNIPPET_SCAN_MAX_BYTES` 字节的安全前缀，边界落在字符边界上，
+/// 保证截出来的 `&str` 本身合法（不会切在 UTF-8 多字节字符中间导致 panic）。
+fn truncate_scan_window(content: &str) -> &str {
+    if content.len() <= SNIPPET_SCAN_MAX_BYTES {
+        return content;
+    }
+    let mut end = SNIPPET_SCAN_MAX_BYTES;
+    while end > 0 && !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    &content[..end]
+}
+
+/// 在截断后的扫描窗口内生成摘要；如果窗口内一个命中区间都没有（比如命中词
+/// 只出现在文档中后段、被截断切掉了），退回“文档开头一段、无高亮”的摘录，
+/// 跟 `preview()` 里查询词和文档完全不匹配时的回退写法保持一致——
+/// 都是“有文件但没有预览片段”的可接受降级，而不是给用户一个空字符串。
+fn snippet_with_fallback(
+    snippet_gen: &SnippetGenerator,
+    content: &str,
+    fallback_chars: usize,
+) -> (String, Vec<Range<usize>>) {
+    let scan_window = truncate_scan_window(content);
+    let snippet = snippet_gen.snippet(scan_window);
+    if !snippet.highlighted().is_empty() {
+        return (
+            snippet.fragment().to_owned(),
+            normalize_ranges(snippet.highlighted().to_vec()),
+        );
+    }
+
+    let head: String = content.chars().take(fallback_chars).collect();
+    (head, Vec::new())
 }
 
 #[cfg(test)]
@@ -333,6 +394,61 @@ mod tests {
             .expect("路径存在，应该退回开头预览而不是 None");
         assert!(!preview.snippet.is_empty());
         assert!(preview.highlighted.is_empty(), "回退分支不应该产生假的高亮");
+        Ok(())
+    }
+
+    #[test]
+    fn search_snippet_scan_truncation_keeps_retrieval_and_falls_back_beyond_scan_window()
+    -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        // 哨兵词用纯英文字母数字串，避免中文分词器按上下文动态切词导致
+        // 同一个词在不同句子里切法不一致（jieba 是上下文相关的统计分词，
+        // 中文短语嵌进不同句子可能被切成不同的 token 边界）。
+        const SENTINEL: &str = "zzzsentinelprobe888";
+
+        // 大文档：哨兵词只出现在文档末尾，且前面的填充内容远超摘要扫描窗口
+        // （128KB），所以扫描窗口内绝不会看到哨兵词。用于验证：
+        // 1) 检索命中不受摘要截断影响（截断只影响摘要生成，不影响倒排检索）；
+        // 2) 摘要生成因为扫描窗口内没有命中区间而退回无高亮兜底，不 panic。
+        let filler = "填充内容占位符文本。".repeat(20_000);
+        assert!(
+            filler.len() > SNIPPET_SCAN_MAX_BYTES,
+            "语料要真的超过截断阈值才能验证截断生效"
+        );
+        let big_content = format!("{filler}文档末尾出现了 {SENTINEL} 这个词。");
+        std::fs::write(target_dir.path().join("big.md"), &big_content)?;
+
+        // 小文档：哨兵词在开头，落在扫描窗口内，摘要应该正常带高亮。
+        let small_content = format!("{SENTINEL} 出现在这篇小文档的开头。");
+        std::fs::write(target_dir.path().join("small.md"), &small_content)?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        let hits = searcher.search(SENTINEL, 10)?;
+        assert_eq!(hits.len(), 2, "检索不该被摘要截断影响，两篇文档都要命中");
+
+        let big_hit = hits
+            .iter()
+            .find(|h| h.path.ends_with("big.md"))
+            .expect("大文档应该命中");
+        assert!(
+            big_hit.highlighted.is_empty(),
+            "命中词被截断窗口挡在外面，摘要应退回无高亮兜底"
+        );
+        assert!(!big_hit.snippet.is_empty(), "兜底摘要不应该是空字符串");
+
+        let small_hit = hits
+            .iter()
+            .find(|h| h.path.ends_with("small.md"))
+            .expect("小文档应该命中");
+        assert!(
+            !small_hit.highlighted.is_empty(),
+            "命中词在扫描窗口内，摘要应该正常高亮"
+        );
+
         Ok(())
     }
 }
