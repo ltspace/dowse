@@ -20,6 +20,8 @@ pub struct SearchHit {
     pub snippet: String,
     /// 命中词的字节区间：已按起点排序且互不重叠，可直接顺序渲染。
     pub highlighted: Vec<Range<usize>>,
+    /// 文件扩展名（不含点，小写），无扩展名时是空串。给 MCP 等消费方标注文件类型用。
+    pub ext: String,
 }
 
 /// 按路径取的预览内容，字段契约和 SearchHit 的 snippet/highlighted 一致，
@@ -27,6 +29,12 @@ pub struct SearchHit {
 pub struct PreviewHit {
     pub snippet: String,
     pub highlighted: Vec<Range<usize>>,
+    /// 原文件体积（字节），来自建索引时存的 size 字段。
+    pub size: u64,
+    /// 原文件 mtime（毫秒级 Unix 时间戳），来自建索引时存的 mtime 字段。
+    pub mtime: i64,
+    /// 文件扩展名（不含点，小写），无扩展名时是空串。
+    pub ext: String,
 }
 
 pub struct Searcher {
@@ -61,7 +69,30 @@ impl Searcher {
     }
 
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchHit>> {
-        let query = self.parser.parse_query(query_str)?;
+        self.search_filtered(query_str, limit, None)
+    }
+
+    /// 同 search()，多一个可选的扩展名过滤（不含点，大小写不敏感）。
+    /// 给 MCP 的 search 工具用：query AND ext 两个条件都在 tantivy 查询层合取，
+    /// 不是拿到结果后再筛——否则筛剩的数量会少于调用方要求的 limit。
+    pub fn search_filtered(
+        &self,
+        query_str: &str,
+        limit: usize,
+        ext: Option<&str>,
+    ) -> Result<Vec<SearchHit>> {
+        let text_query = self.parser.parse_query(query_str)?;
+        let query: Box<dyn Query> = match ext {
+            Some(ext) => {
+                let ext_term = Term::from_field_text(self.fields.ext, &ext.to_ascii_lowercase());
+                let ext_query = TermQuery::new(ext_term, IndexRecordOption::Basic);
+                Box::new(BooleanQuery::new(vec![
+                    (Occur::Must, text_query),
+                    (Occur::Must, Box::new(ext_query) as Box<dyn Query>),
+                ]))
+            }
+            None => text_query,
+        };
         let searcher = self.reader.searcher();
 
         let mut snippet_gen = SnippetGenerator::create(&searcher, &query, self.fields.content)?;
@@ -77,6 +108,11 @@ impl Searcher {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_owned();
+            let ext = doc
+                .get_first(self.fields.ext)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned();
 
             let snippet = snippet_gen.snippet_from_doc(&doc);
             hits.push(SearchHit {
@@ -84,6 +120,7 @@ impl Searcher {
                 score,
                 snippet: snippet.fragment().to_owned(),
                 highlighted: normalize_ranges(snippet.highlighted().to_vec()),
+                ext,
             });
         }
         Ok(hits)
@@ -92,6 +129,15 @@ impl Searcher {
     /// 索引里的文档总数，给 CLI 的状态输出用
     pub fn num_docs(&self) -> u64 {
         self.reader.searcher().num_docs()
+    }
+
+    /// 重新加载 reader，读到最新一次 commit 的段。
+    ///
+    /// MCP server 是独立进程，只读打开浮窗侧持有写权的同一份索引：tantivy 的段文件
+    /// 不可变、读写可跨进程共存，但 reader 不会自己感知到别的进程提交了新段。
+    /// 调用方（MCP 工具处理函数）应在每次请求前调用一次，保证读到浮窗侧最新的索引状态。
+    pub fn reload(&self) -> Result<()> {
+        self.reader.reload().context("索引 reader 重载失败")
     }
 
     /// 按路径取该文档更长的预览上下文（约 1500 字），命中词区间跟 search() 同一契约。
@@ -120,9 +166,13 @@ impl Searcher {
 
             let doc: TantivyDocument = searcher.doc(addr)?;
             let snippet = snippet_gen.snippet_from_doc(&doc);
+            let (size, mtime, ext) = self.doc_meta(&doc);
             return Ok(Some(PreviewHit {
                 snippet: snippet.fragment().to_owned(),
                 highlighted: normalize_ranges(snippet.highlighted().to_vec()),
+                size,
+                mtime,
+                ext,
             }));
         }
 
@@ -138,10 +188,32 @@ impl Searcher {
             .and_then(|v| v.as_str())
             .unwrap_or_default();
         let window: String = content.chars().take(PREVIEW_MAX_CHARS).collect();
+        let (size, mtime, ext) = self.doc_meta(&doc);
         Ok(Some(PreviewHit {
             snippet: window,
             highlighted: vec![],
+            size,
+            mtime,
+            ext,
         }))
+    }
+
+    /// 从命中文档里取 (size, mtime, ext) 三元组，preview() 的两条分支共用。
+    fn doc_meta(&self, doc: &TantivyDocument) -> (u64, i64, String) {
+        let size = doc
+            .get_first(self.fields.size)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let mtime = doc
+            .get_first(self.fields.mtime)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let ext = doc
+            .get_first(self.fields.ext)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        (size, mtime, ext)
     }
 }
 
@@ -259,6 +331,33 @@ mod tests {
             hits = hits.iter().map(|h| &h.path).collect::<Vec<_>>()
         );
         assert!(hits[0].path.ends_with("both.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn search_filtered_by_ext_only_matches_that_extension() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("note.md"), "限流方案对比")?;
+        std::fs::write(target_dir.path().join("note.txt"), "限流方案对比")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        let hits = searcher.search_filtered("限流", 10, Some("md"))?;
+        assert_eq!(
+            hits.len(),
+            1,
+            "ext 过滤后应该只剩 .md 那篇: {hits:?}",
+            hits = hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        assert!(hits[0].path.ends_with("note.md"));
+        assert_eq!(hits[0].ext, "md");
+
+        // 不传 ext 过滤，两篇都应该命中
+        let unfiltered = searcher.search("限流", 10)?;
+        assert_eq!(unfiltered.len(), 2);
         Ok(())
     }
 
