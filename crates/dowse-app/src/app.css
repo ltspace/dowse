@@ -90,13 +90,15 @@
    透明度数字影响，直接把 --glass-tint 钉死成不透明色。
 
    v0.4.x 时这一档不分明暗主题、统一钉成死黑灰（#1c1c20），亮色主题下也会
-   被拽成一块黑灰色面板，观感突兀。这里改成跟品牌 accent（#7fcbe8，水蓝）
-   呼应的"透亮水蓝"质感，并且明暗主题各给一套：这一条（配合下面
-   `@media (prefers-color-scheme: dark)` 里的同名覆盖）分别对应亮色主题的
-   水蓝白，跟暗色主题的水蓝黑——不再是同一块灰不分场合硬套。
-   下面这一条是亮色主题的取值（默认，未命中 dark 媒体查询时生效）。 */
+   被拽成一块黑灰色面板，观感突兀；中间版本改成明暗主题各给一套（亮色水蓝白 /
+   暗色水蓝黑），但暗色那一档用户反馈"还是太暗"——纯色档要的是清爽通透，
+   不是换一种深色。现在统一收口：不管系统是亮色还是暗色主题，纯色档都固定
+   走这一条浅色水蓝白，不再随 `prefers-color-scheme: dark` 分支（下面的
+   dark 媒体查询里已经不再覆盖这一段，专门留了说明）。顶部到底部叠一层极淡
+   的竖向渐变（近白 → 浅水蓝）增加通透感，前景色/分割线/滚动条则反过来
+   固定用深色系半透明，确保浅底上文字始终清楚可读。 */
 :root[data-effect='solid'] {
-	--glass-tint: #eef6fb;
+	--glass-tint: linear-gradient(180deg, #f8fbfe 0%, #e6f2fb 100%);
 	--solid-bg: #eef6fb;
 	--fg-primary: #101014;
 	--fg-secondary: #6b6b75;
@@ -136,26 +138,11 @@
 		--toast-fg: #1c1c20;
 	}
 
-	/* 纯色降级档的暗色主题取值——覆盖上面 `:root[data-effect='solid']`
-	   （亮色主题版本）里的水蓝白，换成带明显蓝味的深蓝黑，而不是死黑灰。
-	   accent 沿用玻璃档暗色主题下的同一套水蓝（#7fcbe8 系），跟新底色是
-	   同一个色相家族，不用再单独调。 */
-	:root[data-effect='solid'] {
-		--glass-tint: #101d28;
-		--solid-bg: #101d28;
-		--fg-primary: #f1f1f4;
-		--fg-secondary: #9d9da6;
-		--fg-tertiary: #77777f;
-		--divider: rgba(255, 255, 255, 0.09);
-		--panel-border: rgba(255, 255, 255, 0.09);
-		--row-hover: rgba(255, 255, 255, 0.045);
-		--scrollbar-thumb: rgba(255, 255, 255, 0.18);
-		--accent-soft: rgba(127, 203, 232, 0.16);
-		--accent-border: rgba(127, 203, 232, 0.45);
-		--accent-strong: #7fcbe8;
-		--accent-caret: #7fcbe8;
-		--shortcut-chip-bg: rgba(255, 255, 255, 0.07);
-	}
+	/* 注意：这里故意不再放 `:root[data-effect='solid']` 的暗色主题覆盖。
+	   纯色降级档现在不分明暗系统主题，统一吃上面那一条浅色水蓝白定义
+	   （见文件靠前处的 `:root[data-effect='solid']` 及其注释）——删掉这段
+	   覆盖，选择器特异度相同、这里又没有更晚的同选择器规则，浅色定义在
+	   暗色系统下也不会被二次覆盖。 */
 }
 
 * {
