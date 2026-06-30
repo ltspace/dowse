@@ -112,32 +112,51 @@ pub fn registered_roots(index_dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(ensure_schema_version(index_dir)?.roots)
 }
 
+/// 对一条路径做尽力而为的归一，把它拉到一种稳定拼法，供嵌套前缀比较使用：
+/// 1. 先直接 `canonicalize()`——路径在磁盘上存在时这一步就把短文件名（8.3）
+///    展开成长名、并加上扩展长度前缀。
+/// 2. 路径还不存在（如指向一个尚未创建的子目录）时 `canonicalize()` 会失败，
+///    退而求其次：沿祖先向上找到最深的那个真实存在的目录 canonicalize，再把
+///    剩下不存在的那截路径拼回去。
+/// 3. 连祖先都解析不了就保留原样，不报错。
+/// 4. 最后统一剥掉 `\\?\`/`\\?\UNC\` 前缀（见 [`crate::display_path`]），跟
+///    其余比较口径对齐。
+///
+/// 存在的意义：Windows 短文件名在部分账户/机器上会让同一目录的原始路径和
+/// canonicalize 结果分属两种拼法（如 `RUNNERA~1` 对 `runneradmin`）。已有根
+/// 往往落在磁盘上（能直接展开成长名），而候选可能指向一个还不存在的子目录
+/// （`canonicalize` 直接失败、只能保留短名），两侧拼法一错位，纯前缀比较就
+/// 漏判真实存在的嵌套。给两侧都跑同一套归一，才能把它们拉到同一种拼法再比。
+fn best_effort_normalize(path: &Path) -> PathBuf {
+    let resolved = path.canonicalize().unwrap_or_else(|_| {
+        for ancestor in path.ancestors() {
+            if let (Ok(base), Ok(rest)) = (ancestor.canonicalize(), path.strip_prefix(ancestor)) {
+                return base.join(rest);
+            }
+        }
+        path.to_path_buf()
+    });
+    PathBuf::from(crate::display_path(&resolved.to_string_lossy()))
+}
+
 /// 校验候选根跟已有根之间不存在嵌套关系（含双向：候选是某个已有根的子目录，
 /// 或者候选是某个已有根的父目录），也拒绝跟已有根完全相同的重复添加。
 /// 嵌套会让 `delete_tree` 的前缀圈选删除和对账的孤儿清理语义变成泥潭
 /// （删 B 会连带删掉嵌在它里面的 A、反之亦然），产品上也没有正当需求
 /// （设计文档"核心操作语义"一节）。
 ///
-/// 路径比较基于剥掉 Windows 扩展长度前缀（`\\?\`/`\\?\UNC\`）后的形态
-/// （见 [`crate::display_path`]）——不同调用路径传入的根可能一个带这个
-/// 前缀一个不带（`canonicalize()` 会加上，托盘"更改索引文件夹"目前不会），
-/// 直接按原始字符串比较会让真实存在的嵌套关系因为前缀不一致而被漏判。
-///
-/// `existing` 里的根写法本身也不统一：全量重建（`finish_rebuild`）存的是
-/// 未经 canonicalize 的原始路径，`add_root`/`append_root` 存的是
-/// canonicalize 过的路径。两种写法在大多数机器上字符串形态一致，但
-/// Windows 短文件名（8.3）在部分账户/机器上会让同一目录的原始路径和
-/// canonicalize 结果分属两种拼法（如 `RUNNERA~1` 对 `runneradmin`），
-/// 单纯前缀比较会因为这种拼法差异漏判真实存在的嵌套。这里对 `existing`
-/// 里每一项做一次尽力而为的 canonicalize（目录已不存在就保留原样，不
-/// 报错），把它拉到跟 `candidate`（调用方已经 canonicalize 过）同一种
-/// 拼法上再比较；报错文案仍然用 `root`/`candidate` 的原始值，不把内部
-/// 的 canonicalize 形态暴露给用户。
+/// 不同调用路径传入的根写法本身不统一：全量重建（`finish_rebuild`）存的是
+/// 未经 canonicalize 的原始路径，`add_root`/`append_root` 存的是 canonicalize
+/// 过的路径；候选还可能指向一个磁盘上尚不存在的子目录。直接按原始字符串比较，
+/// 会因为扩展长度前缀（`\\?\`/`\\?\UNC\`）带不带、Windows 短文件名（8.3）
+/// 展没展开（如 `RUNNERA~1` 对 `runneradmin`）这类拼法差异，漏判真实存在的
+/// 嵌套。这里对 `candidate` 和每一个 `existing` 都跑同一套 [`best_effort_normalize`]，
+/// 把两侧拉到同一种拼法再比较；报错文案仍然用 `root`/`candidate` 的原始值，
+/// 不把内部的归一形态暴露给用户。
 pub(crate) fn assert_no_root_nesting(existing: &[PathBuf], candidate: &Path) -> Result<()> {
-    let candidate_norm = PathBuf::from(crate::display_path(&candidate.to_string_lossy()));
+    let candidate_norm = best_effort_normalize(candidate);
     for root in existing {
-        let root_resolved = root.canonicalize().unwrap_or_else(|_| root.clone());
-        let root_norm = PathBuf::from(crate::display_path(&root_resolved.to_string_lossy()));
+        let root_norm = best_effort_normalize(root);
         if root_norm == candidate_norm {
             bail!("目录 {} 已经是索引根，不用重复添加", candidate.display());
         }
