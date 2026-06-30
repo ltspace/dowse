@@ -6,6 +6,7 @@ members = ["crates/dowse-core", "crates/dowse-cli", "crates/dowse-app/src-tauri"
 # 只需在这里改一处就能同步 license/仓库地址/edition。
 [workspace.package]
 edition = "2024"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ltspace/dowse"
 authors = ["ltspace"]

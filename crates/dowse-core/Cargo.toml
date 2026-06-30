@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+rust-version.workspace = true
 description = "本地文件全文搜索引擎核心库：tantivy 倒排索引 + jieba 中文分词，含编码探测、NTFS/USN 快速索引与 Windows OCR"
 readme = "README.md"
 keywords = ["search", "fulltext", "chinese", "tantivy", "jieba"]
