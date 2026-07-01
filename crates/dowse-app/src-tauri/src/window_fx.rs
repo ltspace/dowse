@@ -23,6 +23,16 @@ pub enum EffectLevel {
 /// 焊死在 40，用户把 CSS alpha 从 0.55 调到 0.32 却"观感丝毫没变"，就是
 /// 因为焊死的 DWM 层把变化盖过去了。这张表把两层的 alpha 绑定到同一个
 /// 挡位上，确保它们永远同向同步移动，用户拨一下托盘菜单，两层一起动。
+///
+/// v0.4.2 自测又发现：v0.4.1 这个"两层绑同一挡位"的方案在 Windows 11
+/// build ≥ 22523（22H2 起）上仍然失效——不是绑定关系错了，是 DWM 侧那条
+/// 路径本身在这些系统版本上已经不接受自定义 alpha 了（`tauri::set_effects`
+/// 底下的 `window-vibrancy` 在这个版本区间会自动切到
+/// `DWMWA_SYSTEMBACKDROP_TYPE`，这个新 API 没有颜色/alpha 参数）。
+/// `apply_with_fallback` 里已经绕开这条自动升级、直接调
+/// `SetWindowCompositionAttribute` 保证 DWM 侧 alpha 真正生效，这张表和
+/// `dwm_alpha()` 的数值本身不用变，改的只是"怎么把这个数字送进 DWM"，
+/// 细节见 `swca` 模块的文档注释。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TransparencyTier {
@@ -52,9 +62,9 @@ pub enum TransparencyTier {
 /// app.css 里用 `:root[data-effect='solid']` 整体覆盖 `--glass-tint`
 /// 为不透明色，跟这里的挡位无关。
 impl TransparencyTier {
-    /// DWM 侧 Acrylic tint 的 alpha 通道，0~255，喂给
-    /// `EffectsBuilder::color`（Windows `SetWindowCompositionAttribute` 的
-    /// `GradientColor`）。
+    /// DWM 侧 Acrylic tint 的 alpha 通道，0~255，最终喂给 `swca::apply_acrylic`
+    /// 组装的 `GradientColor`（Windows `SetWindowCompositionAttribute` 的
+    /// `ACCENT_POLICY`）。
     pub fn dwm_alpha(self) -> u8 {
         match self {
             TransparencyTier::Low => 60,
@@ -140,6 +150,119 @@ fn neutral_acrylic_tint(window: &WebviewWindow, tier: TransparencyTier) -> Color
     }
 }
 
+/// v0.4.2 自测发现：托盘"透明度"三档在任何当前 Windows 11 机器上都是
+/// 死代码，根因在 `tauri::WebviewWindow::set_effects` 这条调用链上——
+/// `tauri` 的 `Effect::Acrylic` 内部转给 `window-vibrancy` 的
+/// `apply_acrylic()`，那个函数在系统 build ≥ 22523（Win11 22H2 起，
+/// 这台机器是 26100）时会改用 `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE,
+/// DWMSBT_TRANSIENTWINDOW)`（Win11 原生系统背景材质），这条新路径**根本
+/// 不接受自定义颜色/alpha 参数**——`neutral_acrylic_tint()` 算出来的
+/// `Color`（也就是 `TransparencyTier::dwm_alpha()` 的 60/40/16）在这条路径
+/// 上被直接丢弃，材质的不透明度完全由系统自己决定，托盘三档不管选哪个，
+/// 送进去的都是同一个系统默认值，DWM 半层因此彻底失联。
+///
+/// 唯一还接受自定义 alpha 的官方渠道是更老的 `SetWindowCompositionAttribute`
+/// （user32.dll 的未公开 API，`ACCENT_ENABLE_ACRYLICBLURBEHIND`），
+/// `window-vibrancy` 只在 build < 22523 时才会走这条路——但那正是我们
+/// 需要的那条。这里绕开 `window-vibrancy` 的自动升级判断，直接调用同一个
+/// API，跟它内部实现用的是同一套结构体布局，代价是放弃 Win11 更新潮的
+/// 原生背景材质观感，换来透明度三档在所有 Windows 版本上都真正生效。
+#[cfg(target_os = "windows")]
+mod swca {
+    use std::sync::OnceLock;
+
+    use tauri::window::Color;
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+    use windows::core::s;
+
+    #[repr(C)]
+    struct AccentPolicy {
+        accent_state: u32,
+        accent_flags: u32,
+        gradient_color: u32,
+        animation_id: u32,
+    }
+
+    #[repr(C)]
+    struct WindowCompositionAttribData {
+        attrib: u32,
+        pv_data: *mut core::ffi::c_void,
+        cb_data: usize,
+    }
+
+    const WCA_ACCENT_POLICY: u32 = 0x13;
+    const ACCENT_DISABLED: u32 = 0;
+    const ACCENT_ENABLE_ACRYLICBLURBEHIND: u32 = 4;
+
+    type SetWindowCompositionAttributeFn =
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut WindowCompositionAttribData) -> i32;
+
+    /// `SetWindowCompositionAttribute` 是未公开 API，没有出现在 Windows SDK
+    /// 的 user32.lib 里——静态 `#[link(name = "user32")]` 链接会在链接期
+    /// 报 `无法解析的外部符号 __imp_SetWindowCompositionAttribute`（本轮
+    /// 修复时实测踩到过），只能运行时 `GetProcAddress` 动态取，跟
+    /// window-vibrancy 内部的做法一致。只查一次，缓存下来。
+    fn proc() -> Option<SetWindowCompositionAttributeFn> {
+        static CACHED: OnceLock<Option<usize>> = OnceLock::new();
+        let addr = *CACHED.get_or_init(|| unsafe {
+            let module = LoadLibraryA(s!("user32.dll")).ok()?;
+            let addr = GetProcAddress(module, s!("SetWindowCompositionAttribute"))?;
+            Some(addr as usize)
+        });
+        addr.map(|addr| unsafe {
+            std::mem::transmute::<usize, SetWindowCompositionAttributeFn>(addr)
+        })
+    }
+
+    /// `accent_state` 只在这个模块内部传 `ACCENT_ENABLE_ACRYLICBLURBEHIND`
+    /// 或 `ACCENT_DISABLED` 两种取值，见 `apply_acrylic`/`clear_acrylic`。
+    fn set_accent(hwnd: *mut core::ffi::c_void, accent_state: u32, color: Option<Color>) -> bool {
+        let Some(set_window_composition_attribute) = proc() else {
+            eprintln!("SWCA：GetProcAddress 拿不到 SetWindowCompositionAttribute，跳过");
+            return false;
+        };
+
+        let mut color = color.unwrap_or(Color(0, 0, 0, 0));
+        let is_acrylic = accent_state == ACCENT_ENABLE_ACRYLICBLURBEHIND;
+        // Acrylic 不接受 alpha=0（会整个不显示），跟 window-vibrancy 的处理一致。
+        if is_acrylic && color.3 == 0 {
+            color.3 = 1;
+        }
+
+        let mut policy = AccentPolicy {
+            accent_state,
+            accent_flags: if is_acrylic { 0 } else { 2 },
+            gradient_color: (color.0 as u32)
+                | ((color.1 as u32) << 8)
+                | ((color.2 as u32) << 16)
+                | ((color.3 as u32) << 24),
+            animation_id: 0,
+        };
+
+        let mut data = WindowCompositionAttribData {
+            attrib: WCA_ACCENT_POLICY,
+            pv_data: &mut policy as *mut _ as *mut core::ffi::c_void,
+            cb_data: std::mem::size_of::<AccentPolicy>(),
+        };
+
+        let ok = unsafe { set_window_composition_attribute(hwnd, &mut data as *mut _) };
+        ok != 0
+    }
+
+    /// 申请 Acrylic Blur Behind，`color` 的 alpha 通道真正生效（跟
+    /// `DWMWA_SYSTEMBACKDROP_TYPE` 不同）。
+    pub fn apply_acrylic(hwnd: *mut core::ffi::c_void, color: Color) -> bool {
+        set_accent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, Some(color))
+    }
+
+    /// 清掉 SWCA 层的 Acrylic——跟 `tauri::WebviewWindow::set_effects(None)`
+    /// 走的是不同的合成属性（那个清的是 `DWMWA_SYSTEMBACKDROP_TYPE`），
+    /// 两边都要清，否则可能残留一层"看不见但还在合成"的旧 Acrylic。
+    pub fn clear_acrylic(hwnd: *mut core::ffi::c_void) -> bool {
+        set_accent(hwnd, ACCENT_DISABLED, None)
+    }
+}
+
 /// Win11 原生窗口圆角裁切：`DwmSetWindowAttribute` 设置
 /// `DWMWA_WINDOW_CORNER_PREFERENCE`（33）= `DWMWCP_ROUND`（2），让 DWM 把整个
 /// 窗口（连同 Acrylic/Mica 玻璃）按系统圆角裁掉。不这么做的话，面板本体的
@@ -185,14 +308,50 @@ fn apply_rounded_corners(window: &WebviewWindow) {
     }
 }
 
+/// 申请 Acrylic，返回是否成功把请求发出去了。Windows 上直接走
+/// `swca::apply_acrylic`——原因见上面 `swca` 模块的文档注释：只有这条路径
+/// 的 alpha 参数真正生效，托盘三档才有视觉区别。拿不到 HWND 时（理论上
+/// 不该发生）退回 tauri 自带的 `set_effects`兜底；非 Windows 平台也是
+/// 一样，Acrylic 本来就是 Windows 独有的材质，那边的实现只是占位。
+fn apply_acrylic_effect(window: &WebviewWindow, tint: Color) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(hwnd) = window.hwnd() {
+            return swca::apply_acrylic(hwnd.0, tint);
+        }
+    }
+    #[allow(unreachable_code)]
+    {
+        let acrylic = EffectsBuilder::new()
+            .effect(Effect::Acrylic)
+            .color(tint)
+            .build();
+        window.set_effects(acrylic).is_ok()
+    }
+}
+
+/// 清掉 SWCA 层的 Acrylic，再叠一次 tauri 自带的 `set_effects(None)`——
+/// 两边各管一个不同的合成属性（见 `swca::clear_acrylic` 文档注释），都清
+/// 才能保证不残留旧材质。
+fn clear_acrylic_effect(window: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(hwnd) = window.hwnd() {
+            let _ = swca::clear_acrylic(hwnd.0);
+        }
+    }
+    let _ = window.set_effects(None);
+}
+
 /// 材质降级链：Acrylic → Mica → 纯色。玻璃效果是锦上添花，
 /// 拿不到就退一级，绝不能让"要不到 Acrylic"变成窗口显示不出来。
 /// `transparency_enabled = false` 时（用户在托盘关了透明效果）直接落纯色。
 ///
-/// 注意：`window.set_effects(..).is_ok()` 只反映"把请求发给了 DWM"，不反映
-/// 材质是否真的生效——Tauri 内部把 `DwmSetWindowAttribute` 的 HRESULT 直接丢掉了，
-/// 永远返回 `Ok`。所以这条链天然测不出"申请到了但显示成纯色"这种情况，
-/// 远程会话就是最典型的例子，得单独识别、单独处理。
+/// 注意：`apply_acrylic_effect`/`window.set_effects(..).is_ok()` 只反映
+/// "把请求发给了 DWM"，不反映材质是否真的生效——Tauri 内部把
+/// `DwmSetWindowAttribute` 的 HRESULT 直接丢掉了，永远返回 `Ok`。所以这条链
+/// 天然测不出"申请到了但显示成纯色"这种情况，远程会话就是最典型的例子，
+/// 得单独识别、单独处理。
 pub fn apply_with_fallback(
     window: &WebviewWindow,
     transparency_enabled: bool,
@@ -203,7 +362,7 @@ pub fn apply_with_fallback(
     apply_rounded_corners(window);
 
     if !transparency_enabled {
-        let _ = window.set_effects(None);
+        clear_acrylic_effect(window);
         eprintln!("材质降级：用户在托盘关闭了透明效果，直接落纯色");
         return EffectLevel::Solid;
     }
@@ -213,11 +372,7 @@ pub fn apply_with_fallback(
         // DWM 在这种场景下大概率会把 Acrylic/Mica 悄悄渲染成不透明纯色——
         // 与其让前端顶着"acrylic"的名头显示一块来源不明的纯色，不如如实
         // 上报 Solid，让前端走我们自己设计过的深灰兜底，观感可控。
-        let acrylic = EffectsBuilder::new()
-            .effect(Effect::Acrylic)
-            .color(neutral_acrylic_tint(window, tier))
-            .build();
-        let _ = window.set_effects(acrylic);
+        apply_acrylic_effect(window, neutral_acrylic_tint(window, tier));
         eprintln!(
             "材质降级：检测到远程会话（SESSIONNAME={}），Acrylic/Mica 在此场景下会被 DWM 渲染成不透明纯色，直接落纯色",
             std::env::var("SESSIONNAME").unwrap_or_default()
@@ -225,12 +380,8 @@ pub fn apply_with_fallback(
         return EffectLevel::Solid;
     }
 
-    let acrylic = EffectsBuilder::new()
-        .effect(Effect::Acrylic)
-        .color(neutral_acrylic_tint(window, tier))
-        .build();
-    if window.set_effects(acrylic).is_ok() {
-        eprintln!("材质降级：Acrylic 申请已发出");
+    if apply_acrylic_effect(window, neutral_acrylic_tint(window, tier)) {
+        eprintln!("材质降级：Acrylic 申请已发出（tier={tier:?}）");
         return EffectLevel::Acrylic;
     }
 
@@ -240,7 +391,7 @@ pub fn apply_with_fallback(
         return EffectLevel::Mica;
     }
 
-    let _ = window.set_effects(None);
+    clear_acrylic_effect(window);
     eprintln!("材质降级：Acrylic 和 Mica 都申请失败，落到纯色");
     EffectLevel::Solid
 }
@@ -249,9 +400,10 @@ pub fn apply_with_fallback(
 /// 屏幕高度的约 22% 处起摆，比 50% 正中更符合"呼出即用"的视觉预期。
 ///
 /// v0.4.1 把窗口从 750×500 放大到 860×560 时复核过这条逻辑：这里用的是
-/// `window.outer_size()`（整个窗口，含 app.css 里给阴影留白的
-/// `--panel-margin`），横向居中和纵向 22% 起摆都是相对屏幕尺寸的比例计算，
-/// 不依赖任何写死的像素基准，换了窗口尺寸不需要跟着改数。
+/// `window.outer_size()`（整个窗口——v0.4.2 起 .panel 满铺窗口，两者已经
+/// 是同一个尺寸，见 app.css 里双框 bug 的修复说明），横向居中和纵向 22%
+/// 起摆都是相对屏幕尺寸的比例计算，不依赖任何写死的像素基准，换了窗口
+/// 尺寸不需要跟着改数。
 pub fn position_upper_center(window: &WebviewWindow) -> tauri::Result<()> {
     let Some(monitor) = window.current_monitor()? else {
         return Ok(());

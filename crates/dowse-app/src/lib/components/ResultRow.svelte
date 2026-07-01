@@ -17,8 +17,10 @@
 	} = $props();
 
 	// 目录部分给路径行用：文件名已经单独占一行了，路径行只需要目录。
+	// 用 display_path（已剥掉 \\?\ 前缀）而不是 path——这一行是纯展示，
+	// path 留给 FileIcon/打开/定位这些真正做文件操作的地方用。
 	let dirOf = $derived.by(() => {
-		const p = hit.path;
+		const p = hit.display_path;
 		const slash = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
 		return slash >= 0 ? p.slice(0, slash + 1) : p;
 	});

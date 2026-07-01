@@ -52,13 +52,13 @@
 	--row-hover: rgba(0, 0, 0, 0.035);
 	--scrollbar-thumb: rgba(0, 0, 0, 0.16);
 
-	/* 窗口本体是透明的，原生阴影关掉了（tauri.conf.json 里 shadow:
-	   false），悬浮感全靠这两个变量在 .panel 上补一圈细描边 + 一层深阴影——
-	   窗口比面板本身留出一圈 margin（见 .panel 的 inset），阴影才有地方画。 */
+	/* 窗口本体是透明的，原生阴影关掉了（tauri.conf.json 里 shadow: false）。
+	   v0.4.1 试过给 .panel 内缩一圈再叠 box-shadow 模拟悬浮感，结果 DWM
+	   的整窗玻璃把这圈内缩渲染成了一圈裸玻璃"画框"（双框 bug，v0.4.2 撤销，
+	   细节见 +page.svelte 里 .panel 规则上的注释）——CSS 阴影方案跟整窗玻璃
+	   物理上不兼容，不再尝试。悬浮感现在只靠这一条描边，.panel 满铺整个
+	   窗口，不留内缩空间。 */
 	--panel-border: rgba(0, 0, 0, 0.07);
-	--panel-shadow:
-		0 16px 40px rgba(15, 15, 20, 0.16),
-		0 2px 8px rgba(15, 15, 20, 0.08);
 
 	--accent-soft: rgba(58, 154, 194, 0.14);
 	--accent-border: rgba(58, 154, 194, 0.4);
@@ -81,11 +81,6 @@
 	--radius-window: 8px;
 	--radius-row: 8px;
 	--radius-chip: 5px;
-
-	/* .panel 相对窗口整体的内缩量——留出来给 --panel-shadow 画阴影用，
-	   窗口比视觉上的"卡片"大这一圈，呼出定位（Rust 侧 position_upper_center）
-	   算的是整个窗口，不受这个内缩影响。 */
-	--panel-margin: 16px;
 }
 
 /* 纯色降级档（玻璃申请失败，或系统/用户关掉了透明效果）：设计文档要的是
@@ -102,9 +97,6 @@
 	--fg-tertiary: #77777f;
 	--divider: rgba(255, 255, 255, 0.09);
 	--panel-border: rgba(255, 255, 255, 0.09);
-	--panel-shadow:
-		0 16px 40px rgba(0, 0, 0, 0.45),
-		0 2px 8px rgba(0, 0, 0, 0.3);
 	--row-hover: rgba(255, 255, 255, 0.045);
 	--scrollbar-thumb: rgba(255, 255, 255, 0.18);
 	--accent-soft: rgba(112, 199, 232, 0.16);
@@ -123,9 +115,6 @@
 		--glass-tint: rgba(18, 18, 22, var(--glass-alpha-dark));
 		--solid-bg: #1c1c20;
 		--panel-border: rgba(255, 255, 255, 0.07);
-		--panel-shadow:
-			0 16px 40px rgba(0, 0, 0, 0.45),
-			0 2px 8px rgba(0, 0, 0, 0.3);
 		--row-hover: rgba(255, 255, 255, 0.045);
 		--scrollbar-thumb: rgba(255, 255, 255, 0.18);
 
