@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: crates/dowse-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crates/dowse-app
+        run: npm ci
+
+      - name: Build Tauri bundle
+        working-directory: crates/dowse-app
+        run: npm run tauri build
+
+      - name: Compute checksums
+        id: artifacts
+        shell: pwsh
+        run: |
+          $patterns = @(
+            "target/release/bundle/nsis/*-setup.exe",
+            "target/release/bundle/msi/*.msi"
+          )
+          $installers = @()
+          foreach ($pattern in $patterns) {
+            $installers += Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue
+          }
+          if ($installers.Count -eq 0) {
+            Write-Error "No installers found under target/release/bundle"
+            exit 1
+          }
+          $checksums = "checksums.txt"
+          if (Test-Path $checksums) { Remove-Item $checksums }
+          foreach ($installer in $installers) {
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $installer.FullName).Hash.ToLower()
+            "$hash  $($installer.Name)" | Out-File -FilePath $checksums -Append -Encoding ascii
+          }
+          $paths = ($installers | ForEach-Object { $_.FullName }) -join "`n"
+          "paths<<EOF`n$paths`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Create draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $assets = @("${{ steps.artifacts.outputs.paths }}".Trim() -split "`n")
+          $assets += "checksums.txt"
+          gh release create $tag --draft --title $tag --notes "" $assets
