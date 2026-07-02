@@ -31,6 +31,12 @@ export interface IndexStatus {
 	last_target_dir: string | null;
 }
 
+/// 类型筛选下拉的取值，跟 Rust 侧 dowse-core::ext_groups::by_name 认的字符串一一对应。
+export type ExtGroup = 'all' | 'doc' | 'code' | 'image';
+
+/// 排序下拉的取值，跟 Rust 侧 dowse-core::SortMode::parse 认的字符串一一对应。
+export type SortOption = 'relevance' | 'mtime_desc' | 'mtime_asc' | 'size_desc';
+
 export type EffectLevel = 'acrylic' | 'mica' | 'solid';
 
 /// 面板可视不透明度的明/暗两套 CSS alpha（0~1），跟托盘"透明度"三档挂钩，

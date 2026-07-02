@@ -8,6 +8,7 @@
     "opener:default",
     "global-shortcut:default",
     "autostart:default",
-    "dialog:default"
+    "dialog:default",
+    "clipboard-manager:default"
   ]
 }
