@@ -6,11 +6,28 @@
 	import { animate } from 'motion';
 
 	import * as api from '$lib/api';
-	import type { EffectLevel, GlassAlpha, SearchHit, TextSegment } from '$lib/types';
+	import type { EffectLevel, ExtGroup, GlassAlpha, SearchHit, SortOption, TextSegment } from '$lib/types';
 	import ResultList from '$lib/components/ResultList.svelte';
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
 	import ShortcutBar from '$lib/components/ShortcutBar.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import GhostDropdown from '$lib/components/GhostDropdown.svelte';
+	import PinButton from '$lib/components/PinButton.svelte';
+
+	// 类型筛选 / 排序器两个幽灵态下拉的选项表——顺序即菜单里的显示顺序，
+	// 第一项永远是"默认值"（对应 GhostDropdown 的 defaultValue）。
+	const TYPE_OPTIONS = [
+		{ value: 'all', label: '全部' },
+		{ value: 'doc', label: '文档' },
+		{ value: 'code', label: '代码' },
+		{ value: 'image', label: '图片' }
+	] as const;
+	const SORT_OPTIONS = [
+		{ value: 'relevance', label: '相关性' },
+		{ value: 'mtime_desc', label: '最新优先' },
+		{ value: 'mtime_asc', label: '最旧优先' },
+		{ value: 'size_desc', label: '最大优先' }
+	] as const;
 
 	let query = $state('');
 	let hits = $state<SearchHit[]>([]);
@@ -23,9 +40,18 @@
 	let rebuildError = $state('');
 	let toast = $state('');
 
+	let extGroup = $state<ExtGroup>('all');
+	let sortOption = $state<SortOption>('relevance');
+	let typeMenuOpen = $state(false);
+	let sortMenuOpen = $state(false);
+	let typeMenuIndex = $state(0);
+	let sortMenuIndex = $state(0);
+	let pinned = $state(false);
+
 	let inputEl: HTMLInputElement | undefined = $state();
 	let panelEl: HTMLDivElement | undefined = $state();
 	let caretFlourishEl: HTMLSpanElement | undefined = $state();
+	let controlsEl: HTMLDivElement | undefined = $state();
 
 	let selectedHit = $derived(hits[selectedIndex] ?? null);
 
@@ -51,9 +77,13 @@
 	}
 
 	// 键入 30ms 防抖即搜——查询词变了就重新发起，过期响应用 token 挡掉。
+	// 类型筛选 / 排序器的选择跟查询词一起参与防抖：选中即重搜，不需要额外
+	// 的"应用"按钮。
 	let searchToken = 0;
 	$effect(() => {
 		const q = query;
+		const group = extGroup;
+		const sort = sortOption;
 		const token = ++searchToken;
 		if (q.trim().length === 0) {
 			hits = [];
@@ -62,7 +92,7 @@
 		}
 		const timer = setTimeout(async () => {
 			try {
-				const results = await api.search(q, 50);
+				const results = await api.search(q, 50, group, sort);
 				if (token !== searchToken) return;
 				hits = results;
 				selectedIndex = 0;
@@ -145,7 +175,85 @@
 			.catch(() => showToast('复制失败。'));
 	}
 
+	function togglePinned() {
+		pinned = !pinned;
+		api.setPinned(pinned).catch((err) => console.error('setPinned failed', err));
+	}
+
+	function showContextMenu(i: number) {
+		selectedIndex = i;
+		const hit = hits[i];
+		if (!hit) return;
+		api.showResultContextMenu(hit.path).catch((err) => console.error('showResultContextMenu failed', err));
+	}
+
+	function closeMenus() {
+		typeMenuOpen = false;
+		sortMenuOpen = false;
+	}
+
+	function openTypeMenu() {
+		sortMenuOpen = false;
+		typeMenuOpen = !typeMenuOpen;
+		typeMenuIndex = Math.max(
+			0,
+			TYPE_OPTIONS.findIndex((o) => o.value === extGroup)
+		);
+	}
+
+	function openSortMenu() {
+		typeMenuOpen = false;
+		sortMenuOpen = !sortMenuOpen;
+		sortMenuIndex = Math.max(
+			0,
+			SORT_OPTIONS.findIndex((o) => o.value === sortOption)
+		);
+	}
+
 	function handleKeydown(e: KeyboardEvent) {
+		// Ctrl+P / Ctrl+S 开关类型/排序菜单——不进快捷键提示条（保持底部简洁），
+		// 只写进 README。两个菜单互斥：开一个就关另一个。
+		if (e.ctrlKey && e.key.toLowerCase() === 'p') {
+			e.preventDefault();
+			openTypeMenu();
+			return;
+		}
+		if (e.ctrlKey && e.key.toLowerCase() === 's') {
+			e.preventDefault();
+			openSortMenu();
+			return;
+		}
+
+		// 菜单打开时，↑↓/Enter/Esc 转去控制菜单本身，不透传给下面的结果列表
+		// 导航——避免同一次按键既翻结果又翻菜单项。
+		if (typeMenuOpen || sortMenuOpen) {
+			const options = typeMenuOpen ? TYPE_OPTIONS : SORT_OPTIONS;
+			let index = typeMenuOpen ? typeMenuIndex : sortMenuIndex;
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				index = Math.min(index + 1, options.length - 1);
+			} else if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				index = Math.max(index - 1, 0);
+			} else if (e.key === 'Enter') {
+				e.preventDefault();
+				const picked = options[index].value;
+				if (typeMenuOpen) extGroup = picked as ExtGroup;
+				else sortOption = picked as SortOption;
+				closeMenus();
+				return;
+			} else if (e.key === 'Escape') {
+				e.preventDefault();
+				closeMenus();
+				return;
+			} else {
+				return;
+			}
+			if (typeMenuOpen) typeMenuIndex = index;
+			else sortMenuIndex = index;
+			return;
+		}
+
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			getCurrentWindow().hide();
@@ -223,6 +331,14 @@
 		});
 	}
 
+	// 鼠标点了 .controls（两个下拉 + 图钉）以外的地方就收起菜单——两个下拉
+	// 平时几乎不占视觉存在感，不能指望用户记得回来点一下 trigger 才能关掉。
+	function handleDocumentClick(e: MouseEvent) {
+		if (!typeMenuOpen && !sortMenuOpen) return;
+		if (controlsEl && e.target instanceof Node && controlsEl.contains(e.target)) return;
+		closeMenus();
+	}
+
 	onMount(() => {
 		refreshIndexStatus();
 		focusAndSelectAll();
@@ -232,10 +348,13 @@
 		});
 		api.getGlassAlpha().then(applyGlassAlpha);
 
+		document.addEventListener('click', handleDocumentClick);
+
 		const unlistenShown = listen('dowse://shown', () => {
 			refreshIndexStatus();
 			focusAndSelectAll();
 			playShowAnimation();
+			closeMenus();
 		});
 		const unlistenEffect = listen<EffectLevel>('dowse://effect-level', (evt) => {
 			document.documentElement.dataset.effect = evt.payload;
@@ -252,6 +371,7 @@
 		});
 
 		return () => {
+			document.removeEventListener('click', handleDocumentClick);
 			unlistenShown.then((f) => f());
 			unlistenEffect.then((f) => f());
 			unlistenGlassAlpha.then((f) => f());
@@ -280,6 +400,35 @@
 			/>
 			<span class="caret-flourish" bind:this={caretFlourishEl} aria-hidden="true"></span>
 		</div>
+		<div class="controls" bind:this={controlsEl}>
+			<GhostDropdown
+				idleLabel="全部类型"
+				options={TYPE_OPTIONS}
+				value={extGroup}
+				defaultValue="all"
+				open={typeMenuOpen}
+				bind:activeIndex={typeMenuIndex}
+				onselect={(v) => {
+					extGroup = v as ExtGroup;
+					closeMenus();
+				}}
+				ontoggle={openTypeMenu}
+			/>
+			<GhostDropdown
+				idleLabel="相关性"
+				options={SORT_OPTIONS}
+				value={sortOption}
+				defaultValue="relevance"
+				open={sortMenuOpen}
+				bind:activeIndex={sortMenuIndex}
+				onselect={(v) => {
+					sortOption = v as SortOption;
+					closeMenus();
+				}}
+				ontoggle={openSortMenu}
+			/>
+			<PinButton {pinned} onclick={togglePinned} />
+		</div>
 	</div>
 
 	<div class="body">
@@ -302,6 +451,7 @@
 						selectedIndex = i;
 						openSelected();
 					}}
+					oncontextmenu={showContextMenu}
 				/>
 			</div>
 			<div class="divider-v"></div>
@@ -372,6 +522,15 @@
 		font-size: 22px;
 		font-weight: 400;
 		caret-color: var(--accent-caret);
+	}
+
+	/* 类型筛选 / 排序器 / 图钉——三个都是默认态"几乎不存在"的幽灵控件，
+	   紧贴输入区右侧，跟输入框之间留一点呼吸但不占视觉重量。 */
+	.controls {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		flex-shrink: 0;
 	}
 
 	.search-input::placeholder {

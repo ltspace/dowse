@@ -52,7 +52,7 @@ cargo run -p dowse -- search 限流         # search
 cargo run -p dowse -- search "精确短语"   # phrase query
 ```
 
-Overlay app (released; current v0.2.1, v0.3.0 coming soon): `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide.
+Overlay app (released; current v0.2.1, v0.3.0 coming soon): `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two ghost-style dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay near-invisible until a non-default value is picked. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart).
 
 <!-- [Image slot 2: light/dark theme + preview pane screenshot] -->
 
