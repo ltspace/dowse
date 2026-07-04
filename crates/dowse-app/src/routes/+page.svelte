@@ -25,21 +25,22 @@
 	import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
 	import IndexingStrip from '$lib/components/IndexingStrip.svelte';
 	import { formatHotkey } from '$lib/hotkey';
+	import { t } from '$lib/i18n';
 
 	// 类型筛选 / 排序器两个幽灵态下拉的选项表——顺序即菜单里的显示顺序，
-	// 第一项永远是"默认值"（对应 GhostDropdown 的 defaultValue）。
+	// 第一项永远是"默认值"（对应 GhostDropdown 的 defaultValue）。文案跟随系统语言。
 	const TYPE_OPTIONS = [
-		{ value: 'all', label: '全部' },
-		{ value: 'doc', label: '文档' },
-		{ value: 'code', label: '代码' },
-		{ value: 'image', label: '图片' }
-	] as const;
+		{ value: 'all', label: t.filterAll },
+		{ value: 'doc', label: t.filterDoc },
+		{ value: 'code', label: t.filterCode },
+		{ value: 'image', label: t.filterImage }
+	];
 	const SORT_OPTIONS = [
-		{ value: 'relevance', label: '相关性' },
-		{ value: 'mtime_desc', label: '最新优先' },
-		{ value: 'mtime_asc', label: '最旧优先' },
-		{ value: 'size_desc', label: '最大优先' }
-	] as const;
+		{ value: 'relevance', label: t.sortRelevance },
+		{ value: 'mtime_desc', label: t.sortNewest },
+		{ value: 'mtime_asc', label: t.sortOldest },
+		{ value: 'size_desc', label: t.sortLargest }
+	];
 
 	let query = $state('');
 	let hits = $state<SearchHit[]>([]);
@@ -228,7 +229,7 @@
 	}
 
 	async function pickDirectoryAndRebuild() {
-		const dir = await open({ directory: true, multiple: false, title: '选择要索引的目录' });
+		const dir = await open({ directory: true, multiple: false, title: t.dialogPickIndexFolder });
 		if (!dir || Array.isArray(dir)) return;
 
 		rebuildState = 'rebuilding';
@@ -266,7 +267,7 @@
 	/// （add_root 而不是 rebuild_index）和完成后不整体替换 hasIndex/roots，
 	/// 而是照常刷新（roots 会多出这一项）。
 	async function pickDirectoryAndAddRoot() {
-		const dir = await open({ directory: true, multiple: false, title: '选择要添加的文件夹' });
+		const dir = await open({ directory: true, multiple: false, title: t.dialogAddFolder });
 		if (!dir || Array.isArray(dir)) return;
 
 		rebuildState = 'rebuilding';
@@ -294,20 +295,20 @@
 
 	function openSelected() {
 		if (!selectedHit) return;
-		api.openFile(selectedHit.path).catch((err) => showToast(`文件打开失败：${err}`));
+		api.openFile(selectedHit.path).catch((err) => showToast(t.toastOpenFailed(String(err))));
 	}
 
 	function revealSelected() {
 		if (!selectedHit) return;
-		api.revealInFolder(selectedHit.path).catch((err) => showToast(`定位文件夹失败：${err}`));
+		api.revealInFolder(selectedHit.path).catch((err) => showToast(t.toastRevealFailed(String(err))));
 	}
 
 	function copySelectedPath() {
 		if (!selectedHit) return;
 		navigator.clipboard
 			.writeText(selectedHit.path)
-			.then(() => showToast('路径已复制。'))
-			.catch(() => showToast('复制失败。'));
+			.then(() => showToast(t.toastPathCopied))
+			.catch(() => showToast(t.toastCopyFailed));
 	}
 
 	function togglePinned() {
@@ -533,18 +534,18 @@
 			// pickDirectoryAndRebuild，指望这里补一次快照拉取，好在窗口这时
 			// 恰好开着的话立刻接上 OCR 阶段的进度条，不用等下一条事件。
 			refreshIndexingStatus();
-			showToast(`索引重建完成，收录 ${evt.payload} 个文件。`);
+			showToast(t.toastRebuildDone(evt.payload));
 		});
 		const unlistenRebuildError = listen<string>('dowse://rebuild-error', (evt) => {
 			refreshIndexingStatus();
-			showToast(`索引重建失败：${evt.payload}`);
+			showToast(t.toastRebuildFailed(evt.payload));
 		});
 		// 托盘"移除"文件夹的成功回执——移除没有"收录数"可言，走独立事件而不是
 		// 复用 dowse://rebuild-done（那个的 toast 文案是"收录 N 个文件"，套用
 		// 到移除操作上语义是反的）。
 		const unlistenRootRemoved = listen<number>('dowse://root-removed', (evt) => {
 			refreshIndexStatus();
-			showToast(`已移除该文件夹，删除 ${evt.payload} 篇文档。`);
+			showToast(t.toastFolderRemoved(evt.payload));
 		});
 		// 建索引"实时直播"：全程监听，不只在 rebuildState === 'rebuilding' 时才挂——
 		// 事件只在 rebuild_index 命令执行期间才会发出，不重建时这个监听器闲置无害。
@@ -585,7 +586,7 @@
 				bind:this={inputEl}
 				type="text"
 				class="search-input"
-				placeholder="搜文件名或内容…"
+				placeholder={t.searchPlaceholder}
 				bind:value={query}
 				onkeydown={handleKeydown}
 				autocomplete="off"
@@ -595,7 +596,7 @@
 		</div>
 		<div class="controls" bind:this={controlsEl}>
 			<GhostDropdown
-				idleLabel="全部类型"
+				idleLabel={t.filterIdleLabel}
 				options={TYPE_OPTIONS}
 				value={extGroup}
 				defaultValue="all"
@@ -608,7 +609,7 @@
 				ontoggle={openTypeMenu}
 			/>
 			<GhostDropdown
-				idleLabel="相关性"
+				idleLabel={t.sortIdleLabel}
 				options={SORT_OPTIONS}
 				value={sortOption}
 				defaultValue="relevance"
@@ -641,7 +642,7 @@
 		{:else}
 			<div class="results">
 				<div class="results-heading">
-					<span>结果 · <AnimatedNumber value={hits.length} /> 条</span>
+					<span>{t.resultsPrefix}<AnimatedNumber value={hits.length} />{t.resultsSuffix}</span>
 					{#if lastSearchMs !== null}
 						<span class="search-ms">{Math.round(lastSearchMs)}ms</span>
 					{/if}
