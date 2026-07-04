@@ -80,6 +80,8 @@ fn generate_test_image(path: &Path, sentinel: &str) -> Result<()> {
 
 #[test]
 fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     if !dowse_core::is_available() {
         eprintln!(
             "跳过 images_with_sentinel_text_become_searchable_after_ocr：\
@@ -152,6 +154,8 @@ fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
 /// （重复识别同一张图会让 processed 计数超过图片总数，这里直接断言计数）。
 #[test]
 fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     if !dowse_core::is_available() {
         eprintln!(
             "跳过 ocr_queue_survives_restart_and_resumes_pending_work：\

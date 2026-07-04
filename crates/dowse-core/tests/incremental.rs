@@ -47,6 +47,8 @@ fn count_hits(index_dir: &Path, query: &str) -> usize {
 
 #[test]
 fn modify_file_updates_searchable_content() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
     let file = target.path().join("note.md");
@@ -73,6 +75,8 @@ fn modify_file_updates_searchable_content() -> Result<()> {
 
 #[test]
 fn delete_file_removes_it_from_index() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
     let file = target.path().join("doomed.md");
@@ -96,6 +100,8 @@ fn delete_file_removes_it_from_index() -> Result<()> {
 
 #[test]
 fn rename_file_old_name_gone_new_name_and_content_searchable() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
     let old = target.path().join("oldname.md");
@@ -134,6 +140,8 @@ fn rename_file_old_name_gone_new_name_and_content_searchable() -> Result<()> {
 
 #[test]
 fn remove_tree_prefix_deletes_whole_subdirectory() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     // 目录整体删除的前缀圈选：sub 下的都删掉，兄弟目录 sub2 和顶层文件不受影响。
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
@@ -188,6 +196,8 @@ fn remove_tree_prefix_deletes_whole_subdirectory() -> Result<()> {
 /// 不依赖真实的 notify 事件触发时序。
 #[test]
 fn upsert_tree_expands_directory_into_every_file_inside() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
 

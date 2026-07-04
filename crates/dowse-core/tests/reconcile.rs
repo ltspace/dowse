@@ -24,6 +24,8 @@ fn count_hits(index_dir: &Path, query: &str) -> usize {
 
 #[test]
 fn reconcile_catches_offline_add_modify_delete() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
 
@@ -93,6 +95,8 @@ fn reconcile_catches_offline_add_modify_delete() -> Result<()> {
 
 #[test]
 fn reconcile_on_unchanged_index_is_a_noop() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
     std::fs::write(target.path().join("x.md"), "内容 elderberry")?;
@@ -118,6 +122,8 @@ fn reconcile_on_unchanged_index_is_a_noop() -> Result<()> {
 /// 不受影响。
 #[test]
 fn reconcile_orphans_removes_docs_outside_all_roots() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let root = target_dir();
     std::fs::write(root.path().join("kept.md"), "内容 huckleberry")?;
@@ -167,6 +173,8 @@ fn reconcile_orphans_removes_docs_outside_all_roots() -> Result<()> {
 /// 随后正常的 `add_root` 重新收录 B，结果应该是"B 完整可搜、且不重复"。
 #[test]
 fn crash_mid_add_root_then_restart_reconciles_to_clean_state() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let a = target_dir();
     std::fs::write(a.path().join("a.md"), "根 A 的内容 apricot")?;

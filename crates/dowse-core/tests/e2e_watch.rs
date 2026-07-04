@@ -69,6 +69,8 @@ fn wait_until(
 
 #[test]
 fn end_to_end_watch_add_delete_rename_latency() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
 
