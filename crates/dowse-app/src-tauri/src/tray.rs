@@ -111,8 +111,6 @@ const MENU_QUIT: &str = "quit";
 const FOLDER_REBUILD_PREFIX: &str = "folder_rebuild::";
 const FOLDER_REMOVE_PREFIX: &str = "folder_remove::";
 
-const IDLE_TOOLTIP: &str = "dowse — Alt+` 呼出";
-
 /// 托盘图标句柄。多根索引（里程碑 7）之后菜单本身不再长期持有单个菜单项的
 /// 句柄去做局部 `.set_text()`/`.set_checked()`——根的数量、每根的文档数、
 /// 忙碌态都会变，改成"每次状态变化就整份重建 Menu，`set_menu` 整体换上去"
@@ -151,7 +149,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 
     let tray_icon = TrayIconBuilder::new()
         .icon(icon)
-        .tooltip(IDLE_TOOLTIP)
+        .tooltip(crate::i18n::strings().idle_tooltip)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(handle_menu_event)
@@ -195,31 +193,32 @@ pub fn refresh_menu(app: &AppHandle) {
 fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let cfg = app.state::<ConfigState>().get();
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    let s = crate::i18n::strings();
 
-    let show_item = MenuItemBuilder::with_id(MENU_SHOW, "呼出").build(app)?;
+    let show_item = MenuItemBuilder::with_id(MENU_SHOW, s.menu_show).build(app)?;
     let folders_submenu = build_folders_submenu(app, busy)?;
 
-    let autostart_item = CheckMenuItemBuilder::with_id(MENU_AUTOSTART, "开机自启")
+    let autostart_item = CheckMenuItemBuilder::with_id(MENU_AUTOSTART, s.menu_autostart)
         .checked(autostart_enabled)
         .build(app)?;
-    let transparency_item = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY, "关闭透明效果")
+    let transparency_item = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY, s.menu_transparency_off)
         .checked(!cfg.transparency_enabled)
         .build(app)?;
 
     let tier = cfg.transparency_tier;
-    let tier_low = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_LOW, "低")
+    let tier_low = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_LOW, s.tier_low)
         .checked(tier == TransparencyTier::Low)
         .build(app)?;
-    let tier_mid = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_MID, "中")
+    let tier_mid = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_MID, s.tier_mid)
         .checked(tier == TransparencyTier::Mid)
         .build(app)?;
-    let tier_high = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_HIGH, "高")
+    let tier_high = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_HIGH, s.tier_high)
         .checked(tier == TransparencyTier::High)
         .build(app)?;
     let tier_submenu =
-        Submenu::with_items(app, "透明度", true, &[&tier_low, &tier_mid, &tier_high])?;
+        Submenu::with_items(app, s.tier_submenu, true, &[&tier_low, &tier_mid, &tier_high])?;
 
-    let quit_item = MenuItemBuilder::with_id(MENU_QUIT, "退出").build(app)?;
+    let quit_item = MenuItemBuilder::with_id(MENU_QUIT, s.menu_quit).build(app)?;
 
     Menu::with_items(
         app,
@@ -248,19 +247,21 @@ fn build_folders_submenu(app: &AppHandle, busy: bool) -> tauri::Result<Submenu<t
         .and_then(|dir| dowse_core::registered_roots(&dir).ok())
         .unwrap_or_default();
 
+    let s = crate::i18n::strings();
     let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::new();
     for (idx, root) in roots.iter().enumerate() {
         let docs = root_doc_count(app, root);
         let label = format!(
-            "{} · {} 篇",
+            "{} · {} {}",
             dowse_core::display_path(&root.to_string_lossy()),
-            crate::rebuild::format_count(docs)
+            crate::rebuild::format_count(docs),
+            s.root_docs_unit
         );
         let rebuild_item =
-            MenuItemBuilder::with_id(format!("{FOLDER_REBUILD_PREFIX}{idx}"), "重建")
+            MenuItemBuilder::with_id(format!("{FOLDER_REBUILD_PREFIX}{idx}"), s.rebuild_item)
                 .enabled(!busy)
                 .build(app)?;
-        let remove_item = MenuItemBuilder::with_id(format!("{FOLDER_REMOVE_PREFIX}{idx}"), "移除")
+        let remove_item = MenuItemBuilder::with_id(format!("{FOLDER_REMOVE_PREFIX}{idx}"), s.remove_item)
             .enabled(!busy)
             .build(app)?;
         let root_submenu = Submenu::with_items(app, label, true, &[&rebuild_item, &remove_item])?;
@@ -270,13 +271,13 @@ fn build_folders_submenu(app: &AppHandle, busy: bool) -> tauri::Result<Submenu<t
     if !roots.is_empty() {
         items.push(Box::new(PredefinedMenuItem::separator(app)?));
     }
-    let add_item = MenuItemBuilder::with_id(MENU_FOLDERS_ADD, "添加文件夹…")
+    let add_item = MenuItemBuilder::with_id(MENU_FOLDERS_ADD, s.add_folder_item)
         .enabled(!busy)
         .build(app)?;
     items.push(Box::new(add_item));
 
     let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|b| b.as_ref()).collect();
-    Submenu::with_items(app, "索引文件夹", true, &refs)
+    Submenu::with_items(app, s.folders_submenu, true, &refs)
 }
 
 fn root_doc_count(app: &AppHandle, root: &std::path::Path) -> u64 {
@@ -296,14 +297,18 @@ pub fn refresh_tooltip(app: &AppHandle) {
         return;
     };
     let snapshot = app.state::<IndexingStatus>().snapshot();
+    let s = crate::i18n::strings();
     let tooltip = match snapshot.phase {
-        IndexingPhase::Idle => IDLE_TOOLTIP.to_string(),
+        IndexingPhase::Idle => s.idle_tooltip.to_string(),
         IndexingPhase::Text => format!(
-            "dowse — 索引中 {} 篇",
-            crate::rebuild::format_count(snapshot.text_processed as u64)
+            "{}{}{}",
+            s.tooltip_indexing_prefix,
+            crate::rebuild::format_count(snapshot.text_processed as u64),
+            s.tooltip_indexing_suffix
         ),
         IndexingPhase::Ocr => format!(
-            "dowse — 图片识别 {} / {}",
+            "{}{} / {}",
+            s.tooltip_ocr_prefix,
             crate::rebuild::format_count(snapshot.ocr_processed as u64),
             crate::rebuild::format_count(snapshot.ocr_total as u64)
         ),
@@ -422,7 +427,7 @@ fn add_folder(app: &AppHandle) {
     let app = app.clone();
     app.dialog()
         .file()
-        .set_title("选择要索引的文件夹")
+        .set_title(crate::i18n::strings().dialog_pick_folder)
         .pick_folder(move |folder| {
             let Some(folder) = folder else {
                 app.state::<RebuildGuard>().end();
@@ -475,7 +480,7 @@ fn rebuild_folder(app: &AppHandle, idx: usize) {
     let app = app.clone();
     std::thread::spawn(move || {
         let outcome = resolve_root_by_index(idx)
-            .ok_or_else(|| "找不到这个索引根，菜单可能已过期，请重新打开托盘菜单".to_string())
+            .ok_or_else(|| crate::i18n::strings().stale_root_error.to_string())
             .and_then(|root| crate::rebuild::perform_rebuild_root(&app, root));
         app.state::<RebuildGuard>().end();
         match outcome {
@@ -500,7 +505,7 @@ fn remove_folder(app: &AppHandle, idx: usize) {
     let app = app.clone();
     std::thread::spawn(move || {
         let outcome = resolve_root_by_index(idx)
-            .ok_or_else(|| "找不到这个索引根，菜单可能已过期，请重新打开托盘菜单".to_string())
+            .ok_or_else(|| crate::i18n::strings().stale_root_error.to_string())
             .and_then(|root| crate::rebuild::perform_remove_root(&app, root));
         app.state::<RebuildGuard>().end();
         match outcome {

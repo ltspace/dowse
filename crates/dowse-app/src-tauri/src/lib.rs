@@ -4,6 +4,7 @@ mod config;
 mod context_menu;
 mod file_icons;
 mod highlight;
+mod i18n;
 mod indexing_status;
 mod logging;
 mod rebuild;
