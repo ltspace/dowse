@@ -201,9 +201,10 @@ fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let autostart_item = CheckMenuItemBuilder::with_id(MENU_AUTOSTART, s.menu_autostart)
         .checked(autostart_enabled)
         .build(app)?;
-    let transparency_item = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY, s.menu_transparency_off)
-        .checked(!cfg.transparency_enabled)
-        .build(app)?;
+    let transparency_item =
+        CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY, s.menu_transparency_off)
+            .checked(!cfg.transparency_enabled)
+            .build(app)?;
 
     let tier = cfg.transparency_tier;
     let tier_low = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_LOW, s.tier_low)
@@ -215,8 +216,12 @@ fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let tier_high = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_HIGH, s.tier_high)
         .checked(tier == TransparencyTier::High)
         .build(app)?;
-    let tier_submenu =
-        Submenu::with_items(app, s.tier_submenu, true, &[&tier_low, &tier_mid, &tier_high])?;
+    let tier_submenu = Submenu::with_items(
+        app,
+        s.tier_submenu,
+        true,
+        &[&tier_low, &tier_mid, &tier_high],
+    )?;
 
     let quit_item = MenuItemBuilder::with_id(MENU_QUIT, s.menu_quit).build(app)?;
 
@@ -261,9 +266,10 @@ fn build_folders_submenu(app: &AppHandle, busy: bool) -> tauri::Result<Submenu<t
             MenuItemBuilder::with_id(format!("{FOLDER_REBUILD_PREFIX}{idx}"), s.rebuild_item)
                 .enabled(!busy)
                 .build(app)?;
-        let remove_item = MenuItemBuilder::with_id(format!("{FOLDER_REMOVE_PREFIX}{idx}"), s.remove_item)
-            .enabled(!busy)
-            .build(app)?;
+        let remove_item =
+            MenuItemBuilder::with_id(format!("{FOLDER_REMOVE_PREFIX}{idx}"), s.remove_item)
+                .enabled(!busy)
+                .build(app)?;
         let root_submenu = Submenu::with_items(app, label, true, &[&rebuild_item, &remove_item])?;
         items.push(Box::new(root_submenu));
     }
