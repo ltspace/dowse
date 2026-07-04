@@ -4,6 +4,8 @@
 	// 状态是会话级的（由父组件持有 $state，见 +page.svelte），这里只负责呈现
 	// 和点击回调，不落盘。
 
+	import { t } from '../i18n';
+
 	let { pinned, onclick }: { pinned: boolean; onclick: () => void } = $props();
 </script>
 
@@ -11,7 +13,7 @@
 	type="button"
 	class="pin"
 	class:pinned
-	title={pinned ? '取消固定（恢复失焦自动隐藏）' : '固定（失焦不再自动隐藏）'}
+	title={pinned ? t.pinUnpin : t.pin}
 	{onclick}
 >
 	<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">

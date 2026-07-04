@@ -5,24 +5,26 @@
 	// （+page.svelte 的 handleKeydown，浮层打开期间拦截所有按键）负责，
 	// 这里只处理鼠标点击。
 
+	import { t } from '../i18n';
+
 	type Row = { label: string; keys: string[] };
 
 	let { hotkey, onclose }: { hotkey: string; onclose: () => void } = $props();
 
 	let columns = $derived<[Row[], Row[]]>([
 		[
-			{ label: '呼出', keys: [hotkey] },
-			{ label: '隐藏', keys: ['Esc'] },
-			{ label: '导航', keys: ['↑', '↓'] },
-			{ label: '打开', keys: ['↵'] },
-			{ label: '跳转文件夹', keys: ['Ctrl', '↵'] }
+			{ label: t.soShow, keys: [hotkey] },
+			{ label: t.soHide, keys: ['Esc'] },
+			{ label: t.soNavigate, keys: ['↑', '↓'] },
+			{ label: t.soOpen, keys: ['↵'] },
+			{ label: t.soRevealFolder, keys: ['Ctrl', '↵'] }
 		],
 		[
-			{ label: '复制路径', keys: ['Ctrl', 'C'] },
-			{ label: '筛选类型', keys: ['Ctrl', 'P'] },
-			{ label: '排序', keys: ['Ctrl', 'S'] },
-			{ label: '固定', keys: ['Ctrl', 'D'] },
-			{ label: '速查', keys: ['Ctrl', '/'] }
+			{ label: t.soCopyPath, keys: ['Ctrl', 'C'] },
+			{ label: t.soFilterType, keys: ['Ctrl', 'P'] },
+			{ label: t.soSort, keys: ['Ctrl', 'S'] },
+			{ label: t.soPin, keys: ['Ctrl', 'D'] },
+			{ label: t.soCheatSheet, keys: ['Ctrl', '/'] }
 		]
 	]);
 </script>
@@ -32,9 +34,9 @@
      真实按钮元素的惯例，不用另外补键盘事件处理器：键盘那半由父组件在浮层
      打开期间拦截输入框的所有按键完成（搜索框全程持有焦点，见 +page.svelte
      的 handleKeydown），这个按钮只负责鼠标点击这一半。 -->
-<button type="button" class="scrim" onclick={onclose} aria-label="关闭快捷键速查（按任意键或点击）">
-	<div class="card" role="dialog" aria-modal="true" aria-label="快捷键速查">
-		<p class="card-title">快捷键</p>
+<button type="button" class="scrim" onclick={onclose} aria-label={t.soScrimLabel}>
+	<div class="card" role="dialog" aria-modal="true" aria-label={t.soDialogLabel}>
+		<p class="card-title">{t.soCardTitle}</p>
 		<div class="columns">
 			{#each columns as col, i (i)}
 				<ul class="col">
