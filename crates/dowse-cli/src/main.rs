@@ -69,7 +69,7 @@ fn main() -> Result<()> {
             // 这里再降频到每千个文件（是 50 的整数倍）打一行，避免大目录把
             // 终端刷屏。
             let stats = rebuild_index_with_progress(&index_dir()?, &dir, |progress| {
-                if progress.processed.is_multiple_of(1000) {
+                if progress.processed % 1000 == 0 {
                     println!("  已处理 {} 个文件…", progress.processed);
                 }
             })?;
