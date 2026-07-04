@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use dowse_core::{
-    IndexUpdater, NotifyEventSource, Searcher, WatchProgress, rebuild_index, registered_roots,
-    run_watch,
+    DEFAULT_WORKERS, IndexUpdater, NotifyEventSource, OcrPipeline, Searcher, WatchProgress,
+    drain_ocr_queue, rebuild_index, registered_roots, run_watch,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -70,6 +70,18 @@ fn main() -> Result<()> {
                 "完成: 收录 {} 个文件, 跳过 {} 个, 用时 {:.1}s",
                 stats.indexed, stats.skipped, stats.seconds
             );
+
+            // 文本先行可搜之后，紧接着把 OCR 队列同步跑完——`dowse index` 是一次性
+            // 命令，用户期望它退出时索引就是完整状态，而不是留一堆图片"回头再说"
+            // （常驻的托盘程序不需要这一步，图片交给后台 worker 池慢慢消化）。
+            let ocr_stats = drain_ocr_queue(&index_dir()?, DEFAULT_WORKERS)?;
+            if !ocr_stats.available {
+                println!(
+                    "未检测到可用的 OCR 语言包，跳过图片文字识别（截图/图片文字不会被索引）。"
+                );
+            } else if ocr_stats.processed > 0 {
+                println!("OCR 完成: 识别 {} 张图片", ocr_stats.processed);
+            }
         }
         Command::Search { query, limit } => {
             let query_str = query.join(" ");
@@ -150,6 +162,10 @@ fn watch(dir: Option<PathBuf>) -> Result<()> {
         .context("安装 Ctrl+C 处理器失败")?;
     }
 
+    // OCR 是独立的后台低优先级管线，跟文本监听并行跑，互不阻塞；没有可用语言包
+    // 时 start() 返回 None，打印一行提示，watch 主流程照常继续（不因此报错退出）。
+    let ocr_pipeline = OcrPipeline::start(updater.clone(), index.clone(), DEFAULT_WORKERS);
+
     run_watch(
         NotifyEventSource,
         &roots,
@@ -169,6 +185,10 @@ fn watch(dir: Option<PathBuf>) -> Result<()> {
             }
         },
     )?;
+
+    if let Some(pipeline) = ocr_pipeline {
+        pipeline.stop();
+    }
 
     println!("监听已停止。");
     Ok(())
