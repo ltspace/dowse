@@ -6,7 +6,15 @@
 	import { animate } from 'motion';
 
 	import * as api from '$lib/api';
-	import type { EffectLevel, ExtGroup, GlassAlpha, SearchHit, SortOption, TextSegment } from '$lib/types';
+	import type {
+		EffectLevel,
+		ExtGroup,
+		GlassAlpha,
+		IndexProgress,
+		SearchHit,
+		SortOption,
+		TextSegment
+	} from '$lib/types';
 	import ResultList from '$lib/components/ResultList.svelte';
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
 	import ShortcutBar from '$lib/components/ShortcutBar.svelte';
@@ -39,6 +47,16 @@
 	let rebuildState = $state<'idle' | 'rebuilding' | 'error'>('idle');
 	let rebuildError = $state('');
 	let toast = $state('');
+
+	// 建索引"实时直播"：processed/currentFile 在整个重建期间随
+	// dowse://rebuild-progress 事件滚动更新；report 只在重建成功的那一刻
+	// 赋值，浮窗拿它替换掉实时计数、停留片刻后再收回引导层（见
+	// pickDirectoryAndRebuild）。
+	let indexingProcessed = $state(0);
+	let indexingCurrentFile = $state('');
+	let indexingReport = $state<{ indexed: number; seconds: number; ocrPending: number } | null>(
+		null
+	);
 
 	let extGroup = $state<ExtGroup>('all');
 	let sortOption = $state<SortOption>('relevance');
@@ -145,12 +163,22 @@
 		if (!dir || Array.isArray(dir)) return;
 
 		rebuildState = 'rebuilding';
+		indexingProcessed = 0;
+		indexingCurrentFile = '';
+		indexingReport = null;
 		try {
 			const stats = await api.rebuildIndex(dir);
-			rebuildState = 'idle';
 			hasIndex = true;
-			showToast(`索引建立完成，收录 ${stats.indexed} 个文件。`);
 			refreshIndexStatus();
+			// 冷报告替换掉实时计数，停留片刻后收回整个引导层——用户看得见
+			// "完成了"，不需要再点一下才能回到搜索态。
+			const report = { indexed: stats.indexed, seconds: stats.seconds, ocrPending: stats.ocr_pending };
+			indexingReport = report;
+			setTimeout(() => {
+				if (indexingReport !== report) return;
+				rebuildState = 'idle';
+				indexingReport = null;
+			}, 1800);
 		} catch (err) {
 			rebuildState = 'error';
 			rebuildError = String(err);
@@ -369,6 +397,12 @@
 		const unlistenRebuildError = listen<string>('dowse://rebuild-error', (evt) => {
 			showToast(`索引重建失败：${evt.payload}`);
 		});
+		// 建索引"实时直播"：全程监听，不只在 rebuildState === 'rebuilding' 时才挂——
+		// 事件只在 rebuild_index 命令执行期间才会发出，不重建时这个监听器闲置无害。
+		const unlistenRebuildProgress = listen<IndexProgress>('dowse://rebuild-progress', (evt) => {
+			indexingProcessed = evt.payload.processed;
+			indexingCurrentFile = evt.payload.path;
+		});
 
 		return () => {
 			document.removeEventListener('click', handleDocumentClick);
@@ -377,6 +411,7 @@
 			unlistenGlassAlpha.then((f) => f());
 			unlistenRebuildDone.then((f) => f());
 			unlistenRebuildError.then((f) => f());
+			unlistenRebuildProgress.then((f) => f());
 		};
 	});
 </script>
@@ -438,6 +473,9 @@
 				{query}
 				{numDocs}
 				errorMessage={rebuildError}
+				{indexingProcessed}
+				{indexingCurrentFile}
+				{indexingReport}
 				onpick={pickDirectoryAndRebuild}
 			/>
 		{:else}

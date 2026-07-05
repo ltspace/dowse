@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::autohide::AutoHideSuppressor;
@@ -37,6 +37,19 @@ pub struct IndexStatsDto {
     pub indexed: usize,
     pub skipped: usize,
     pub seconds: f64,
+    /// 建索引期间发现、还没识别完的图片数——OCR 是独立的后台低优先级管线，
+    /// 全量重建结束时这些图片大概率还在排队，浮窗拿这个数补一行"另有 N 张
+    /// 图片在后台识别"的小字，不让用户误以为索引没做完。
+    pub ocr_pending: usize,
+}
+
+/// 全量重建索引期间的一次进度汇报，经 `dowse://rebuild-progress` 事件推给前端。
+/// 对应 dowse-core 的 `IndexProgress`，path 这里已经转成剥过 `\\?\` 前缀的
+/// 展示用字符串——前端只拿它当一行流过的文字，不会拿去做文件操作。
+#[derive(Serialize, Clone)]
+pub struct IndexProgressDto {
+    pub processed: usize,
+    pub path: String,
 }
 
 #[derive(Serialize)]
@@ -192,8 +205,13 @@ pub fn reveal_in_folder(_path: String) -> Result<(), String> {
 
 /// 全量重建索引。目标目录来自前端的目录选择器（或托盘"重建索引"复用上次的目录）。
 /// 成功后把新的 Searcher 换进常驻状态，并把目录记进配置，供托盘复用。
+///
+/// 建索引期间通过 `dowse://rebuild-progress` 事件把进度实时推给前端（浮窗的
+/// "实时直播"效果），频率由 dowse-core 的 `PROGRESS_INTERVAL` 控制，这里
+/// 原样转发，不再额外节流。
 #[tauri::command]
 pub fn rebuild_index(
+    app: tauri::AppHandle,
     search: State<SearchState>,
     config: State<ConfigState>,
     watch: State<WatchController>,
@@ -209,7 +227,20 @@ pub fn rebuild_index(
     // 重建前先停监听：放掉旧索引的写锁和文件句柄，否则 Windows 删不掉旧索引目录。
     watch.stop();
 
-    let stats = dowse_core::rebuild_index(&index_dir, &target).map_err(|e| e.to_string())?;
+    let stats = dowse_core::rebuild_index_with_progress(&index_dir, &target, |progress| {
+        let _ = app.emit(
+            "dowse://rebuild-progress",
+            IndexProgressDto {
+                processed: progress.processed,
+                path: dowse_core::display_path(&progress.path.to_string_lossy()),
+            },
+        );
+    })
+    .map_err(|e| e.to_string())?;
+
+    // 在 watch.start 挪走 index_dir 之前先问一次 OCR 队列——两者用的是同一个
+    // index_dir，问完这次调用就不再需要它了。
+    let ocr_pending = dowse_core::OcrQueue::for_index_dir(&index_dir).pending_len();
 
     let new_searcher = dowse_core::Searcher::open(&index_dir).map_err(|e| e.to_string())?;
     search.replace(new_searcher);
@@ -222,6 +253,7 @@ pub fn rebuild_index(
         indexed: stats.indexed,
         skipped: stats.skipped,
         seconds: stats.seconds,
+        ocr_pending,
     })
 }
 

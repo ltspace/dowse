@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use dowse_core::{
     DEFAULT_WORKERS, IndexUpdater, NotifyEventSource, OcrPipeline, Searcher, WatchProgress,
-    drain_ocr_queue, rebuild_index, registered_roots, run_watch,
+    drain_ocr_queue, rebuild_index_with_progress, registered_roots, run_watch,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -65,7 +65,14 @@ fn main() -> Result<()> {
         Command::Index { dir } => {
             let dir = dir.canonicalize().context("目标目录不存在")?;
             println!("索引目标: {}", dir.display());
-            let stats = rebuild_index(&index_dir()?, &dir)?;
+            // 核心层已经把回调频率降到每 PROGRESS_INTERVAL(50) 个文件一次，
+            // 这里再降频到每千个文件（是 50 的整数倍）打一行，避免大目录把
+            // 终端刷屏。
+            let stats = rebuild_index_with_progress(&index_dir()?, &dir, |progress| {
+                if progress.processed.is_multiple_of(1000) {
+                    println!("  已处理 {} 个文件…", progress.processed);
+                }
+            })?;
             println!(
                 "完成: 收录 {} 个文件, 跳过 {} 个, 用时 {:.1}s",
                 stats.indexed, stats.skipped, stats.seconds

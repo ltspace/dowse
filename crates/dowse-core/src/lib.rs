@@ -14,7 +14,9 @@ mod watch;
 
 pub use events::{Debouncer, PendingChange, PendingOp, QUIET_WINDOW_MS, WATER_LEVEL, WatchEvent};
 pub use ext_groups::by_name as ext_group_by_name;
-pub use indexer::{IndexStats, rebuild_index};
+pub use indexer::{
+    IndexProgress, IndexStats, PROGRESS_INTERVAL, rebuild_index, rebuild_index_with_progress,
+};
 pub use meta::registered_roots;
 pub use ocr::is_available;
 pub use ocr_queue::OcrQueue;
