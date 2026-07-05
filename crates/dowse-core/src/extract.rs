@@ -166,7 +166,10 @@ fn extract_tagged_text(xml: &[u8], text_tag: &[u8], para_tag: Option<&[u8]>) -> 
                 }
             }
             Ok(Event::Text(t)) => {
-                if in_text && let Ok(unescaped) = t.unescape() {
+                if in_text
+                    && let Ok(decoded) = t.decode()
+                    && let Ok(unescaped) = quick_xml::escape::unescape(&decoded)
+                {
                     out.push_str(&unescaped);
                 }
             }

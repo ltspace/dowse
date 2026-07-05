@@ -17,13 +17,13 @@ chardetng = "1.0.0"
 encoding_rs = "0.8.35"
 notify = "8.2.0"
 pdf-extract = "0.12.0"
-quick-xml = "0.37.5"
+quick-xml = "0.41.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tantivy = "0.26.1"
 tantivy-jieba = "0.20.0"
 walkdir = "2.5.0"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
@@ -38,4 +38,4 @@ tempfile = "3.27.0"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Media_Ocr", "Graphics_Imaging", "Storage", "Storage_Streams", "Foundation", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Ioctl", "Win32_System_IO", "Win32_Security"] }
 windows-future = "0.3"
-pollster = "0.4"
+pollster = "1.0.1"
