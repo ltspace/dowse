@@ -84,6 +84,16 @@ pub fn get_glass_alpha(config: State<ConfigState>) -> GlassAlpha {
     config.get().transparency_tier.glass_alpha()
 }
 
+/// 快捷键速查浮层（Ctrl+/）要显示"呼出"这一行实际绑定的全局快捷键，而不是
+/// 硬编码默认值——`hotkey` 目前只能手改配置文件，真改过的话浮层不该继续
+/// 显示旧的默认值。原样返回 `tauri-plugin-global-shortcut` 认的格式化字符串
+/// （如 "Alt+Backquote"），人类可读的转换（Backquote -> `）交给前端做，
+/// 跟其它 DTO 一样"Rust 只管传值，展示格式前端定"。
+#[tauri::command]
+pub fn get_hotkey(config: State<ConfigState>) -> String {
+    config.get().hotkey
+}
+
 /// 前端打开浮窗/挂载时调用一次，用来决定空输入/无索引/有索引三种引导状态。
 #[tauri::command]
 pub fn index_status(search: State<SearchState>, config: State<ConfigState>) -> IndexStatusDto {
