@@ -246,7 +246,7 @@ mod platform {
                 RootCapability::Fast { volume }
             }
             Err(err) => RootCapability::Fallback {
-                reason: format!("打开卷句柄失败（非管理员权限）: {err}"),
+                reason: format!("未获管理员权限，该卷改用通用索引方式，功能不受影响: {err}"),
             },
         }
     }
