@@ -1,8 +1,12 @@
+mod cursor;
 mod events;
 mod ext_groups;
 mod extract;
+mod frn_table;
 mod indexer;
 mod meta;
+#[cfg(windows)]
+mod mft;
 mod ocr;
 mod ocr_queue;
 mod ocr_worker;
@@ -10,6 +14,10 @@ mod reconcile;
 mod searcher;
 mod status;
 mod updater;
+#[cfg(windows)]
+mod usn;
+mod usn_translate;
+mod volume;
 mod watch;
 
 pub use events::{Debouncer, PendingChange, PendingOp, QUIET_WINDOW_MS, WATER_LEVEL, WatchEvent};
@@ -27,7 +35,10 @@ pub use reconcile::{ReconcileStats, reconcile};
 pub use searcher::{PreviewHit, SearchHit, Searcher, SortMode};
 pub use status::{IndexStatus, index_status};
 pub use updater::{BatchOutcome, IndexUpdater};
-pub use watch::{EventSource, NotifyEventSource, WatchGuard, WatchProgress, run_watch};
+pub use volume::ntfs_fast_path_available;
+pub use watch::{
+    EventSource, NotifyEventSource, WatchGuard, WatchProgress, run_watch, watch_roots_auto,
+};
 
 use tantivy::schema::{
     FAST, IndexRecordOption, STORED, STRING, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,

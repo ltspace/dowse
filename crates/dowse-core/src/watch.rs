@@ -261,3 +261,110 @@ fn flush_batch(
         }
     }
 }
+
+/// 按卷判定自动选监听路径的入口（里程碑 6）：每个根探测 NTFS + 管理员权限，
+/// 拿得到就走 MFT/USN 快车道，拿不到就走现有的 walkdir + notify 慢车道
+/// （设计文档第一节）。CLI 的 `dowse watch` 和托盘常驻程序的监听线程都应该
+/// 调这个函数替代直接调 `run_watch(NotifyEventSource, ...)`——这是"上层
+/// 完全不用感知快慢车道差别"在代码上的落地：调用方只需要把原来的
+/// `run_watch(NotifyEventSource, &roots, ...)` 换成
+/// `watch_roots_auto(index_dir, &roots, ...)`，其余逻辑不用动。
+///
+/// 一台机器可能同时有走得快的盘和走不了快车道的盘（比如 C 盘有管理员权限、
+/// U 盘是 FAT32），两条车道会分别起监听、共用同一个 `updater`/`stop`。
+/// 只有慢车道（最常见：非管理员运行）时完全复用里程碑 3 的老路径，
+/// 不引入任何新线程/新开销。
+///
+/// `on_progress` 要求 `Fn`（不是 `FnMut`）+ `Send + Sync`：混合车道场景下
+/// 快慢两条车道各自在自己的线程里调用它，需要能从多个线程并发调用。
+pub fn watch_roots_auto(
+    index_dir: &Path,
+    roots: &[PathBuf],
+    updater: Arc<Mutex<IndexUpdater>>,
+    stop: Arc<AtomicBool>,
+    on_progress: impl Fn(WatchProgress) + Send + Sync + 'static,
+) -> Result<()> {
+    let mut fast_roots = Vec::new();
+    let mut slow_roots = Vec::new();
+    for root in roots {
+        match crate::volume::probe_root_capability(root) {
+            crate::volume::RootCapability::Fast { .. } => fast_roots.push(root.clone()),
+            crate::volume::RootCapability::Fallback { .. } => slow_roots.push(root.clone()),
+        }
+    }
+
+    #[cfg(windows)]
+    let volume_starts = if fast_roots.is_empty() {
+        None
+    } else {
+        match crate::usn::bootstrap_fast_roots(index_dir, &fast_roots, &updater) {
+            Ok(starts) => Some(starts),
+            Err(err) => {
+                // 诚实降级不只是"探测阶段没权限就走慢车道"：真正 bootstrap
+                // 时才暴露的问题（比如探测和 bootstrap 之间权限被收回）
+                // 也不该让整个监听起不来——把这些根并入慢车道，这次运行
+                // 整体退回 walkdir + notify，下次启动再重新探测。
+                eprintln!("快速路径初始化失败，本次运行整体退回 walkdir + notify: {err}");
+                slow_roots.append(&mut fast_roots);
+                None
+            }
+        }
+    };
+    #[cfg(not(windows))]
+    let volume_starts: Option<()> = None;
+
+    if fast_roots.is_empty() || volume_starts.is_none() {
+        for root in &slow_roots {
+            let mut guard = updater.lock().expect("updater mutex poisoned");
+            if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {
+                eprintln!("启动对账 {} 失败: {err}", root.display());
+            }
+        }
+        return run_watch(NotifyEventSource, &slow_roots, updater, stop, move |p| {
+            on_progress(p)
+        });
+    }
+
+    #[cfg(windows)]
+    {
+        let on_progress = Arc::new(on_progress);
+        let slow_handle = if slow_roots.is_empty() {
+            None
+        } else {
+            let slow_roots = slow_roots.clone();
+            let updater = updater.clone();
+            let stop = stop.clone();
+            let on_progress = on_progress.clone();
+            Some(std::thread::spawn(move || {
+                for root in &slow_roots {
+                    let mut guard = updater.lock().expect("updater mutex poisoned");
+                    if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {
+                        eprintln!("启动对账 {} 失败: {err}", root.display());
+                    }
+                }
+                let on_progress = on_progress.clone();
+                if let Err(err) =
+                    run_watch(NotifyEventSource, &slow_roots, updater, stop, move |p| {
+                        on_progress(p)
+                    })
+                {
+                    eprintln!("慢车道监听退出: {err}");
+                }
+            }))
+        };
+
+        let result = crate::usn::run_fast_lane(
+            index_dir,
+            &fast_roots,
+            volume_starts.expect("上面已经判空"),
+            updater,
+            stop,
+            on_progress,
+        );
+
+        if let Some(handle) = slow_handle {
+            let _ = handle.join();
+        }
+        result
+    }
+}
