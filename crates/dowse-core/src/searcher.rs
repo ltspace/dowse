@@ -489,6 +489,171 @@ mod tests {
     }
 
     #[test]
+    fn search_is_case_insensitive_for_latin() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("api.md"), "API design notes")?;
+        std::fs::write(target_dir.path().join("fs.md"), "File system layout")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        for (query, expected) in [
+            ("api", "api.md"),
+            ("API", "api.md"),
+            ("file", "fs.md"),
+            ("FILE", "fs.md"),
+        ] {
+            let hits = searcher.search(query, 10)?;
+            assert_eq!(hits.len(), 1, "查询 {query:?} 应命中一篇");
+            assert!(
+                hits[0].path.ends_with(expected),
+                "查询 {query:?} 应命中 {expected}，实际 {:?}",
+                hits[0].path
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn search_hyphenated_string_matches_subwords() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("covid.md"), "covid-19 vaccine")?;
+        std::fs::write(
+            target_dir.path().join("marker.md"),
+            "glimmerfrost-9931-unique-marker",
+        )?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        for (query, expected) in [
+            ("covid", "covid.md"),
+            ("19", "covid.md"),
+            ("glimmerfrost", "marker.md"),
+            ("9931", "marker.md"),
+            ("marker", "marker.md"),
+        ] {
+            let hits = searcher.search(query, 10)?;
+            assert!(
+                hits.iter().any(|h| h.path.ends_with(expected)),
+                "子词查询 {query:?} 应命中 {expected}，实际 {:?}",
+                hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+            );
+        }
+
+        // 整串查询：AND 语义下所有子词都在同一篇，应该命中。
+        let full = searcher.search("glimmerfrost-9931-unique-marker", 10)?;
+        assert!(
+            full.iter().any(|h| h.path.ends_with("marker.md")),
+            "整串查询应命中 marker.md，实际 {:?}",
+            full.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn search_mixed_cjk_latin_document() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(
+            target_dir.path().join("mixed.md"),
+            "用 GPT-4 写的 covid-19 报告",
+        )?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        for query in ["gpt", "covid", "报告"] {
+            let hits = searcher.search(query, 10)?;
+            assert!(
+                hits.iter().any(|h| h.path.ends_with("mixed.md")),
+                "混合文档查询 {query:?} 应命中 mixed.md，实际 {:?}",
+                hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn search_mixed_document_highlight_ranges_are_valid() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(
+            target_dir.path().join("mixed.md"),
+            "这是一份关于 glimmerfrost-9931 的中文说明，包含 API 设计与 covid-19 数据。",
+        )?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        let hits = searcher.search("glimmerfrost", 10)?;
+        assert_eq!(hits.len(), 1);
+        let hit = &hits[0];
+        assert!(!hit.highlighted.is_empty(), "命中词应该被标记出来");
+        for w in hit.highlighted.windows(2) {
+            assert!(w[0].end <= w[1].start, "区间应互不重叠且按起点排序");
+        }
+        for r in &hit.highlighted {
+            assert!(r.start <= r.end);
+            assert!(r.end <= hit.snippet.len());
+            // 切片不 panic，且切出来的确实是原查询子串（小写归一后一致）。
+            assert!(hit.snippet.is_char_boundary(r.start));
+            assert!(hit.snippet.is_char_boundary(r.end));
+            assert_eq!(hit.snippet[r.start..r.end].to_lowercase(), "glimmerfrost");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn phrase_query_matches_adjacent_terms_under_sequential_positions() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(
+            target_dir.path().join("marker.md"),
+            "glimmerfrost-9931-unique-marker",
+        )?;
+        std::fs::write(
+            target_dir.path().join("cn.md"),
+            "系统采用分布式限流器保护后端服务。",
+        )?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        // 英文短语：unique 和 marker 在新的顺序 position 方案下相邻，短语应命中。
+        let phrase = searcher.search("\"unique marker\"", 10)?;
+        assert!(
+            phrase.iter().any(|h| h.path.ends_with("marker.md")),
+            "短语 \"unique marker\" 应命中 marker.md，实际 {:?}",
+            phrase.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+
+        // 顺序打乱的短语不应命中（验证短语确实按相邻位置匹配，不是退化成 OR）。
+        let reversed = searcher.search("\"marker unique\"", 10)?;
+        assert!(
+            !reversed.iter().any(|h| h.path.ends_with("marker.md")),
+            "词序颠倒的短语不该命中，实际 {:?}",
+            reversed.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+
+        // 中文短语：证明短语语法对 jieba 段照样解析并匹配。
+        let cn = searcher.search("\"分布式\"", 10)?;
+        assert!(
+            cn.iter().any(|h| h.path.ends_with("cn.md")),
+            "中文短语应命中 cn.md，实际 {:?}",
+            cn.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn search_multi_word_query_defaults_to_and() -> Result<()> {
         let index_dir = tempfile::tempdir()?;
         let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
