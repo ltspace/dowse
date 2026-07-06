@@ -48,8 +48,10 @@ enum Command {
 
 /// 索引统一放在 %LOCALAPPDATA%\dowse\index，跟被索引的目录无关。
 ///
-/// `DOWSE_INDEX_DIR` 环境变量可以覆盖这个位置——只给集成测试用，好让子进程指向
-/// 一个临时索引而不是碰用户机器上真的那份；正常使用不应该设这个变量。
+/// `DOWSE_INDEX_DIR` 环境变量可以覆盖这个位置：集成测试（tests/mcp_integration.rs）
+/// 靠它把子进程指向一个临时索引，不碰用户机器上真的那份。这是只给测试/CI 基础设施
+/// 用的内部逃生舱，不是产品对外配置项——正常使用不该设它，也因此刻意不写进 `--help`，
+/// 免得被当成稳定接口来承诺。
 fn index_dir() -> Result<PathBuf> {
     if let Ok(dir) = std::env::var("DOWSE_INDEX_DIR") {
         return Ok(PathBuf::from(dir));
