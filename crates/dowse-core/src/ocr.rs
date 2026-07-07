@@ -108,15 +108,11 @@ mod engine_impl {
     /// 路径太长，是 WinRT 的路径解析根本不接受这种 Win32 扩展前缀语法。真机验证
     /// 时用 `dowse index` 建索引直接踩中了这个坑（三张图全部识别失败），这里剥掉
     /// 前缀、退回普通 Win32 路径语法再喂给它。
+    ///
+    /// 剥前缀的规则跟 `lib.rs::display_path` 完全一样（那边是给展示层用），
+    /// 这里直接委托过去，不重复一份同样的字符串处理逻辑。
     fn strip_extended_prefix(path: &Path) -> PathBuf {
-        let s = path.to_string_lossy();
-        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-            return PathBuf::from(format!(r"\\{rest}"));
-        }
-        if let Some(rest) = s.strip_prefix(r"\\?\") {
-            return PathBuf::from(rest);
-        }
-        path.to_path_buf()
+        PathBuf::from(crate::display_path(&path.to_string_lossy()))
     }
 
     fn load_software_bitmap(path: &Path) -> windows::core::Result<SoftwareBitmap> {
