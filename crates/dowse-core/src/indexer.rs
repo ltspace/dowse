@@ -343,6 +343,11 @@ pub fn rebuild_index_with_progress(
 
     let ocr_queue = OcrQueue::for_index_dir(index_dir);
 
+    // 全量重建的目标只有这一个根：把队列里不属于这个根、或者对应文件已经
+    // 不在磁盘上的历史条目裁掉，再落盘——不然进程级单例把旧目标目录的陈年
+    // pending/processed 全量存回，只增不减、永久堆积。
+    ocr_queue.compact(&[target_dir.to_path_buf()]);
+
     // 索引提交尾部的耐久性顺序不变量：先把 OCR 队列落盘，再提交 tantivy 写入。
     // 顺序反过来的话，进程恰好在两步之间崩溃时，索引里已经落地的图片占位
     // 文档（mtime/size 已经写对）会让下次启动对账判定"没有变化"，而队列里

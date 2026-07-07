@@ -126,6 +126,23 @@ impl OcrQueue {
         let state = self.state.lock().expect("ocr queue mutex poisoned");
         save_state(&self.index_dir, &state)
     }
+
+    /// 按当前扫描根裁剪队列：不落在 `roots` 任一根之下、或者对应文件已经不在
+    /// 磁盘上的 pending/processed 条目一律丢弃。
+    ///
+    /// 这个队列是进程级单例（见 [`Self::for_index_dir`]），rebuild_index 每次
+    /// 全量重建时会把内存里已有的历史条目原样存回——如果目标目录换过、或者
+    /// 有文件在两次重建之间被删掉，这些条目没有任何清理路径，只增不减、永久
+    /// 堆积。rebuild_index 在最终落盘前调用这个方法压实一次。
+    pub fn compact(&self, roots: &[PathBuf]) {
+        let mut state = self.state.lock().expect("ocr queue mutex poisoned");
+        let keep = |key: &String| -> bool {
+            let path = Path::new(key);
+            roots.iter().any(|r| path.starts_with(r)) && path.exists()
+        };
+        state.pending.retain(|key, _| keep(key));
+        state.processed.retain(|key, _| keep(key));
+    }
 }
 
 fn queue_path(index_dir: &Path) -> PathBuf {
@@ -257,6 +274,75 @@ mod tests {
             reloaded.processed.len(),
             1,
             "已处理的那张应该被记住，重启不会重新识别"
+        );
+    }
+
+    /// compact 应该只留下"落在给定根之下、且文件仍在磁盘上"的 pending 条目——
+    /// 换过目标目录（root 之外）、或者文件已经被删掉的历史条目都该丢弃。
+    #[test]
+    fn compact_drops_pending_outside_roots_and_missing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let index_dir = dir.path().join("index");
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let kept = root.join("kept.png");
+        std::fs::write(&kept, b"x").unwrap();
+        let gone = root.join("gone.png");
+        std::fs::write(&gone, b"x").unwrap();
+        let outside = dir.path().join("outside.png");
+        std::fs::write(&outside, b"x").unwrap();
+
+        let queue = OcrQueue::for_index_dir(&index_dir);
+        queue.enqueue(kept.clone(), 1, 2);
+        queue.enqueue(gone.clone(), 1, 2);
+        queue.enqueue(outside.clone(), 1, 2);
+        std::fs::remove_file(&gone).unwrap(); // 模拟"文件已删"
+
+        queue.compact(&[root.clone()]);
+
+        assert_eq!(
+            queue.pending_len(),
+            1,
+            "只应保留 root 下、文件仍存在的 kept 一条"
+        );
+    }
+
+    /// 同上，但针对已处理结果缓存（processed）：换目标目录/文件已删的旧
+    /// 识别结果缓存也该被裁掉，不能永久占着。
+    #[test]
+    fn compact_drops_processed_cache_outside_roots_and_missing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let index_dir = dir.path().join("index");
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let kept = root.join("kept.png");
+        std::fs::write(&kept, b"x").unwrap();
+        let gone = root.join("gone.png");
+        std::fs::write(&gone, b"x").unwrap();
+        let outside = dir.path().join("outside.png");
+        std::fs::write(&outside, b"x").unwrap();
+
+        let queue = OcrQueue::for_index_dir(&index_dir);
+        queue.mark_processed(kept.clone(), 1, 2, "内容".to_string());
+        queue.mark_processed(gone.clone(), 1, 2, "内容".to_string());
+        queue.mark_processed(outside.clone(), 1, 2, "内容".to_string());
+        std::fs::remove_file(&gone).unwrap();
+
+        queue.compact(&[root.clone()]);
+
+        assert!(
+            queue.cached_content(&kept, 1, 2).is_some(),
+            "root 下且文件仍在应保留缓存"
+        );
+        assert!(
+            queue.cached_content(&gone, 1, 2).is_none(),
+            "文件已删应丢弃缓存"
+        );
+        assert!(
+            queue.cached_content(&outside, 1, 2).is_none(),
+            "root 之外应丢弃缓存"
         );
     }
 }
