@@ -14,6 +14,7 @@ mod reconcile;
 mod roots;
 mod searcher;
 mod status;
+mod tokenizer;
 mod updater;
 #[cfg(windows)]
 mod usn;
@@ -97,7 +98,7 @@ pub(crate) fn build_schema() -> (Schema, Fields) {
 pub(crate) fn register_tokenizers(index: &tantivy::Index) {
     index
         .tokenizers()
-        .register("jieba", tantivy_jieba::JiebaTokenizer::new());
+        .register("jieba", tokenizer::MixedTokenizer::new());
 }
 
 /// 剥掉 Windows 扩展长度路径语法（`\\?\`/`\\?\UNC\`）的前缀，只给**展示层**用。
