@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Text is now tokenized by script: CJK runs go to jieba, Latin/digit runs split
+  on alphanumeric boundaries, and every token is lowercased. Searches are now
+  case-insensitive (`api` matches `API`), and hyphenated or mixed terms are
+  found by their parts (`covid`, `19`, and `covid-19` all match `covid-19`).
+  Token positions are sequential, which makes quoted phrase queries more
+  accurate. Chinese segmentation is unchanged.
+- The index schema is now version 4. Existing indexes must be rebuilt once
+  after upgrading; opening an older index reports a clear error asking for a
+  rebuild.
+
 ## [0.6.1] - 2026-06-25
 
 ### Added
