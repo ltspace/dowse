@@ -16,6 +16,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+mod common;
+
 // 纯小写字母数字、不含分隔符——跟 searcher.rs 测试里 "zzzsentinelprobe888" 同一个
 // 套路：jieba 分词器会把这样一整串 ASCII 当成单个 token，搜索时不用担心被切碎。
 //
@@ -111,6 +113,10 @@ fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
     let text_hits = searcher.search("普通文本文件", 10)?;
     assert!(!text_hits.is_empty(), "文本文件的索引不应该被 OCR 分支影响");
 
+    // 显式 drop 掉持有索引句柄的 Searcher，再走重试退避删临时目录。
+    drop(searcher);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target_dir);
     Ok(())
 }
 
@@ -154,5 +160,9 @@ fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
         let hits = searcher.search(&format!("{SENTINEL}x{i}"), 10)?;
         assert!(!hits.is_empty(), "第 {i} 张图片的哨兵词应该能搜到");
     }
+
+    drop(searcher);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target_dir);
     Ok(())
 }

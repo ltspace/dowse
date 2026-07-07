@@ -6,6 +6,8 @@ use std::path::Path;
 use anyhow::Result;
 use dowse_core::{IndexUpdater, ReconcileStats, Searcher, rebuild_index, reconcile};
 
+mod common;
+
 fn target_dir() -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix("dowse-rec-")
@@ -77,6 +79,13 @@ fn reconcile_catches_offline_add_modify_delete() -> Result<()> {
         1,
         "未变文件照常可搜"
     );
+
+    // 显式 drop 掉持有索引写入端句柄的 updater，再走重试退避删临时目录——
+    // Windows 下 tantivy 合并线程释放句柄有滞后，直接让 TempDir 隐式 drop
+    // 偶尔会 flaky（PermissionDenied）。
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
 
@@ -95,5 +104,9 @@ fn reconcile_on_unchanged_index_is_a_noop() -> Result<()> {
 
     assert_eq!(count_hits(index_dir.path(), "elderberry"), 1);
     assert_eq!(count_hits(index_dir.path(), "fig"), 1);
+
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }

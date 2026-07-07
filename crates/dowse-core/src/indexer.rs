@@ -38,6 +38,39 @@ pub struct IndexProgress {
 /// 这些目录整棵跳过：要么是依赖/构建产物，要么是仓库内部数据。
 const SKIP_DIRS: &[&str] = &["node_modules", "target", ".git", ".venv", "__pycache__"];
 
+/// `remove_dir_all` 撞上 `PermissionDenied` 时的重试次数上限（首次尝试之外
+/// 还会再试这么多次）。
+const REMOVE_DIR_ALL_RETRIES: u32 = 4;
+/// 重试的起始等待时长，按 2 倍指数退避递增（50ms、100ms、200ms、400ms）。
+const REMOVE_DIR_ALL_RETRY_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// 删整个目录，撞上 `PermissionDenied` 时按指数退避重试几次再放弃。
+///
+/// Windows 下删索引目录是 flaky 测试和生产 rebuild 共同的根因：tantivy 的
+/// mmap/合并线程、notify 的目录句柄、OCR worker 释放句柄都不一定跟"调用方
+/// 认为已经用完了"这个时间点同步——句柄晚释放几十毫秒很常见。标准库的
+/// `remove_dir_all` 只试一次，撞上未释放的句柄就直接报错；这里给它一点
+/// 时间让句柄自然释放，仍然只在 `PermissionDenied` 上重试，别的错误
+/// （目录本来就不存在等）照常直接透传，不掩盖真实故障。
+pub fn remove_dir_all_retrying(path: &Path) -> std::io::Result<()> {
+    let mut delay = REMOVE_DIR_ALL_RETRY_BASE_DELAY;
+    for attempt in 1..=REMOVE_DIR_ALL_RETRIES {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!(
+                    "删除目录 {} 遇到句柄未释放（第 {attempt}/{REMOVE_DIR_ALL_RETRIES} 次重试前等待 {delay:?}）: {err}",
+                    path.display()
+                );
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    std::fs::remove_dir_all(path)
+}
+
 /// 遍历 root 下所有该收录的文件路径，统一应用跳过规则（依赖/构建产物目录、
 /// 隐藏目录）。全量重建、启动对账、监听时目录整体移入都共用这一处遍历逻辑，
 /// 保证三条路径"哪些文件算数"的判断完全一致。
@@ -234,6 +267,26 @@ pub(crate) fn add_image_document_with_content(
     Ok(())
 }
 
+/// 索引提交尾部的顺序不变量：**先**把 OCR 队列状态落盘，**后**提交 tantivy 的
+/// 索引写入。全量重建（本文件）和增量更新批处理尾部（`updater.rs::apply`）
+/// 都通过这一个函数收尾，顺序只需要在这一处锁死——两个调用方各自决定"要不要
+/// 存 OCR 队列"（`save_ocr_queue` 传空操作即可跳过），但只要传了非空操作，
+/// 它必须先于 `commit_writer` 执行完。
+///
+/// 为什么方向不能反：图片文档一入索引就带着正确的 (mtime,size)（哪怕内容还是
+/// 占位的空字符串），如果先 commit 再存队列，进程恰好在两步之间崩溃时，索引
+/// 里已经落地的占位文档会让下次启动对账判定"这张图片没有变化"，而队列里记着
+/// 的"这张图片还没识别"却没能持久化——这张图片的文字就永远进不了索引。反过来，
+/// 队列先落盘、索引后提交：崩溃后最坏情况是重复识别一张已经处理过的 pending
+/// 图片，幂等无害。
+pub(crate) fn commit_index_tail(
+    save_ocr_queue: impl FnOnce() -> Result<()>,
+    commit_writer: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    save_ocr_queue()?;
+    commit_writer()
+}
+
 /// v0 策略：全量重建。删掉旧索引目录，从头扫一遍。
 /// 增量更新是里程碑 3 的事，现在先把"能搜"跑通。
 ///
@@ -254,7 +307,7 @@ pub fn rebuild_index_with_progress(
     let start = Instant::now();
 
     if index_dir.exists() {
-        std::fs::remove_dir_all(index_dir).context("清理旧索引目录失败")?;
+        remove_dir_all_retrying(index_dir).context("清理旧索引目录失败")?;
     }
     std::fs::create_dir_all(index_dir)?;
 
@@ -288,8 +341,30 @@ pub fn rebuild_index_with_progress(
         }
     }
 
-    // commit 才是真正落盘的时刻；之前 add_document 都只进内存缓冲
-    writer.commit().context("索引提交失败")?;
+    let ocr_queue = OcrQueue::for_index_dir(index_dir);
+
+    // 索引提交尾部的耐久性顺序不变量：先把 OCR 队列落盘，再提交 tantivy 写入。
+    // 顺序反过来的话，进程恰好在两步之间崩溃时，索引里已经落地的图片占位
+    // 文档（mtime/size 已经写对）会让下次启动对账判定"没有变化"，而队列里
+    // 记着的待处理状态却没能持久化——这张图片的文字就永远进不了索引。
+    // 重复识别一张 pending 图片是幂等无害的，方向反过来才会丢数据，见
+    // `commit_index_tail` 的文档。
+    commit_index_tail(
+        || {
+            ocr_queue
+                .save()
+                .context("保存 OCR 队列状态失败")
+        },
+        || writer.commit().map(|_| ()).context("索引提交失败"),
+    )?;
+
+    // 合流线程的句柄要在这里 join 掉：commit 只是把变更写进段文件，后台
+    // 合并线程可能还在跑，不等它们退出，段文件的 mmap 句柄不会释放——
+    // Windows 下紧接着的 remove_dir_all（下次重建/测试收尾）就可能撞上
+    // PermissionDenied（P1 审查项：flaky 根因之一）。
+    writer
+        .wait_merging_threads()
+        .context("等待索引合并线程退出失败")?;
 
     // 全量重建后重写 meta.json：记下当前 schema 版本、这次索引的根目录，
     // 以及（如果走了快速路径）刚建好的 USN 游标基线——后面启动监听时读到它
@@ -302,12 +377,6 @@ pub fn rebuild_index_with_progress(
             usn_cursors,
         },
     )?;
-
-    // 上面的 walk 里，每碰到一张新图片就往 OcrQueue 的内存态里塞了一条 pending，
-    // 这里统一落一次盘——批量存盘，不是每碰到一张图片就写一次文件。
-    OcrQueue::for_index_dir(index_dir)
-        .save()
-        .context("保存 OCR 队列状态失败")?;
 
     Ok(IndexStats {
         indexed,
@@ -374,5 +443,68 @@ mod tests {
 
         assert_eq!(calls, 0);
         Ok(())
+    }
+
+    /// 锁死 `commit_index_tail` 的顺序不变量：`save_ocr_queue` 必须先于
+    /// `commit_writer` 跑完——这正是 rebuild/增量更新两处收尾共用的耐久性
+    /// 保证，反过来就会复现"崩溃后图片文字永远进不了索引"的 bug。
+    #[test]
+    fn commit_index_tail_saves_ocr_queue_before_committing_writer() {
+        let order = std::cell::RefCell::new(Vec::new());
+        let result = commit_index_tail(
+            || {
+                order.borrow_mut().push("save_queue");
+                Ok(())
+            },
+            || {
+                order.borrow_mut().push("commit_writer");
+                Ok(())
+            },
+        );
+        assert!(result.is_ok());
+        assert_eq!(order.into_inner(), vec!["save_queue", "commit_writer"]);
+    }
+
+    /// 队列保存失败时不该继续提交索引写入——保持"先记账、后落地"的语义，
+    /// 不能让一次失败的队列保存之后仍然把索引提交出去。
+    #[test]
+    fn commit_index_tail_skips_commit_when_queue_save_fails() {
+        let order = std::cell::RefCell::new(Vec::new());
+        let result = commit_index_tail(
+            || {
+                order.borrow_mut().push("save_queue");
+                anyhow::bail!("模拟保存失败")
+            },
+            || {
+                order.borrow_mut().push("commit_writer");
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            order.into_inner(),
+            vec!["save_queue"],
+            "队列保存失败时不该继续提交索引写入"
+        );
+    }
+
+    #[test]
+    fn remove_dir_all_retrying_removes_existing_directory() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let target = dir.path().join("victim");
+        std::fs::create_dir_all(&target)?;
+        std::fs::write(target.join("f.txt"), "内容")?;
+
+        remove_dir_all_retrying(&target)?;
+        assert!(!target.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn remove_dir_all_retrying_propagates_non_permission_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist");
+        let err = remove_dir_all_retrying(&missing).expect_err("目录不存在应该报错，不应该重试掩盖");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 }

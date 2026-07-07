@@ -6,6 +6,8 @@ use std::path::Path;
 use anyhow::Result;
 use dowse_core::{IndexUpdater, PendingChange, PendingOp, Searcher, rebuild_index};
 
+mod common;
+
 /// 建索引用的目标目录名不能带 "." 前缀——walk_index_files 会整棵跳过隐藏目录，
 /// 而 tempfile 默认给临时目录起 ".tmpXXXX" 这种名字。
 fn target_dir() -> tempfile::TempDir {
@@ -55,6 +57,10 @@ fn modify_file_updates_searchable_content() -> Result<()> {
 
     assert_eq!(count_hits(index_dir.path(), "香蕉"), 1, "新内容应能搜到");
     assert_eq!(count_hits(index_dir.path(), "苹果"), 0, "旧内容应搜不到");
+
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
 
@@ -74,6 +80,10 @@ fn delete_file_removes_it_from_index() -> Result<()> {
     assert_eq!(outcome.removed, 1);
 
     assert_eq!(count_hits(index_dir.path(), "zzqq"), 0, "删除后应搜不到");
+
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
 
@@ -108,6 +118,10 @@ fn rename_file_old_name_gone_new_name_and_content_searchable() -> Result<()> {
         "新文件名应能搜到"
     );
     assert_eq!(count_hits(index_dir.path(), "mango"), 1, "正文内容照常命中");
+
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
 
@@ -154,5 +168,9 @@ fn remove_tree_prefix_deletes_whole_subdirectory() -> Result<()> {
     );
     assert_eq!(count_hits(index_dir.path(), "顶层"), 1, "顶层文件不受影响");
     assert_eq!(count_hits(index_dir.path(), "甲"), 0, "sub 下文件已删");
+
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
