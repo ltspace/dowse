@@ -1186,7 +1186,7 @@ checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
 
 [[package]]
 name = "dowse"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1203,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "dowse-app"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "directories",
@@ -1223,7 +1223,7 @@ dependencies = [
 
 [[package]]
 name = "dowse-core"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "chardetng",

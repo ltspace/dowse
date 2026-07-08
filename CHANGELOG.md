@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-08
+
+### Added
+
+- Interface text follows the system language in Chinese or English. The overlay
+  dropdowns, search placeholder, result count, empty-state guidance, preview
+  hints, pin tooltip, shortcut bar, and shortcut overlay, together with the tray
+  tooltip, the tray and right-click menus, and the folder-selection dialog, are
+  drawn from a dictionary. A Chinese system UI shows Chinese, everything else
+  shows English. The choice is made once at startup; there is no runtime switch.
+
 ### Changed
 
 - Text is now tokenized by script: CJK runs go to jieba, Latin/digit runs split
@@ -17,6 +28,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The index schema is now version 4. Existing indexes must be rebuilt once
   after upgrading; opening an older index reports a clear error asking for a
   rebuild.
+
+### Fixed
+
+- Fixed a bug where incremental indexing could stop permanently after the index
+  writer collided with a real-time anti-virus scan. Reopening the writer hit a
+  lock-ordering deadlock and never recovered, so files renamed or created after
+  the collision were not indexed until the next full rebuild. Reopening now
+  reuses the existing write lock and recovers cleanly.
 
 ## [0.6.1] - 2026-06-25
 
@@ -209,7 +228,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
 - The index root directory is no longer skipped by exclusion rules.
 
-[Unreleased]: https://github.com/ltspace/dowse/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/ltspace/dowse/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/ltspace/dowse/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/ltspace/dowse/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ltspace/dowse/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ltspace/dowse/compare/v0.4.2...v0.5.0
