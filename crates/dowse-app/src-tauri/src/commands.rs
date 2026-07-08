@@ -195,10 +195,19 @@ pub fn open_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
 /// 用 raw_arg 拼命令行而不是 .arg()：explorer 要求 `/select,"path"` 是
 /// 一个整体 token，Rust 默认的参数转义会把 `/select,` 和路径分开加引号，
 /// explorer 识别不出来。
+///
+/// `path` 直接拼进 raw_arg，评审确认过双引号内没法逃逸出去构造额外参数
+/// （explorer 把 `/select,"..."` 当一个整体 token 解析，不存在 shell 那种
+/// 分词/命令拼接的注入面）。不过 spawn 前照样校验一下路径存在——防的不是
+/// 注入，是把这条命令喂给一个根本不存在的路径时 explorer 的行为不可控
+/// （可能弹出无关的默认窗口），加固成本很低，顺手做。
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn reveal_in_folder(path: String) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
+    if !Path::new(&path).exists() {
+        return Err("目标路径不存在".to_string());
+    }
     let arg = format!("/select,\"{path}\"");
     std::process::Command::new("explorer")
         .raw_arg(arg)
