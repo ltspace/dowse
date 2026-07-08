@@ -36,7 +36,6 @@ jobs:
         run: npm run tauri build
 
       - name: Compute checksums
-        id: artifacts
         shell: pwsh
         run: |
           $patterns = @(
@@ -57,8 +56,6 @@ jobs:
             $hash = (Get-FileHash -Algorithm SHA256 -Path $installer.FullName).Hash.ToLower()
             "$hash  $($installer.Name)" | Out-File -FilePath $checksums -Append -Encoding ascii
           }
-          $paths = ($installers | ForEach-Object { $_.FullName }) -join "`n"
-          "paths<<EOF`n$paths`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Create draft release
         shell: pwsh
@@ -66,6 +63,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $assets = @("${{ steps.artifacts.outputs.paths }}".Trim() -split "`n")
-          $assets += "checksums.txt"
-          gh release create $tag --draft --title $tag --notes "" $assets
+          $assets = @(Get-ChildItem -Recurse -Path target/release/bundle -Include *.exe,*.msi | ForEach-Object { $_.FullName })
+          $assets += (Resolve-Path checksums.txt).Path
+          gh release create $tag --draft --title $tag --notes "" @assets
