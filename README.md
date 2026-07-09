@@ -67,31 +67,38 @@ The closest open-source implementation is sist2, but it targets Linux (on Window
 
 ## Performance
 
-Design targets; exceeding them is treated as a defect. "Measured" is round 3 of a
-from-scratch benchmark (`dowse 0.6.1`, i7-13700K / 24 logical cores / 64GB RAM, single
-machine, single session, 2026-07-12). Full methodology and raw numbers (`BENCH-REPORT-V3.md`)
-are kept with the benchmark working directory, outside this repo.
+Design targets; exceeding them is treated as a defect. "Measured" is a from-scratch
+benchmark of `dowse 0.7.0` (i7-13700K / 24 logical cores / 64GB RAM, single machine,
+single session, 2026-07-12), reusing the byte-identical corpus from the v0.6.1 round-3
+benchmark for direct comparability. Full raw output (index/search logs, JSON result
+files) is kept with the benchmark working directory, outside this repo.
 
-| Metric | Design target | Measured (round 3, v0.6.1, 2026-07-12) |
+| Metric | Design target | Measured (v0.7.0, 2026-07-12) |
 |---|---|---|
 | Hotkey to window visible | < 50ms | not measured — CLI-only benchmark, no overlay-app instrumentation |
 | Keystroke to results rendered | < 80ms | not measured — same |
-| OCR, single image | ~112ms / 1080p screenshot | ~176ms isolated; ~12–19ms/image at full-queue throughput (worker pool + batch commit) — synthetic 480×200 test images, not real 1080p screenshots |
-| Resident memory | < 150MB idle | not measured (idle); peak working set during full-corpus indexing was ~507MB — a different metric, not a regression against the idle target |
-| Installer size | < 15MB | **9.75MB** (`dowse-app_0.6.1_x64-setup.exe`, published release) |
-| Full-text index build, 10,000 files / 437MB | seconds (planned filename-only fast path) | 19.8–21.4s — current full-content `dowse index`, not the planned filename-only MFT path |
-| Full-text index build + OCR, 15,100 files (incl. 5,100 images) | — | ~83s first pass (5,015/5,100 images OCR'd; a write-conflict retry budget left 85 pending, cleared by a second pass in <2s — resumable, not lost) |
-| Search latency, P50 (5 required categories) | — | 149–178ms across single word / Chinese phrase / English phrase / multi-word AND / zero-result, on a 15,100-document index |
-| Search latency, P95 | — | 155–186ms, same 5 categories |
-| `ext:` filter query latency | — | P50 153ms, same band as unfiltered queries |
-| Index size ÷ corpus size | — | 0.54 (text-only), down from 0.64–0.66 in the prior benchmark round and 0.76 two rounds ago |
+| OCR, single image | ~112ms / 1080p screenshot | ~4–27ms isolated across settled repeat runs (near the process-startup noise floor; a contention-inflated first run right after the full-corpus OCR pass measured ~170ms and was discarded, see note below); ~4–5ms/image at full-queue throughput (worker pool + batch commit) — synthetic 480×200 test images, not real 1080p screenshots |
+| Resident memory | < 150MB idle | not measured (idle); peak working set during full-corpus indexing was ~327MB — a different metric, not a regression against the idle target |
+| Installer size | < 15MB | **9.77MB** (`dowse-app_0.7.0_x64-setup.exe`, published release) |
+| Full-text index build, 10,000 files / 437MB | seconds (planned filename-only fast path) | 10.0–10.6s — current full-content `dowse index`, not the planned filename-only MFT path |
+| Full-text index build + OCR, 15,100 files (incl. 5,100 images) | — | ~46.6s first pass, all 5,100/5,100 images OCR'd in that same pass — no pending, no second pass needed |
+| Search latency, P50 (5 required categories) | — | 30.7–161.1ms across single word / Chinese phrase / English phrase / multi-word AND / zero-result, on a 15,100-document index |
+| Search latency, P95 | — | 39.1–172.3ms, same 5 categories |
+| `ext:` filter query latency | — | P50 155.6ms, same band as the non-zero-result query categories |
+| Index size ÷ corpus size | — | 0.36 (text-only), down from 0.54 in the v0.6.1 round |
 
-Full-corpus rows measured on a 10,000-file / 437.66MB text corpus plus 5,100 synthetic
-480×200 OCR images (89.8MB), byte-size-matched to the prior two benchmark rounds' text corpus
-for comparability. Two prior full rebuild rounds are documented; the round immediately before
-this one found full-corpus indexing ~3x slower and a ~95% crash rate under rapid repeated
-rebuilds — this round found neither: indexing is back near round-1 levels and every transient
-write conflict encountered was caught and auto-retried, with zero unrecovered failures.
+Full-corpus rows measured on the same 10,000-file / 437.66MB text corpus plus 5,100
+synthetic 480×200 OCR images (89.8MB) used for the v0.6.1 round-3 numbers above —
+byte-identical, reused directly rather than regenerated. Indexing is roughly 2x faster
+and the on-disk text index roughly a third smaller than v0.6.1; both track the new
+tokenizer (lowercase normalization, alphanumeric-boundary splitting of Latin words)
+producing a leaner term dictionary. The zero-result query dropped from 135ms (v0.6.1)
+to a startup-noise-level 31ms, consistent with less index to scan before concluding a
+term is absent. The OCR full-queue figure (4–5ms/image, down from 12–19ms/image) was
+measured on a 20-image probe made of duplicate copies of one source image, so treat it
+as indicative rather than a tight bound — any OS-level OCR caching keyed on image
+content would flatter both this round and the v0.6.1 one equally, but does not by
+itself explain the improvement.
 
 ## Quick start
 
