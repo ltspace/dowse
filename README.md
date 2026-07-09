@@ -39,7 +39,7 @@ The closest open-source implementation is sist2, but it targets Linux (on Window
 | | |
 |---|---|
 | 🔍 **File name search** | Instant, as you type |
-| 📄 **Document content search** | Plain text, Markdown, code, and Office formats (PDF, Word, Excel, PowerPoint) |
+| 📄 **Document content search** | Plain text, Markdown, code, and document formats (PDF, Word, Excel, PowerPoint) |
 | 🖼️ **Screenshot / image OCR** | Text inside PNG/JPG/WebP/BMP images, fully offline (Windows.Media.Ocr) |
 | 🈶 **Chinese word segmentation** | jieba + BM25 ranking, not trigrams — plus automatic GBK encoding detection |
 | ⚡ **Incremental indexing** | File-watch during runtime, mtime/size reconciliation at startup |
@@ -61,7 +61,7 @@ The closest open-source implementation is sist2, but it targets Linux (on Window
 ## Chinese text handling
 
 - Word segmentation via jieba, ranking via BM25 (tantivy engine). No trigrams.
-- Automatic file encoding detection (chardetng). GBK-encoded files are decoded correctly before indexing — this matters because a large share of Chinese-language documents on Windows, especially older ones, are still saved in GBK rather than UTF-8, and a search tool that assumes UTF-8 silently mis-indexes or garbles them.
+- Automatic file encoding detection (chardetng). GBK-encoded files are decoded correctly before indexing — this matters because a large share of Chinese-language documents on Windows, especially older ones, are still saved in GBK rather than UTF-8, and a search tool that assumes UTF-8 will silently mis-index or garble them.
 - Multi-term queries default to AND semantics. Quoted phrase queries match on exact position.
 - OCR runs on the Windows-native engine (Windows.Media.Ocr), fully offline. The zh-Hans language pack also covers mixed Chinese/English text, no extra configuration required.
 
@@ -77,7 +77,7 @@ files) is kept with the benchmark working directory, outside this repo.
 |---|---|---|
 | Hotkey to window visible | < 50ms | not measured — CLI-only benchmark, no overlay-app instrumentation |
 | Keystroke to results rendered | < 80ms | not measured — same |
-| OCR, single image | ~112ms / 1080p screenshot | ~4–27ms isolated across settled repeat runs (near the process-startup noise floor; a contention-inflated first run right after the full-corpus OCR pass measured ~170ms and was discarded, see note below); ~4–5ms/image at full-queue throughput (worker pool + batch commit) — synthetic 480×200 test images, not real 1080p screenshots |
+| OCR, single image | ~112ms / 1080p screenshot | ~170ms isolated (480×200 synthetic image), unchanged from v0.6.1 — the OCR pipeline was not modified this release. Sub-30ms readings on immediate repeat runs of the same image reflect OS-level recognition caching, not real recognition, and are excluded here. Not real 1080p screenshots |
 | Resident memory | < 150MB idle | not measured (idle); peak working set during full-corpus indexing was ~327MB — a different metric, not a regression against the idle target |
 | Installer size | < 15MB | **9.77MB** (`dowse-app_0.7.0_x64-setup.exe`, published release) |
 | Full-text index build, 10,000 files / 437MB | seconds (planned filename-only fast path) | 10.0–10.6s — current full-content `dowse index`, not the planned filename-only MFT path |
@@ -94,11 +94,11 @@ and the on-disk text index roughly a third smaller than v0.6.1; both track the n
 tokenizer (lowercase normalization, alphanumeric-boundary splitting of Latin words)
 producing a leaner term dictionary. The zero-result query dropped from 135ms (v0.6.1)
 to a startup-noise-level 31ms, consistent with less index to scan before concluding a
-term is absent. The OCR full-queue figure (4–5ms/image, down from 12–19ms/image) was
-measured on a 20-image probe made of duplicate copies of one source image, so treat it
-as indicative rather than a tight bound — any OS-level OCR caching keyed on image
-content would flatter both this round and the v0.6.1 one equally, but does not by
-itself explain the improvement.
+term is absent. OCR recognition speed is unchanged this release, since the pipeline was
+not touched: single-image recognition stays around 170ms, and the sub-30ms readings on
+repeated identical images are OS-level caching artifacts, not real recognition. The
+full-corpus text-plus-OCR pass got faster (83s to 46.6s) from the quicker tokenizer and
+write path, not from faster recognition.
 
 ## Quick start
 
@@ -122,7 +122,7 @@ npm install
 cargo tauri build      # produces the installer under target/release/bundle
 ```
 
-Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two ghost-style dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay near-invisible until a non-default value is picked. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart).
+Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart).
 
 ![Preview pane for an image result: the source image rendered inline next to its OCR-extracted text with the matched terms highlighted](docs/screenshots/ocr-preview.png)
 
@@ -184,7 +184,7 @@ Rust · [tantivy](https://github.com/quickwit-oss/tantivy) · jieba · Tauri 2 �
 
 ## Privacy
 
-The index is stored locally (`%LOCALAPPDATA%\dowse`). No network access, no telemetry. You can verify this yourself: watch the process in Resource Monitor or a firewall tool and confirm it opens no outbound connections. Releases will also ship a SHA-256 checksum for the installer so you can verify the download.
+The index is stored locally (`%LOCALAPPDATA%\dowse`). No network access, no telemetry. You can verify this yourself: watch the process in Resource Monitor or a firewall tool and confirm it opens no outbound connections. Releases also include a SHA-256 checksum for the installer so you can verify the download.
 
 ## License
 
