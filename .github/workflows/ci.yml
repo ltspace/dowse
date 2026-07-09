@@ -42,3 +42,32 @@ jobs:
 
       - name: Format check
         run: cargo fmt --check
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # dowse-core parses arbitrary files from disk via pdf-extract/zip/
+      # quick-xml/chardetng, a class of deps with a history of parsing CVEs.
+      # Scoped to advisories only, so licenses/bans/sources need no tuning.
+      - name: Dependency advisory audit
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command-arguments: advisories
+
+  check-non-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # dowse-core has #[cfg(not(windows))] stubs for ocr/volume/mft/usn;
+      # this verifies they actually compile since the other job is Windows-only.
+      - name: Check dowse-core on non-Windows
+        run: cargo check -p dowse-core
