@@ -296,6 +296,65 @@ pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> 
     rebuild_index_with_progress(index_dir, target_dir, |_| {})
 }
 
+/// 全量重建撞上 Windows 上实时扫描的杀毒/EDR 软件时，tantivy 的索引写入
+/// 线程会在新建段文件的一瞬间被拒绝访问（`ERROR_ACCESS_DENIED`），进而把
+/// 整个 `IndexWriter` 判定为"已死"，往外抛的是笼统的 "index writer was
+/// killed"，看不到具体是哪个文件、什么原因——排障时强制在这条路径上追加
+/// `commit()` 才挖出真实的底层错误是某个刚建的段文件 `OpenWriteError`/
+/// `PermissionDenied`（Windows 错误码 5）。这跟 `remove_dir_all_retrying`
+/// 处理的"目录没删干净"是两回事：这里索引目录是全新建的，问题出在扫描器
+/// 和 tantivy 高频建/删文件之间的瞬时竞争，属于外部软件的一次性抖动。
+///
+/// 全量重建本来就是从头删/建索引目录，天然幂等——整次重试比在 tantivy
+/// 内部找钩子补丁更可靠。仅在命中这个特征错误时重试，别的错误（磁盘满、
+/// 目标目录不存在等）照常直接透传。
+const REBUILD_RETRIES: u32 = 10;
+/// 重试之间给扫描器一点喘息时间再动手，太快重试等于原地反复撞同一堵墙；
+/// 按 2 倍指数退避递增（300ms、600ms……），跟 `remove_dir_all_retrying`
+/// 同一套思路，封顶避免最坏情况下退避本身拖太久。
+const REBUILD_RETRY_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+const REBUILD_RETRY_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// 每次尝试用几个 tantivy 写入线程：并发建/删文件的规模越大，越容易撞上
+/// 扫描器（见 `rebuild_index_attempt` 里的解释）。第一次尝试按常规折中的
+/// 4 线程跑（吞吐还过得去），连续失败就说明这台机器眼下的扫描器压力偏大，
+/// 后面几次重试逐步收窄并发规模，用吞吐换成功率——第 8 次起降到只剩 1
+/// 线程，跟单线程写入等价，实测这是最不容易再撞上的配置。
+fn writer_threads_for_attempt(attempt: u32) -> usize {
+    match attempt {
+        1..=4 => 4,
+        5..=7 => 2,
+        _ => 1,
+    }
+}
+
+/// 判定一次重建失败是不是上面说的"被扫描器打断的瞬时竞争"。这个根因在
+/// tantivy 里会以两种不同的外壳冒出来，两种都要认：
+///
+/// - 建文档循环里调用 `add_document` 时撞上：某个 worker 线程早先已经
+///   因为这个原因死了，写入端被判定"已死"，这时候拿到的是笼统的
+///   `TantivyError::ErrorInThread`，看不到具体是哪个文件、什么原因
+///   （tantivy 自己也没往外传）。
+/// - 一路挺到 `commit()` 才撞上：这时候 tantivy 会把真正死掉的那个
+///   worker 线程的原始错误直接吐出来，是 `TantivyError::OpenWriteError`
+///   包着 Windows 错误码 5（`PermissionDenied`）——排障记录里就是靠这条
+///   路径才挖到真实根因。只在两种外壳下都遇到过，所以只认这两种，别的
+///   IoError（比如磁盘满、路径不存在）不在这个判据里，照常直接透传。
+fn is_transient_writer_killed(err: &anyhow::Error) -> bool {
+    err.chain().any(
+        |cause| match cause.downcast_ref::<tantivy::TantivyError>() {
+            Some(tantivy::TantivyError::ErrorInThread(_)) => true,
+            Some(tantivy::TantivyError::OpenWriteError(
+                tantivy::directory::error::OpenWriteError::IoError { io_error, .. },
+            )) => io_error.kind() == std::io::ErrorKind::PermissionDenied,
+            Some(tantivy::TantivyError::IoError(io_error)) => {
+                io_error.kind() == std::io::ErrorKind::PermissionDenied
+            }
+            _ => false,
+        },
+    )
+}
+
 /// 同 `rebuild_index`，多一个进度回调：每处理 `PROGRESS_INTERVAL` 个文件就报一次
 /// 累计处理数和当前文件路径。CLI 的 `dowse index` 和浮窗的"建索引"都走这个，
 /// 一份实现两处消费，避免两端各自维护一份遍历+回调逻辑。
@@ -305,7 +364,37 @@ pub fn rebuild_index_with_progress(
     mut on_progress: impl FnMut(IndexProgress),
 ) -> Result<IndexStats> {
     let start = Instant::now();
+    let mut delay = REBUILD_RETRY_BASE_DELAY;
 
+    for attempt in 1..=REBUILD_RETRIES {
+        let writer_threads = writer_threads_for_attempt(attempt);
+        match rebuild_index_attempt(index_dir, target_dir, writer_threads, &mut on_progress) {
+            Ok((indexed, skipped, usn_cursors)) => {
+                return finish_rebuild(index_dir, target_dir, indexed, skipped, usn_cursors, start);
+            }
+            Err(err) if attempt < REBUILD_RETRIES && is_transient_writer_killed(&err) => {
+                eprintln!(
+                    "全量重建撞上瞬时的索引写入中断（第 {attempt}/{REBUILD_RETRIES} 次，常见于杀毒/EDR \
+                     软件实时扫描新建文件），等待 {delay:?} 后整次重试: {err}"
+                );
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(REBUILD_RETRY_MAX_DELAY);
+                continue;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    unreachable!("循环要么在 Ok 分支返回，要么在最后一次尝试的 Err 分支返回")
+}
+
+/// 一次重建尝试：删旧目录、建新索引、把 `files` 全部写进去，返回收录/跳过计数
+/// 和 USN 游标基线，交给 `finish_rebuild` 收尾。失败时上层决定要不要整次重试。
+fn rebuild_index_attempt(
+    index_dir: &Path,
+    target_dir: &Path,
+    writer_threads: usize,
+    on_progress: &mut impl FnMut(IndexProgress),
+) -> Result<(usize, usize, HashMap<VolumeKey, UsnCursor>)> {
     if index_dir.exists() {
         remove_dir_all_retrying(index_dir).context("清理旧索引目录失败")?;
     }
@@ -315,8 +404,18 @@ pub fn rebuild_index_with_progress(
     let index = Index::create_in_dir(index_dir, schema)?;
     register_tokenizers(&index);
 
-    // 200MB 的写入缓冲：攒满一批才刷盘，比逐篇写快一个量级
-    let mut writer: IndexWriter = index.writer(200 * 1024 * 1024)?;
+    // 200MB 的写入缓冲：攒满一批才刷盘，比逐篇写快一个量级。
+    //
+    // 线程数不用 tantivy 默认的 `index.writer(..)`（按 CPU 核数封顶 8）：
+    // 高核数机器默认会开满 8 个 worker 线程，在索引目录里高频并发建/删
+    // 文件（tantivy 每建一个段文件都要重写一次 `.managed.json`），这种
+    // "多线程短时间内在同一目录爆发式建删文件"的模式正好撞上杀毒/EDR
+    // 软件（尤其是带行为检测的，比如反勒索模块）的敏感区，实测默认 8
+    // 线程哪怕配上面的整次重试兜底也压不住。`writer_threads` 由上层的
+    // `writer_threads_for_attempt` 按重试次数递减传进来，第一次尝试给
+    // 4（吞吐折中），连续撞上就逐步收窄到 1。
+    let mut writer: IndexWriter =
+        index.writer_with_num_threads(writer_threads, 200 * 1024 * 1024)?;
 
     let mut indexed = 0usize;
     let mut skipped = 0usize;
@@ -367,6 +466,20 @@ pub fn rebuild_index_with_progress(
         .wait_merging_threads()
         .context("等待索引合并线程退出失败")?;
 
+    Ok((indexed, skipped, usn_cursors))
+}
+
+/// 重建成功之后的收尾：写 meta.json、拼 `IndexStats`。这一步不碰 tantivy
+/// 的 `IndexWriter`，不会撞上 `rebuild_index_attempt` 那种瞬时竞争，
+/// 不需要包进重试循环。
+fn finish_rebuild(
+    index_dir: &Path,
+    target_dir: &Path,
+    indexed: usize,
+    skipped: usize,
+    usn_cursors: HashMap<VolumeKey, UsnCursor>,
+    start: Instant,
+) -> Result<IndexStats> {
     // 全量重建后重写 meta.json：记下当前 schema 版本、这次索引的根目录，
     // 以及（如果走了快速路径）刚建好的 USN 游标基线——后面启动监听时读到它
     // 就能从这一刻开始回放追平，不用退回 mtime 全扫对账（设计文档第四节）。
