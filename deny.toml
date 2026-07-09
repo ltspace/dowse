@@ -1,0 +1,6 @@
+# CI only runs `cargo deny check advisories` (see .github/workflows/ci.yml,
+# job `audit`). licenses/bans/sources are intentionally left unconfigured
+# since those checks are not invoked.
+
+[advisories]
+ignore = []
