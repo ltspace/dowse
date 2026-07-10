@@ -3,4 +3,16 @@
 # since those checks are not invoked.
 
 [advisories]
-ignore = []
+# unmaintained/unsound 只针对传递依赖里没人维护的老包报警（这批目前主要是
+# gtk-rs 的 GTK3 绑定、proc-macro-error、unic-* 系列——都是间接依赖带进来
+# 的，gtk-rs 那批还是 Linux 专属，dowse 在 Windows 上走的是 WebView2，根本
+# 用不到），不该卡住构建，所以整体关掉（Scope::None = 不检查任何 crate）。
+# vulnerability 不在这里配置：cargo-deny 0.16 起这类字段已被移除，真实漏洞
+# 恒定按 deny 处理，门禁要对真漏洞保持敏感，只在下面 ignore 里对个案单独放行。
+unmaintained = "none"
+unsound = "none"
+
+ignore = [
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml：畸形 XML 起始标签重复属性名检测退化成二次方时间的 DoS。0.41.0 已是最新版本，上游未发布可用的更高版本，Solution 明确写的是 'No safe upgrade available'。dowse 是索引本机文件的本地桌面工具，喂给这条解析路径的 XML 只来自用户自己选择索引的本地文件，威胁模型有限。上游发布修复版本后应移除此条 ignore。" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml：NsReader 命名空间声明缺少上限，可导致无界内存分配的 DoS。0.41.0 已是最新版本，上游未发布可用的更高版本，Solution 明确写的是 'No safe upgrade available'。dowse 是索引本机文件的本地桌面工具，喂给这条解析路径的 XML 只来自用户自己选择索引的本地文件，威胁模型有限。上游发布修复版本后应移除此条 ignore。" },
+]
