@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::autohide::AutoHideSuppressor;
 use crate::config::ConfigState;
 use crate::file_icons::FileIconCache;
 use crate::highlight::{TextSegment, highlight_name, segments_from_ranges};
+use crate::indexing_status::{IndexingSnapshot, IndexingStatus};
+use crate::rebuild::{IndexStatsDto, RebuildGuard};
 use crate::state::SearchState;
-use crate::watcher::WatchController;
 use crate::window_fx::{EffectLevel, EffectLevelState, GlassAlpha};
 
 #[derive(Serialize)]
@@ -33,30 +34,11 @@ pub struct PreviewDto {
 }
 
 #[derive(Serialize)]
-pub struct IndexStatsDto {
-    pub indexed: usize,
-    pub skipped: usize,
-    pub seconds: f64,
-    /// 建索引期间发现、还没识别完的图片数——OCR 是独立的后台低优先级管线，
-    /// 全量重建结束时这些图片大概率还在排队，浮窗拿这个数补一行"另有 N 张
-    /// 图片在后台识别"的小字，不让用户误以为索引没做完。
-    pub ocr_pending: usize,
-}
-
-/// 全量重建索引期间的一次进度汇报，经 `dowse://rebuild-progress` 事件推给前端。
-/// 对应 dowse-core 的 `IndexProgress`，path 这里已经转成剥过 `\\?\` 前缀的
-/// 展示用字符串——前端只拿它当一行流过的文字，不会拿去做文件操作。
-#[derive(Serialize, Clone)]
-pub struct IndexProgressDto {
-    pub processed: usize,
-    pub path: String,
-}
-
-#[derive(Serialize)]
 pub struct IndexStatusDto {
     pub has_index: bool,
     pub num_docs: u64,
-    /// 上次成功建索引的目录，回显在"重建索引"引导上。
+    /// 上次成功建索引的目录，回显在"重建索引"引导上，也是空态"当前索引根"
+    /// 那行小字的数据来源（症状 5：选完目录之后要能看得见）。
     pub last_target_dir: Option<String>,
 }
 
@@ -111,6 +93,15 @@ pub fn index_status(search: State<SearchState>, config: State<ConfigState>) -> I
         num_docs,
         last_target_dir,
     }
+}
+
+/// 建索引进度的当前快照——窗口每次呼出都应该拉一次这个，再接续事件流
+/// （`dowse://rebuild-progress`/`dowse://ocr-progress`）：窗口隐藏期间事件照样
+/// 会发，但前端没监听、没地方存，重新唤出时必须能补一次，不能是一片空白
+/// 或者停在呼出前那一刻的旧快照。
+#[tauri::command]
+pub fn indexing_status(status: State<IndexingStatus>) -> IndexingSnapshot {
+    status.snapshot()
 }
 
 /// 浮窗"类型/排序"两个幽灵态下拉的取值透传到这里，翻译成 dowse-core 的
@@ -222,58 +213,27 @@ pub fn reveal_in_folder(_path: String) -> Result<(), String> {
     Err("目前只支持 Windows".to_string())
 }
 
-/// 全量重建索引。目标目录来自前端的目录选择器（或托盘"重建索引"复用上次的目录）。
-/// 成功后把新的 Searcher 换进常驻状态，并把目录记进配置，供托盘复用。
+/// 全量重建索引。目标目录来自前端的目录选择器（或托盘"重建索引"/"更改索引
+/// 文件夹…"复用/新选的目录）。实际工作全部在 `rebuild::perform_rebuild`
+/// 里——浮窗按钮、托盘两个菜单项三个入口共用同一份实现，行为保证一致。
 ///
 /// 建索引期间通过 `dowse://rebuild-progress` 事件把进度实时推给前端（浮窗的
-/// "实时直播"效果），频率由 dowse-core 的 `PROGRESS_INTERVAL` 控制，这里
-/// 原样转发，不再额外节流。
+/// "实时直播"效果），频率由 dowse-core 的 `PROGRESS_INTERVAL` 控制。
+/// `RebuildGuard` 防止这个命令和托盘的重建入口并发触发——已经有一次在跑
+/// 就直接报错，不会互相踩踏。
 #[tauri::command]
-pub fn rebuild_index(
-    app: tauri::AppHandle,
-    search: State<SearchState>,
-    config: State<ConfigState>,
-    watch: State<WatchController>,
-    dir: String,
-) -> Result<IndexStatsDto, String> {
-    let target = PathBuf::from(&dir);
-    let target = target
-        .canonicalize()
-        .map_err(|_| "目录不存在".to_string())?;
+pub fn rebuild_index(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto, String> {
+    if !app.state::<RebuildGuard>().try_begin() {
+        return Err("已有一次建索引正在进行中，请稍候".to_string());
+    }
+    let target = PathBuf::from(&dir).canonicalize().map_err(|_| {
+        app.state::<RebuildGuard>().end();
+        "目录不存在".to_string()
+    })?;
 
-    let index_dir = crate::config::index_dir().map_err(|e| e.to_string())?;
-
-    // 重建前先停监听：放掉旧索引的写锁和文件句柄，否则 Windows 删不掉旧索引目录。
-    watch.stop();
-
-    let stats = dowse_core::rebuild_index_with_progress(&index_dir, &target, |progress| {
-        let _ = app.emit(
-            "dowse://rebuild-progress",
-            IndexProgressDto {
-                processed: progress.processed,
-                path: dowse_core::display_path(&progress.path.to_string_lossy()),
-            },
-        );
-    })
-    .map_err(|e| e.to_string())?;
-
-    // 在 watch.start 挪走 index_dir 之前先问一次 OCR 队列——两者用的是同一个
-    // index_dir，问完这次调用就不再需要它了。
-    let ocr_pending = dowse_core::OcrQueue::for_index_dir(&index_dir).pending_len();
-
-    let new_searcher = dowse_core::Searcher::open(&index_dir).map_err(|e| e.to_string())?;
-    search.replace(new_searcher);
-    let _ = config.set_target_dir(target.clone());
-
-    // 重建完盯住新索引根，重新挂上"对账 + 实时监听"。
-    watch.start(index_dir, vec![target]);
-
-    Ok(IndexStatsDto {
-        indexed: stats.indexed,
-        skipped: stats.skipped,
-        seconds: stats.seconds,
-        ocr_pending,
-    })
+    let result = crate::rebuild::perform_rebuild(&app, target);
+    app.state::<RebuildGuard>().end();
+    result
 }
 
 /// 图钉固定开关：前端点了图钉按钮就调这个命令，把会话级的"抑制失焦自动

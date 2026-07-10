@@ -340,7 +340,7 @@ fn writer_threads_for_attempt(attempt: u32) -> usize {
 ///   包着 Windows 错误码 5（`PermissionDenied`）——排障记录里就是靠这条
 ///   路径才挖到真实根因。只在两种外壳下都遇到过，所以只认这两种，别的
 ///   IoError（比如磁盘满、路径不存在）不在这个判据里，照常直接透传。
-fn is_transient_writer_killed(err: &anyhow::Error) -> bool {
+pub(crate) fn is_transient_writer_killed(err: &anyhow::Error) -> bool {
     err.chain().any(
         |cause| match cause.downcast_ref::<tantivy::TantivyError>() {
             Some(tantivy::TantivyError::ErrorInThread(_)) => true,

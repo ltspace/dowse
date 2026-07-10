@@ -1,14 +1,17 @@
 use tauri::image::Image;
 use tauri::menu::{
-    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu,
+    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem,
+    Submenu,
 };
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
+use tauri_plugin_dialog::DialogExt;
 
 use crate::config::ConfigState;
+use crate::indexing_status::{IndexingPhase, IndexingStatus};
+use crate::rebuild::{RebuildGuard, format_count};
 use crate::state::SearchState;
-use crate::watcher::WatchController;
 use crate::window_fx::{self, EffectLevelState, TransparencyTier};
 
 /// 任务栏是浅色还是深色，决定托盘剪影用哪一版（见图标说明第 4 节）。只在
@@ -91,12 +94,27 @@ fn decode_rgba_png(bytes: &[u8]) -> (Vec<u8>, u32, u32) {
 
 const MENU_SHOW: &str = "show";
 const MENU_REBUILD: &str = "rebuild";
+const MENU_CHANGE_FOLDER: &str = "change_folder";
+const MENU_INDEX_INFO: &str = "index_info";
 const MENU_AUTOSTART: &str = "autostart";
 const MENU_TRANSPARENCY: &str = "transparency";
 const MENU_TRANSPARENCY_LOW: &str = "transparency_low";
 const MENU_TRANSPARENCY_MID: &str = "transparency_mid";
 const MENU_TRANSPARENCY_HIGH: &str = "transparency_high";
 const MENU_QUIT: &str = "quit";
+
+const IDLE_TOOLTIP: &str = "dowse — Alt+` 呼出";
+
+/// 托盘图标句柄 + 几个需要运行时更新文案/启停的菜单项句柄。建完菜单/托盘之后
+/// 存进 `app.manage()`，供重建流程、OCR 进度回调随时取出来刷新（tooltip、
+/// "索引：<目录> · N 篇" 这行只读信息、"重建索引"/"更改索引文件夹…" 两个
+/// 动作项的置灰）。
+pub struct TrayHandles {
+    icon: TrayIcon<tauri::Wry>,
+    index_info_item: MenuItem<tauri::Wry>,
+    rebuild_item: MenuItem<tauri::Wry>,
+    change_folder_item: MenuItem<tauri::Wry>,
+}
 
 /// "透明度"子菜单里三个互斥的档位勾选项。Tauri/muda 没有原生的单选菜单项
 /// 类型，这里用三个 `CheckMenuItem` 手动模拟单选组——选中一个就要把另外
@@ -117,15 +135,21 @@ impl TransparencyMenuItems {
     }
 }
 
-/// 托盘图标 + 右键菜单：呼出 / 重建索引 / 开机自启开关 / 透明效果开关 /
-/// 透明度三档子菜单 / 退出。进程常驻，浮窗只是 show/hide——托盘是用户确认
-/// "它还活着"和做少数配置的入口。
+/// 托盘图标 + 右键菜单：呼出 / 索引信息（只读） / 重建索引 / 更改索引文件夹…
+/// / 开机自启开关 / 透明效果开关 / 透明度三档子菜单 / 退出。进程常驻，浮窗
+/// 只是 show/hide——托盘是用户确认"它还活着"、看一眼索引状态、做少数配置的
+/// 入口（症状 5：选定文件夹建索引后要能看得见当前根、能改）。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let cfg = app.state::<ConfigState>().get();
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
 
     let show_item = MenuItemBuilder::with_id(MENU_SHOW, "呼出").build(app)?;
+    let index_info_item = MenuItemBuilder::with_id(MENU_INDEX_INFO, index_info_text(app))
+        .enabled(false)
+        .build(app)?;
     let rebuild_item = MenuItemBuilder::with_id(MENU_REBUILD, "重建索引").build(app)?;
+    let change_folder_item =
+        MenuItemBuilder::with_id(MENU_CHANGE_FOLDER, "更改索引文件夹…").build(app)?;
     let autostart_item = CheckMenuItemBuilder::with_id(MENU_AUTOSTART, "开机自启")
         .checked(autostart_enabled)
         .build(app)?;
@@ -157,7 +181,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         app,
         &[
             &show_item,
+            &index_info_item,
             &rebuild_item,
+            &change_folder_item,
             &PredefinedMenuItem::separator(app)?,
             &autostart_item,
             &transparency_item,
@@ -169,9 +195,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 
     let icon = tray_icon_image();
 
-    TrayIconBuilder::new()
+    let tray_icon = TrayIconBuilder::new()
         .icon(icon)
-        .tooltip("dowse — Alt+` 呼出")
+        .tooltip(IDLE_TOOLTIP)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(handle_menu_event)
@@ -188,7 +214,76 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
+    app.manage(TrayHandles {
+        icon: tray_icon,
+        index_info_item,
+        rebuild_item,
+        change_folder_item,
+    });
+
     Ok(())
+}
+
+/// "索引：<目录> · N 篇"这一行只读菜单项的文案；还没建过索引时给一句引导语。
+fn index_info_text(app: &AppHandle) -> String {
+    let target_dir = app.state::<ConfigState>().get().target_dir;
+    let Some(dir) = target_dir else {
+        return "尚未建立索引".to_string();
+    };
+    let num_docs = app
+        .state::<SearchState>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|s| s.num_docs()))
+        .unwrap_or(0);
+    format!(
+        "索引：{} · {} 篇",
+        dowse_core::display_path(&dir.to_string_lossy()),
+        format_count(num_docs)
+    )
+}
+
+/// 重建/切换完索引根之后调一次，把托盘那行只读信息刷新成最新的目录 + 篇数
+/// （症状 5"可见"：托盘要能看到当前索引根，不用只靠猜）。
+pub fn refresh_index_info(app: &AppHandle) {
+    let Some(handles) = app.try_state::<TrayHandles>() else {
+        return;
+    };
+    let _ = handles.index_info_item.set_text(index_info_text(app));
+}
+
+/// 把托盘 tooltip 同步成 `IndexingStatus` 当前快照对应的文案——空闲时是
+/// 默认的呼出提示，文本/OCR 两个阶段各自换成"索引中 N 篇"/"图片识别 N / M"，
+/// 窗口不用开着也能瞟一眼进度（症状 2/3 的验收场景之一）。
+pub fn refresh_tooltip(app: &AppHandle) {
+    let Some(handles) = app.try_state::<TrayHandles>() else {
+        return;
+    };
+    let snapshot = app.state::<IndexingStatus>().snapshot();
+    let tooltip = match snapshot.phase {
+        IndexingPhase::Idle => IDLE_TOOLTIP.to_string(),
+        IndexingPhase::Text => format!(
+            "dowse — 索引中 {} 篇",
+            format_count(snapshot.text_processed as u64)
+        ),
+        IndexingPhase::Ocr => format!(
+            "dowse — 图片识别 {} / {}",
+            format_count(snapshot.ocr_processed as u64),
+            format_count(snapshot.ocr_total as u64)
+        ),
+    };
+    let _ = handles.icon.set_tooltip(Some(tooltip));
+}
+
+/// 重建期间把"重建索引"/"更改索引文件夹…"两个动作项置灰，防止重入——全量
+/// 重建会删掉旧索引目录重建，两次并发执行会互相踩踏。
+pub fn set_rebuilding(app: &AppHandle, busy: bool) {
+    let Some(handles) = app.try_state::<TrayHandles>() else {
+        return;
+    };
+    let _ = handles.rebuild_item.set_enabled(!busy);
+    let _ = handles.change_folder_item.set_enabled(!busy);
 }
 
 fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
@@ -199,6 +294,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             }
         }
         MENU_REBUILD => rebuild_from_last_dir(app),
+        MENU_CHANGE_FOLDER => change_index_folder(app),
         MENU_AUTOSTART => {
             let mgr = app.autolaunch();
             let enabled = mgr.is_enabled().unwrap_or(false);
@@ -259,6 +355,28 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     }
 }
 
+/// 后台线程里跑一次 `rebuild::perform_rebuild`，成功/失败各广播一个事件——
+/// 托盘触发的重建没有 Tauri invoke 的返回值可用（不像浮窗按钮那样直接拿到
+/// `rebuild_index` 命令的 Result），前端靠监听 `dowse://rebuild-done`/
+/// `dowse://rebuild-error` 得知结果（沿用 v0.6.0 就有的这套事件）。
+/// `RebuildGuard` 的独占权由调用方（`rebuild_from_last_dir`/
+/// `change_index_folder`）在拿到目标目录之后、真正开始重建之前获取。
+fn spawn_rebuild(app: &AppHandle, target: std::path::PathBuf) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let result = crate::rebuild::perform_rebuild(&app, target);
+        app.state::<RebuildGuard>().end();
+        match result {
+            Ok(stats) => {
+                let _ = app.emit("dowse://rebuild-done", stats.indexed);
+            }
+            Err(err) => {
+                let _ = app.emit("dowse://rebuild-error", err);
+            }
+        }
+    });
+}
+
 /// 托盘"重建索引"复用上次成功建索引的目录；还没配置过就呼出窗口，
 /// 让用户走前端"选个目录开始建索引"的引导，而不是在托盘里悄悄失败。
 fn rebuild_from_last_dir(app: &AppHandle) {
@@ -268,27 +386,37 @@ fn rebuild_from_last_dir(app: &AppHandle) {
         }
         return;
     };
+    if !app.state::<RebuildGuard>().try_begin() {
+        return;
+    }
+    spawn_rebuild(app, target_dir);
+}
 
+/// 托盘"更改索引文件夹…"：弹系统目录选择器，选定后对新目录整次重建（等价于
+/// 换根，旧根内容整体被替换——症状 5"可改"）。用户取消选择就什么都不做。
+/// `RebuildGuard` 在弹出选择器之前就拿到，防止用户在对话框还开着的时候
+/// 又从别的入口（浮窗按钮/"重建索引"）触发第二次重建；取消/拿不到路径时
+/// 要记得放回去，不然这个入口会永久卡死在"重建中"。
+fn change_index_folder(app: &AppHandle) {
+    if !app.state::<RebuildGuard>().try_begin() {
+        return;
+    }
     let app = app.clone();
-    std::thread::spawn(move || {
-        let Ok(index_dir) = crate::config::index_dir() else {
-            return;
-        };
-        // 重建前先停监听，放掉旧索引的写锁/文件句柄（Windows 删不掉被占用的目录）。
-        app.state::<WatchController>().stop();
-        match dowse_core::rebuild_index(&index_dir, &target_dir) {
-            Ok(stats) => {
-                if let Ok(searcher) = dowse_core::Searcher::open(&index_dir) {
-                    app.state::<SearchState>().replace(searcher);
-                }
-                // 重建完盯住新索引根，重新挂上对账 + 实时监听。
-                app.state::<WatchController>()
-                    .start(index_dir, vec![target_dir]);
-                let _ = app.emit("dowse://rebuild-done", stats.indexed);
-            }
-            Err(err) => {
-                let _ = app.emit("dowse://rebuild-error", err.to_string());
-            }
-        }
-    });
+    app.dialog()
+        .file()
+        .set_title("选择要索引的目录")
+        .pick_folder(move |folder| {
+            let Some(folder) = folder else {
+                app.state::<RebuildGuard>().end();
+                return;
+            };
+            let Ok(target) = folder.into_path() else {
+                app.state::<RebuildGuard>().end();
+                return;
+            };
+            // spawn_rebuild 内部会在重建结束后调用 RebuildGuard::end()，
+            // 这里不用重复放一次——独占权从"拿到"到"重建线程结束"是同一段
+            // 生命周期，中间途经选择器回调，不能提前释放。
+            spawn_rebuild(&app, target);
+        });
 }

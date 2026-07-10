@@ -1,5 +1,6 @@
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tantivy::collector::DocSetCollector;
@@ -9,11 +10,25 @@ use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Te
 
 use crate::events::{PendingChange, PendingOp};
 use crate::indexer::{
-    add_file_document, add_image_document_with_content, commit_index_tail, walk_index_files,
+    add_file_document, add_image_document_with_content, commit_index_tail,
+    is_transient_writer_killed, walk_index_files,
 };
 use crate::ocr::is_image;
 use crate::ocr_queue::OcrQueue;
 use crate::{Fields, build_schema, register_tokenizers};
+
+/// 长驻写入端（`IndexUpdater`）撞上杀软扫描瞬时冲突时的重试参数。判据复用
+/// `indexer::is_transient_writer_killed`——跟全量重建是同一个根因（见
+/// `indexer.rs` 40d8437 的文档），但恢复手段不同：全量重建是"整次重来"（删
+/// 目录重建一个全新的 IndexWriter），这里的 IndexWriter 是长期持有的对象，
+/// 一旦被 tantivy 判定"已死"就永远死了，唯一的恢复手段是丢弃它、在同一个
+/// `Index` 上重开一个新的 IndexWriter（旧 writer drop 时释放的写锁文件，
+/// 新 writer 能立刻拿到）。重试次数比全量重建少（6 次而非 10 次）——增量批次
+/// /单张 OCR 结果本来就小，不需要像全量重建那样逐步收窄并发线程数，
+/// 固定单线程写入本来就是默认；重试之间的退避节奏跟全量重建一致。
+const WRITER_RETRIES: u32 = 6;
+const WRITER_RETRY_BASE_DELAY: Duration = Duration::from_millis(300);
+const WRITER_RETRY_MAX_DELAY: Duration = Duration::from_secs(3);
 
 /// 一批增量更新的处理结果，给日志/调试看。
 #[derive(Debug, Default, Clone, Copy)]
@@ -59,50 +74,57 @@ impl IndexUpdater {
 
     /// 处理一批防抖合并后的变更，最后 commit 一次。
     /// commit 失败返回 Err，调用方（run_watch）负责把这批退回队列下轮重试。
+    ///
+    /// 撞上杀软扫描瞬时冲突（见 `commit_with_retry` 文档）时整批重做——
+    /// `upsert_one`/`delete_exact`/`delete_tree` 全部是"先删后加"或者按 term
+    /// 精确删除，同一批重复应用结果不变，重做无害。
     pub fn apply(&mut self, batch: &[PendingChange]) -> Result<BatchOutcome> {
-        let mut outcome = BatchOutcome::default();
-        let mut touched_image = false;
-        for change in batch {
-            match change.op {
-                PendingOp::Upsert => {
-                    self.upsert_one(&change.path, &mut outcome, &mut touched_image)?;
-                }
-                PendingOp::UpsertTree => {
-                    // 目录整体新建/移入：真正"这个目录下有哪些文件"的完整 walk
-                    // 在这里做（消费侧线程），不在 notify 回调线程里做——大目录
-                    // 阻塞秒级会让 OS 的目录变更缓冲溢出丢事件，见
-                    // `watch.rs::emit_upsert` 的说明。展开后逐个文件走跟普通
-                    // `Upsert` 完全一样的先删后加逻辑。
-                    for file in walk_index_files(&change.path) {
-                        self.upsert_one(&file, &mut outcome, &mut touched_image)?;
+        self.commit_with_retry(|this| {
+            let mut outcome = BatchOutcome::default();
+            let mut touched_image = false;
+            for change in batch {
+                match change.op {
+                    PendingOp::Upsert => {
+                        this.upsert_one(&change.path, &mut outcome, &mut touched_image)?;
+                    }
+                    PendingOp::UpsertTree => {
+                        // 目录整体新建/移入：真正"这个目录下有哪些文件"的完整 walk
+                        // 在这里做（消费侧线程），不在 notify 回调线程里做——大目录
+                        // 阻塞秒级会让 OS 的目录变更缓冲溢出丢事件，见
+                        // `watch.rs::emit_upsert` 的说明。展开后逐个文件走跟普通
+                        // `Upsert` 完全一样的先删后加逻辑。
+                        for file in walk_index_files(&change.path) {
+                            this.upsert_one(&file, &mut outcome, &mut touched_image)?;
+                        }
+                    }
+                    PendingOp::Remove => {
+                        this.delete_exact(&change.path);
+                        outcome.removed += 1;
+                    }
+                    PendingOp::RemoveTree => {
+                        outcome.removed += this.delete_tree(&change.path)?;
                     }
                 }
-                PendingOp::Remove => {
-                    self.delete_exact(&change.path);
-                    outcome.removed += 1;
-                }
-                PendingOp::RemoveTree => {
-                    outcome.removed += self.delete_tree(&change.path)?;
-                }
             }
-        }
-        // 顺序不变量同 `commit_index_tail` 的文档：队列必须先于 commit 落盘，
-        // 崩溃后重复识别一张 pending 图片是幂等无害的，反过来会丢数据。
-        commit_index_tail(
-            || {
-                if touched_image {
-                    // 这一批里确实有图片新增/变更被塞进了 OCR 队列的内存态，落一次盘——
-                    // 没有图片的批次（大多数文本编辑场景）不用为这个多写一次文件。
-                    OcrQueue::for_index_dir(&self.index_dir)
-                        .save()
-                        .context("保存 OCR 队列状态失败")
-                } else {
-                    Ok(())
-                }
-            },
-            || self.writer.commit().map(|_| ()).context("增量提交失败"),
-        )?;
-        Ok(outcome)
+            // 顺序不变量同 `commit_index_tail` 的文档：队列必须先于 commit 落盘，
+            // 崩溃后重复识别一张 pending 图片是幂等无害的，反过来会丢数据。
+            let index_dir = this.index_dir.clone();
+            commit_index_tail(
+                || {
+                    if touched_image {
+                        // 这一批里确实有图片新增/变更被塞进了 OCR 队列的内存态，落一次盘——
+                        // 没有图片的批次（大多数文本编辑场景）不用为这个多写一次文件。
+                        OcrQueue::for_index_dir(&index_dir)
+                            .save()
+                            .context("保存 OCR 队列状态失败")
+                    } else {
+                        Ok(())
+                    }
+                },
+                || this.writer.commit().map(|_| ()).context("增量提交失败"),
+            )?;
+            Ok(outcome)
+        })
     }
 
     /// 单个文件的先删后加：`PendingOp::Upsert` 和展开后的 `PendingOp::UpsertTree`
@@ -129,21 +151,81 @@ impl IndexUpdater {
         Ok(())
     }
 
-    /// OCR worker 写回一张图片的最终识别结果：先删旧文档、写入新内容、立刻单独
-    /// 提交。commit 粒度是"每张图片一次"，不跟主更新批次共用节奏——两者本来就是
-    /// 独立的管线（设计文档"独立于文本管线"一节）。单文档的 commit 在 tantivy 里
-    /// 很轻，OCR 识别本身（百毫秒级）远比它慢，不会成为瓶颈；换来的是实现简单、
-    /// 每识别完一张就立刻可搜，不会因为 worker 中途崩溃丢掉一整批还没提交的结果。
-    pub(crate) fn stage_and_commit_ocr_result(
+    /// OCR worker 写回一批图片的最终识别结果：每张先删旧文档、写入新内容，整批
+    /// 攒完只 commit 一次。批量提交（而不是曾经的"每识别完一张就单独 commit
+    /// 一次"）是 v0.6.1 的修复：15k 张图片对应 15k 次重量级 tantivy commit（每次
+    /// 都重写段元文件、可能触发合并）会把磁盘 IO 打爆，现场表现为窗口唤起卡顿、
+    /// 进程在高频建删文件时更容易撞上杀软实时扫描而崩溃。批次大小/时间窗口由
+    /// 调用方（`ocr_worker.rs`）控制，这里只管"给一批、提交一批"。
+    ///
+    /// 空批直接返回 Ok，不做任何写入端操作。
+    pub(crate) fn stage_and_commit_ocr_batch(
         &mut self,
-        path: &Path,
-        mtime: i64,
-        size: u64,
-        content: &str,
+        items: &[(PathBuf, i64, u64, String)],
     ) -> Result<()> {
-        self.delete_exact(path);
-        add_image_document_with_content(&self.writer, &self.fields, path, mtime, size, content)?;
-        self.writer.commit().context("OCR 结果提交失败")?;
+        if items.is_empty() {
+            return Ok(());
+        }
+        self.commit_with_retry(|this| {
+            for (path, mtime, size, content) in items {
+                this.delete_exact(path);
+                add_image_document_with_content(
+                    &this.writer,
+                    &this.fields,
+                    path,
+                    *mtime,
+                    *size,
+                    content,
+                )?;
+            }
+            this.writer.commit().context("OCR 批量结果提交失败")?;
+            Ok(())
+        })
+    }
+
+    /// 在长驻写入端上执行一次"写入 + commit"，撞上杀软扫描瞬时冲突（判据见
+    /// `indexer::is_transient_writer_killed`，跟全量重建共用同一套探测逻辑）
+    /// 时重开一个新 `IndexWriter` 再整次重做。`op` 每次重试都会被完整重新
+    /// 调用一遍——调用方（`apply`/`stage_and_commit_ocr_batch`）内部全是
+    /// "先删后加"或者按 term 精确删除，重复调用结果不变，天然满足这个前提。
+    fn commit_with_retry<T>(&mut self, mut op: impl FnMut(&mut Self) -> Result<T>) -> Result<T> {
+        let mut delay = WRITER_RETRY_BASE_DELAY;
+        for attempt in 1..=WRITER_RETRIES {
+            match op(self) {
+                Ok(value) => return Ok(value),
+                Err(err) if attempt < WRITER_RETRIES && is_transient_writer_killed(&err) => {
+                    eprintln!(
+                        "索引写入端撞上瞬时的杀软扫描冲突（第 {attempt}/{WRITER_RETRIES} 次，\
+                         等待 {delay:?} 后重开写入端重试）: {err}"
+                    );
+                    std::thread::sleep(delay);
+                    // 重开本身也可能在扫描器仍处于活跃窗口时撞上同一类瞬时错误
+                    // （现场排障中实测复现过）——这里不立即放弃：把它当成这次
+                    // 尝试的失败，直接进入循环的下一轮。下一轮 `op(self)` 会用
+                    // 那个仍然"已死"的旧 writer 再跑一次，必然立刻撞回同一个
+                    // 特征错误，从而在下一轮里再退避、再重开一次——本质上是
+                    // 复用同一个循环，把"重开失败"也纳入了整体的重试预算
+                    // （`WRITER_RETRIES` 次），而不是单独开一条不重试的路径。
+                    if let Err(reopen_err) = self.reopen_writer() {
+                        eprintln!("重开索引写入端失败，留到下一轮重试预算里再试: {reopen_err}");
+                    }
+                    delay = (delay * 2).min(WRITER_RETRY_MAX_DELAY);
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        unreachable!("循环要么在 Ok 分支返回，要么在最后一次尝试的 Err 分支返回")
+    }
+
+    /// 丢弃当前（已被 tantivy 判定"已死"的）`IndexWriter`，在同一个 `Index` 上
+    /// 重开一个新的。旧 writer 在这次赋值时被 drop，它持有的写锁文件随之释放，
+    /// 新 writer 才能拿到——顺序不能反，`Index::writer` 内部会等锁。
+    fn reopen_writer(&mut self) -> Result<()> {
+        self.writer = self
+            .index
+            .writer(50 * 1024 * 1024)
+            .context("重开索引写入端失败")?;
         Ok(())
     }
 

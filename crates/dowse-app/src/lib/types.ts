@@ -42,6 +42,20 @@ export interface IndexStatus {
 	last_target_dir: string | null;
 }
 
+/// 建索引进度阶段——跟 Rust 侧 `indexing_status.rs::IndexingPhase` 一一对应。
+export type IndexingPhase = 'idle' | 'text' | 'ocr';
+
+/// `indexing_status` 查询命令的返回值，也是窗口每次呼出时用来"续播"进度视图
+/// 的快照：事件流只在窗口开着时有意义，重新唤出窗口必须能补一次这份快照，
+/// 不能是一片空白或者停在呼出前那一刻的旧状态。
+export interface IndexingSnapshot {
+	phase: IndexingPhase;
+	text_processed: number;
+	text_current_file: string;
+	ocr_processed: number;
+	ocr_total: number;
+}
+
 /// 类型筛选下拉的取值，跟 Rust 侧 dowse-core::ext_groups::by_name 认的字符串一一对应。
 export type ExtGroup = 'all' | 'doc' | 'code' | 'image';
 
