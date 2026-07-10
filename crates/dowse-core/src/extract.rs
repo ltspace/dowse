@@ -42,13 +42,30 @@ pub fn extract_text(path: &Path) -> Option<String> {
     }
 
     match ext.as_str() {
-        "pdf" => pdf_extract::extract_text(path).ok(),
+        "pdf" => extract_pdf(path),
         "docx" => extract_docx(path),
         "xlsx" => extract_xlsx(path),
         "pptx" => extract_pptx(path),
         e if TEXT_EXTS.contains(&e) => read_text_smart(path),
         _ => None,
     }
+}
+
+/// 从 PDF 抽文本。`pdf_extract`（及其底层 `lopdf`）对某些畸形或深层嵌套的 PDF
+/// 不是返回 `Err`，而是内部 `unwrap`/`panic!`（甚至栈溢出）——`.ok()` 接不住 panic。
+/// 而抽取是在监听/OCR 线程持有共享 `IndexUpdater` 锁时调的：panic 一旦穿过持有的
+/// `MutexGuard`，就会把这把共享锁**毒化**，之后所有 `.lock()` 都 panic，连锁拖垮
+/// 整条监听 + OCR 管线（对常驻托盘程序是灾难性的）。
+///
+/// 这里用 `catch_unwind` 把 PDF 抽取的 panic 兜成 `None`，让畸形 PDF 跟其它抽不出
+/// 文本的文件一样安静跳过。（`updater.rs`/`watch.rs`/`ocr_worker.rs` 那侧的锁也已
+/// 改成抗毒化的 `unwrap_or_else(|e| e.into_inner())`，两层防御各自都能兜住。）
+fn extract_pdf(path: &Path) -> Option<String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pdf_extract::extract_text(path).ok()
+    }))
+    .ok()
+    .flatten()
 }
 
 /// 打开一个 zip 包里的单个条目，读成字节。条目不存在/包本身打不开（损坏、

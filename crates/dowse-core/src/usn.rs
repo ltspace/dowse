@@ -348,7 +348,7 @@ pub(crate) fn bootstrap_fast_roots(
                     stats.matched
                 );
                 let (catchup_stats, new_cursor) = {
-                    let mut guard = updater.lock().expect("updater mutex poisoned");
+                    let mut guard = updater.lock().unwrap_or_else(|e| e.into_inner());
                     catchup(&vol, &vol_roots, &mut table, cursor, &mut guard)?
                 };
                 eprintln!(
@@ -368,7 +368,7 @@ pub(crate) fn bootstrap_fast_roots(
             None => {
                 eprintln!("{vol}: 无可用游标（首次启动或已过期），退回 mtime 全扫对账");
                 for root in &vol_roots {
-                    let mut guard = updater.lock().expect("updater mutex poisoned");
+                    let mut guard = updater.lock().unwrap_or_else(|e| e.into_inner());
                     if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {
                         eprintln!("启动对账 {} 失败: {err}", root.display());
                     }

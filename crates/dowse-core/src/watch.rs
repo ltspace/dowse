@@ -245,7 +245,7 @@ fn flush_batch(
     let batch = debouncer.drain();
     let batch_size = batch.len();
 
-    let mut guard = updater.lock().expect("updater mutex poisoned");
+    let mut guard = updater.lock().unwrap_or_else(|e| e.into_inner());
     match guard.apply(&batch) {
         Ok(outcome) => {
             drop(guard);
@@ -290,7 +290,7 @@ pub fn watch_roots_auto(
     // `reconcile::reconcile_orphans` 的文档）。用完整的 roots 列表（不区分
     // 快慢车道）跑一次即可，孤儿判定跟"这个根走不走 MFT 快速路径"无关。
     {
-        let mut guard = updater.lock().expect("updater mutex poisoned");
+        let mut guard = updater.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(err) = crate::reconcile::reconcile_orphans(roots, &mut guard) {
             eprintln!("孤儿文档清理失败: {err}");
         }
@@ -327,7 +327,7 @@ pub fn watch_roots_auto(
 
     if fast_roots.is_empty() || volume_starts.is_none() {
         for root in &slow_roots {
-            let mut guard = updater.lock().expect("updater mutex poisoned");
+            let mut guard = updater.lock().unwrap_or_else(|e| e.into_inner());
             if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {
                 eprintln!("启动对账 {} 失败: {err}", root.display());
             }
@@ -349,7 +349,7 @@ pub fn watch_roots_auto(
             let on_progress = on_progress.clone();
             Some(std::thread::spawn(move || {
                 for root in &slow_roots {
-                    let mut guard = updater.lock().expect("updater mutex poisoned");
+                    let mut guard = updater.lock().unwrap_or_else(|e| e.into_inner());
                     if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {
                         eprintln!("启动对账 {} 失败: {err}", root.display());
                     }
@@ -396,7 +396,7 @@ pub fn watch_roots_auto(
                 // 尝试快车道，这里只影响"这一次运行"。
                 eprintln!("快车道启动失败，本次运行把这些根并入慢车道继续: {err}");
                 for root in &fast_roots_for_fallback {
-                    let mut guard = updater_for_fallback.lock().expect("updater mutex poisoned");
+                    let mut guard = updater_for_fallback.lock().unwrap_or_else(|e| e.into_inner());
                     if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {
                         eprintln!("启动对账 {} 失败: {err}", root.display());
                     }

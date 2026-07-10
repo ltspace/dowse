@@ -191,7 +191,7 @@ fn flush_batch(
     }
 
     let commit_result = {
-        let mut guard = updater.lock().expect("updater mutex poisoned");
+        let mut guard = updater.lock().unwrap_or_else(|e| e.into_inner());
         guard.stage_and_commit_ocr_batch(&items)
     };
 

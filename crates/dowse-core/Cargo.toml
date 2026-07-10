@@ -11,6 +11,12 @@ readme = "README.md"
 keywords = ["search", "fulltext", "chinese", "tantivy", "jieba"]
 categories = ["text-processing", "filesystem"]
 
+# docs.rs 默认在 Linux 上构建文档，会漏掉本 crate 大量 #[cfg(windows)] 的 API
+# （NTFS/USN 快速索引、Windows OCR）。指定 Windows 目标，让文档页完整呈现。
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc"]
+
 [dependencies]
 anyhow.workspace = true
 chardetng = "1.0.0"

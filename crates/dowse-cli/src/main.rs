@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use dowse_core::{
-    DEFAULT_WORKERS, IndexUpdater, OcrPipeline, Searcher, WatchProgress, drain_ocr_queue,
-    rebuild_index_with_progress, registered_roots, watch_roots_auto,
+    DEFAULT_WORKERS, IndexUpdater, OcrPipeline, Searcher, SortMode, WatchProgress, display_path,
+    drain_ocr_queue, index_status, rebuild_index_with_progress, registered_roots, watch_roots_auto,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -34,7 +34,15 @@ enum Command {
         /// 最多返回几条
         #[arg(short = 'n', long, default_value_t = 10)]
         limit: usize,
+        /// 只保留这些扩展名的结果（不含点，逗号分隔，如 md,pdf,txt）
+        #[arg(long, value_delimiter = ',')]
+        ext: Vec<String>,
+        /// 排序方式：relevance（默认）/ mtime_desc / mtime_asc / size_desc
+        #[arg(long)]
+        sort: Option<String>,
     },
+    /// 查看索引概况：位置、文档总数、落盘体积、已注册根目录、最近更新时间
+    Status,
     /// 前台运行文件监听，实时打印收到的事件和防抖后提交的批次（调试用），Ctrl+C 退出
     Watch {
         /// 要监听的目录；不给就用上次建索引时注册的根目录
@@ -92,20 +100,39 @@ fn main() -> Result<()> {
                 println!("OCR 完成: 识别 {} 张图片", ocr_stats.processed);
             }
         }
-        Command::Search { query, limit } => {
+        Command::Search {
+            query,
+            limit,
+            ext,
+            sort,
+        } => {
             let query_str = query.join(" ");
+            if query_str.trim().is_empty() {
+                anyhow::bail!("查询词不能为空，用法：dowse search <词> [更多词…]");
+            }
             let searcher = Searcher::open(&index_dir()?)?;
-            let hits = searcher.search(&query_str, limit)?;
+            let sort_mode = SortMode::parse(sort.as_deref());
+            // clap 的 value_delimiter 已经按逗号拆好；空 Vec 表示不过滤扩展名。
+            let ext_refs: Vec<&str> = ext.iter().map(String::as_str).collect();
+            let ext_group = (!ext_refs.is_empty()).then_some(ext_refs.as_slice());
+            let hits = searcher.search_advanced(&query_str, limit, ext_group, sort_mode)?;
 
             if hits.is_empty() {
                 println!("没搜到。索引里共 {} 篇文档。", searcher.num_docs());
                 return Ok(());
             }
             for hit in &hits {
-                println!("\x1b[36m{}\x1b[0m  (score {:.2})", hit.path, hit.score);
+                // 只有相关性排序下 BM25 分数才有意义；按 mtime/size 排时分数固定为 0，
+                // 展示它会误导，所以这两档不打分数。
+                if sort_mode == SortMode::Relevance {
+                    println!("\x1b[36m{}\x1b[0m  (score {:.2})", hit.path, hit.score);
+                } else {
+                    println!("\x1b[36m{}\x1b[0m", hit.path);
+                }
                 println!("  {}", render_snippet(&hit.snippet, &hit.highlighted));
             }
         }
+        Command::Status => status()?,
         Command::Watch { dir } => watch(dir)?,
         Command::Mcp => run_mcp()?,
     }
@@ -130,6 +157,62 @@ async fn run_mcp_async() -> Result<()> {
     let service = server.serve(stdio()).await.context("MCP server 启动失败")?;
     service.waiting().await.context("MCP server 异常退出")?;
     Ok(())
+}
+
+/// `dowse status`：读一份只读索引概况打给用户——索引在哪、收了多少篇、
+/// 占多大盘、注册了哪些根、最近一次更新在什么时候。
+fn status() -> Result<()> {
+    let dir = index_dir()?;
+    let status = index_status(&dir)
+        .context("读不到索引状态，先跑 `dowse index <目录>` 建一次索引")?;
+
+    println!("索引位置: {}", dir.display());
+    println!("文档总数: {}", status.num_docs);
+    println!("落盘体积: {}", human_bytes(status.disk_size_bytes));
+    if let Some(t) = status.last_updated {
+        // elapsed() 只在系统时钟回拨这种罕见情况会 Err，退化成"刚刚"即可。
+        let ago = t.elapsed().map(human_ago).unwrap_or_else(|_| "刚刚".to_owned());
+        println!("最近更新: {ago}");
+    }
+    if status.roots.is_empty() {
+        println!("已注册根目录: (无)");
+    } else {
+        println!("已注册根目录:");
+        for r in &status.roots {
+            println!("  {}", display_path(&r.to_string_lossy()));
+        }
+    }
+    Ok(())
+}
+
+/// 把字节数格式化成人类可读的 B/KB/MB/GB（1024 进制）。
+fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
+}
+
+/// 把时长格式化成"X 秒/分钟/小时/天前"。
+fn human_ago(d: std::time::Duration) -> String {
+    let s = d.as_secs();
+    if s < 60 {
+        format!("{s} 秒前")
+    } else if s < 3600 {
+        format!("{} 分钟前", s / 60)
+    } else if s < 86400 {
+        format!("{} 小时前", s / 3600)
+    } else {
+        format!("{} 天前", s / 86400)
+    }
 }
 
 /// `dowse watch`：挂上文件监听，把事件和提交批次实时打到终端，Ctrl+C 退出。

@@ -6,10 +6,15 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "本地文件极速全文搜索的命令行工具与 MCP 服务：tantivy + jieba 中文分词，支持增量索引与实时监听"
+description = "Windows 本地文件极速全文搜索的命令行工具与 MCP 服务：tantivy + jieba 中文分词，支持增量索引与实时监听"
 readme = "README.md"
 keywords = ["search", "fulltext", "cli", "chinese", "mcp"]
 categories = ["command-line-utilities", "text-processing"]
+
+# docs.rs 默认在 Linux 构建，本工具主要面向 Windows；指定 Windows 目标构建文档。
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc"]
 
 [dependencies]
 anyhow.workspace = true
