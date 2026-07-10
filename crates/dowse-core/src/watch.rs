@@ -337,6 +337,13 @@ pub fn watch_roots_auto(
         });
     }
 
+    // 非 Windows 平台上 volume_starts 恒为 None（见上面的 #[cfg(not(windows))]
+    // 分支），所以上面这个 if 恒真，一定会在到达这里之前 return——这条
+    // unreachable! 纯粹是给编译器一个 `Result<()>` 类型的桩，让函数在非
+    // Windows 平台上也能完成类型检查，不代表这条路径真的会被执行到。
+    #[cfg(not(windows))]
+    unreachable!("非 Windows 平台上面的 if 恒真，已在此之前 return");
+
     #[cfg(windows)]
     {
         let on_progress = Arc::new(on_progress);
