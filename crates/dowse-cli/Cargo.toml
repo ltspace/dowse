@@ -1,6 +1,6 @@
 [package]
 name = "dowse"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
@@ -8,4 +8,4 @@ anyhow.workspace = true
 clap = { version = "4.6.1", features = ["derive"] }
 ctrlc = "3.5.2"
 directories = "6.0.0"
-dowse-core = { version = "0.1.0", path = "../dowse-core" }
+dowse-core = { version = "0.3.0", path = "../dowse-core" }
