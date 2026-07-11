@@ -396,6 +396,25 @@ mod tests {
         assert_eq!(parse_usn_record_v2_bytes(&bytes), None);
     }
 
+    #[test]
+    fn odd_name_length_drops_trailing_partial_code_unit_without_panicking() {
+        // 正常构造 "XY" 两个 UTF-16 单元（4 字节），再把 FileNameLength 改成奇数 3。
+        // chunks_exact(2) 会忽略最后不满 2 字节的尾巴，只解出第一个字符 'X'——
+        // 这里钉住这个既有行为，确认它不 panic 且如实丢弃尾字节。
+        let mut bytes = build_usn_record_v2_bytes(5, 1, 1, USN_REASON_FILE_CREATE, 0, "XY");
+        bytes[56..58].copy_from_slice(&3u16.to_ne_bytes());
+        let record = parse_usn_record_v2_bytes(&bytes).expect("奇数长度也应解析成功而不 panic");
+        assert_eq!(record.name, "X", "尾部不满 2 字节的部分应被丢弃");
+    }
+
+    #[test]
+    fn zero_name_length_yields_empty_name() {
+        let bytes = build_usn_record_v2_bytes(6, 1, 1, USN_REASON_FILE_CREATE, 0, "");
+        let record = parse_usn_record_v2_bytes(&bytes).expect("空文件名也应解析成功");
+        assert_eq!(record.name, "");
+        assert_eq!(record.frn, 6);
+    }
+
     fn root_path() -> PathBuf {
         if cfg!(windows) {
             PathBuf::from(r"C:\watch")
