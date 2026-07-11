@@ -4,3 +4,12 @@ members = ["crates/dowse-core", "crates/dowse-cli", "crates/dowse-app/src-tauri"
 
 [workspace.dependencies]
 anyhow = "1"
+
+# 安装包预算 15MB（设计文档："超了就是 bug"）。默认 release profile 只优化速度
+# 不管体积，实测裸 exe 就快 20MB 了——换成体积优先 + LTO + 去符号表，
+# 拿一点点搜索延迟换体积，80ms 的搜索预算本来就宽裕，够花。
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
