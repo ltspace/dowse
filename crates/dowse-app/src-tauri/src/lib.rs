@@ -1,5 +1,7 @@
+mod autohide;
 mod commands;
 mod config;
+mod context_menu;
 mod file_icons;
 mod highlight;
 mod state;
@@ -11,7 +13,9 @@ use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+use autohide::AutoHideSuppressor;
 use config::ConfigState;
+use context_menu::ContextMenuTarget;
 use file_icons::FileIconCache;
 use state::SearchState;
 use watcher::WatchController;
@@ -39,6 +43,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -59,6 +64,8 @@ pub fn run() {
         .manage(SearchState::load_initial())
         .manage(WatchController::new())
         .manage(FileIconCache::new())
+        .manage(AutoHideSuppressor::new())
+        .manage(ContextMenuTarget::new())
         .invoke_handler(tauri::generate_handler![
             commands::index_status,
             commands::search,
@@ -69,6 +76,8 @@ pub fn run() {
             commands::get_effect_level,
             commands::get_glass_alpha,
             commands::file_icon,
+            commands::set_pinned,
+            context_menu::show_result_context_menu,
         ])
         .setup(move |app| {
             // 快捷键抢注册失败（常见原因：被输入法或别的常驻工具占用了）
@@ -83,6 +92,10 @@ pub fn run() {
             let window = app
                 .get_webview_window("main")
                 .expect("tauri.conf.json 里定义的 main 窗口应该存在");
+
+            // 结果行右键菜单（context_menu::show_result_context_menu）在这个窗口上
+            // popup，选中项通过这里回调；托盘菜单是另一套独立的事件注册，见 tray.rs。
+            window.on_menu_event(context_menu::handle_context_menu_event);
 
             let cfg = app.state::<ConfigState>().get();
             let level = window_fx::apply_with_fallback(
@@ -121,7 +134,16 @@ pub fn run() {
         .on_window_event(|window, event| {
             // 进程常驻，浮窗只是 show/hide：失焦即隐藏，符合 Spotlight/Raycast 的习惯，
             // 也避免用户切到别的窗口后浮窗还悬在最上层碍事。
+            //
+            // v0.5.0 加了"抑制自动隐藏"的豁免（见 autohide.rs）：结果行右键弹出
+            // 原生菜单期间、以及用户点了图钉固定期间，这次失焦不该触发隐藏。
+            // 注意这里只影响这一条自动隐藏路径——Esc（前端直接调
+            // `getCurrentWindow().hide()`）和全局呼出快捷键的 `hide_window()`
+            // 都不经过这里，固定状态不会拦住用户主动收起浮窗。
             if let WindowEvent::Focused(false) = event {
+                if window.state::<AutoHideSuppressor>().is_suppressed() {
+                    return;
+                }
                 let _ = window.hide();
             }
         })

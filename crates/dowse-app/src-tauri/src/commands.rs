@@ -4,6 +4,7 @@ use serde::Serialize;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::autohide::AutoHideSuppressor;
 use crate::config::ConfigState;
 use crate::file_icons::FileIconCache;
 use crate::highlight::{TextSegment, highlight_name, segments_from_ranges};
@@ -89,18 +90,30 @@ pub fn index_status(search: State<SearchState>, config: State<ConfigState>) -> I
     }
 }
 
+/// 浮窗"类型/排序"两个幽灵态下拉的取值透传到这里，翻译成 dowse-core 的
+/// 分组常量/`SortMode`——语义（哪个字符串对应哪组扩展名、哪种排序）由
+/// dowse-core 一处定义，Tauri 这层只是原样转发字符串，不在这里重复一份映射表。
+/// `ext_group`/`sort` 都是可选参数：不传、传 "all"/未知字符串都表示不筛选/
+/// 用默认相关性排序，前端传坏了也不会让搜索报错。
 #[tauri::command]
 pub fn search(
     search: State<SearchState>,
     query: String,
     limit: usize,
+    ext_group: Option<String>,
+    sort: Option<String>,
 ) -> Result<Vec<SearchHitDto>, String> {
     let guard = search.0.lock().map_err(|_| "搜索状态异常".to_string())?;
     let Some(searcher) = guard.as_ref() else {
         return Ok(Vec::new());
     };
 
-    let hits = searcher.search(&query, limit).map_err(|e| e.to_string())?;
+    let group = dowse_core::ext_group_by_name(ext_group.as_deref());
+    let sort_mode = dowse_core::SortMode::parse(sort.as_deref());
+
+    let hits = searcher
+        .search_advanced(&query, limit, group, sort_mode)
+        .map_err(|e| e.to_string())?;
     Ok(hits
         .into_iter()
         .map(|hit| {
@@ -210,4 +223,12 @@ pub fn rebuild_index(
         skipped: stats.skipped,
         seconds: stats.seconds,
     })
+}
+
+/// 图钉固定开关：前端点了图钉按钮就调这个命令，把会话级的"抑制失焦自动
+/// 隐藏"状态同步到 Rust 侧（见 autohide.rs 的 `AutoHideSuppressor`）。
+/// 不落盘——重启应用后前端按钮状态和这里的计数器都回到初始值。
+#[tauri::command]
+pub fn set_pinned(suppressor: State<AutoHideSuppressor>, pinned: bool) {
+    suppressor.set_pinned(pinned);
 }
