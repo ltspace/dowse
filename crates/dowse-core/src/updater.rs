@@ -8,7 +8,9 @@ use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 use crate::events::{PendingChange, PendingOp};
-use crate::indexer::{add_file_document, add_image_document_with_content, commit_index_tail};
+use crate::indexer::{
+    add_file_document, add_image_document_with_content, commit_index_tail, walk_index_files,
+};
 use crate::ocr::is_image;
 use crate::ocr_queue::OcrQueue;
 use crate::{Fields, build_schema, register_tokenizers};
@@ -63,19 +65,16 @@ impl IndexUpdater {
         for change in batch {
             match change.op {
                 PendingOp::Upsert => {
-                    // 先删后加，天然幂等：同一 path 无论之前有没有、内容变没变，
-                    // 结果都是"索引里恰好有这一篇的最新版本"。
-                    self.delete_exact(&change.path);
-                    if is_image(&change.path) {
-                        touched_image = true;
-                    }
-                    if add_file_document(&self.writer, &self.fields, &change.path, &self.index_dir)?
-                    {
-                        outcome.upserted += 1;
-                    } else {
-                        // 抽不出文本（不支持的格式/损坏/文件已消失）：先删的动作已生效，
-                        // 相当于把这篇从索引里拿掉。计一次 skip，不中断整批。
-                        outcome.skipped += 1;
+                    self.upsert_one(&change.path, &mut outcome, &mut touched_image)?;
+                }
+                PendingOp::UpsertTree => {
+                    // 目录整体新建/移入：真正"这个目录下有哪些文件"的完整 walk
+                    // 在这里做（消费侧线程），不在 notify 回调线程里做——大目录
+                    // 阻塞秒级会让 OS 的目录变更缓冲溢出丢事件，见
+                    // `watch.rs::emit_upsert` 的说明。展开后逐个文件走跟普通
+                    // `Upsert` 完全一样的先删后加逻辑。
+                    for file in walk_index_files(&change.path) {
+                        self.upsert_one(&file, &mut outcome, &mut touched_image)?;
                     }
                 }
                 PendingOp::Remove => {
@@ -104,6 +103,30 @@ impl IndexUpdater {
             || self.writer.commit().map(|_| ()).context("增量提交失败"),
         )?;
         Ok(outcome)
+    }
+
+    /// 单个文件的先删后加：`PendingOp::Upsert` 和展开后的 `PendingOp::UpsertTree`
+    /// 都走这里，保证两条路径落进索引、计数的逻辑完全一致。
+    fn upsert_one(
+        &self,
+        path: &Path,
+        outcome: &mut BatchOutcome,
+        touched_image: &mut bool,
+    ) -> Result<()> {
+        // 先删后加，天然幂等：同一 path 无论之前有没有、内容变没变，
+        // 结果都是"索引里恰好有这一篇的最新版本"。
+        self.delete_exact(path);
+        if is_image(path) {
+            *touched_image = true;
+        }
+        if add_file_document(&self.writer, &self.fields, path, &self.index_dir)? {
+            outcome.upserted += 1;
+        } else {
+            // 抽不出文本（不支持的格式/损坏/文件已消失）：先删的动作已生效，
+            // 相当于把这篇从索引里拿掉。计一次 skip，不中断整批。
+            outcome.skipped += 1;
+        }
+        Ok(())
     }
 
     /// OCR worker 写回一张图片的最终识别结果：先删旧文档、写入新内容、立刻单独

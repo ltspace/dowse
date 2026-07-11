@@ -9,7 +9,6 @@ use notify::event::{ModifyKind, RemoveKind, RenameMode};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 
 use crate::events::{Debouncer, QUIET_WINDOW_MS, WatchEvent};
-use crate::indexer::walk_index_files;
 use crate::updater::{BatchOutcome, IndexUpdater};
 
 /// 文件系统事件源抽象。里程碑 3 用 notify 做第一个实现；里程碑 6 的 NTFS
@@ -90,13 +89,15 @@ fn translate_event(event: &Event, tx: &Sender<WatchEvent>) {
     }
 }
 
-/// 一个路径的新增/修改：目录就展开成其下每个文件的 upsert，文件就直接 upsert。
-/// 目录整体被移入或复制进监听范围时，notify 只报一个目录事件，得自己下钻。
+/// 一个路径的新增/修改：目录就发一个 UpsertDir 标记，文件就直接 upsert。
+/// 目录整体被移入或复制进监听范围时，notify 只报一个目录事件，得自己下钻——
+/// 但下钻的完整 walk **不能**在这里做：这里是 notify 的回调线程，大目录的
+/// walk 阻塞到秒级会让 OS 的目录变更缓冲（Windows 上是 ReadDirectoryChangesW
+/// 的内核缓冲区，容量有限）来不及被消费而溢出丢事件。真正的展开挪到消费侧
+/// 线程（`IndexUpdater::apply` 处理 `PendingOp::UpsertTree` 时）去做。
 fn emit_upsert(path: &Path, tx: &Sender<WatchEvent>) {
     if path.is_dir() {
-        for file in walk_index_files(path) {
-            let _ = tx.send(WatchEvent::Upsert(file));
-        }
+        let _ = tx.send(WatchEvent::UpsertDir(path.to_path_buf()));
     } else {
         // 文件已不在（建了又秒删）也照发 Upsert：更新器会先删后发现无内容可加，
         // 等价于一次删除，幂等无害。

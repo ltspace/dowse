@@ -16,6 +16,11 @@ pub const WATER_LEVEL: usize = 5000;
 pub enum WatchEvent {
     /// 文件新建或修改。两者索引操作相同（先删后加，天然幂等），归成一类。
     Upsert(PathBuf),
+    /// 目录整体新建或移入监听范围：只是个标记，不带展开后的文件列表。
+    /// 真正"这个目录底下有哪些文件"的完整 walk 挪到消费侧线程做（见
+    /// `watch.rs::emit_upsert` 的说明）——产出这个事件的一方（notify 回调
+    /// 线程）绝不能自己做这个耗时的 walk，否则会挡住它继续收新事件。
+    UpsertDir(PathBuf),
     /// 单个文件删除。
     Remove(PathBuf),
     /// 目录删除、或改名移出监听范围：整棵子树要从索引里前缀圈选删除。
@@ -30,6 +35,10 @@ pub enum WatchEvent {
 pub enum PendingOp {
     /// 先删后加。新建、修改、重命名的新名都落到这里。
     Upsert,
+    /// 目录整体新建/移入：展开成其下每个文件各自 upsert，在消费侧线程
+    /// （`IndexUpdater::apply`）里做实际的 walk，跟 `RemoveTree` 是同一套
+    /// "前缀圈选"思路的镜像——只不过一个是删、一个是加。
+    UpsertTree,
     /// 删除单个文件的索引文档。
     Remove,
     /// 前缀圈选删除整棵子树。
@@ -73,6 +82,9 @@ impl Debouncer {
         match event {
             WatchEvent::Upsert(p) => {
                 self.pending.insert(p, PendingOp::Upsert);
+            }
+            WatchEvent::UpsertDir(p) => {
+                self.pending.insert(p, PendingOp::UpsertTree);
             }
             WatchEvent::Remove(p) => {
                 self.pending.insert(p, PendingOp::Remove);
@@ -288,6 +300,24 @@ mod tests {
             vec![PendingChange {
                 path: dir,
                 op: PendingOp::RemoveTree
+            }]
+        );
+    }
+
+    /// UpsertDir 只是个标记，防抖队列原样记成 UpsertTree，不在这一层展开成
+    /// 具体文件——真正的 walk 挪到了消费侧（`IndexUpdater::apply`），这里只
+    /// 验证标记本身的合并语义。
+    #[test]
+    fn upsert_dir_maps_to_upsert_tree() {
+        let r = root();
+        let mut d = Debouncer::new(vec![r.clone()]);
+        let dir = under(&r, "moved-in-dir");
+        d.push(WatchEvent::UpsertDir(dir.clone()));
+        assert_eq!(
+            d.drain(),
+            vec![PendingChange {
+                path: dir,
+                op: PendingOp::UpsertTree
             }]
         );
     }
