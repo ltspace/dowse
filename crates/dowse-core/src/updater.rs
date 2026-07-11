@@ -8,7 +8,7 @@ use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 use crate::events::{PendingChange, PendingOp};
-use crate::indexer::{add_file_document, add_image_document_with_content};
+use crate::indexer::{add_file_document, add_image_document_with_content, commit_index_tail};
 use crate::ocr::is_image;
 use crate::ocr_queue::OcrQueue;
 use crate::{Fields, build_schema, register_tokenizers};
@@ -87,14 +87,22 @@ impl IndexUpdater {
                 }
             }
         }
-        self.writer.commit().context("增量提交失败")?;
-        if touched_image {
-            // 这一批里确实有图片新增/变更被塞进了 OCR 队列的内存态，落一次盘——
-            // 没有图片的批次（大多数文本编辑场景）不用为这个多写一次文件。
-            OcrQueue::for_index_dir(&self.index_dir)
-                .save()
-                .context("保存 OCR 队列状态失败")?;
-        }
+        // 顺序不变量同 `commit_index_tail` 的文档：队列必须先于 commit 落盘，
+        // 崩溃后重复识别一张 pending 图片是幂等无害的，反过来会丢数据。
+        commit_index_tail(
+            || {
+                if touched_image {
+                    // 这一批里确实有图片新增/变更被塞进了 OCR 队列的内存态，落一次盘——
+                    // 没有图片的批次（大多数文本编辑场景）不用为这个多写一次文件。
+                    OcrQueue::for_index_dir(&self.index_dir)
+                        .save()
+                        .context("保存 OCR 队列状态失败")
+                } else {
+                    Ok(())
+                }
+            },
+            || self.writer.commit().map(|_| ()).context("增量提交失败"),
+        )?;
         Ok(outcome)
     }
 
