@@ -32,3 +32,10 @@ export interface IndexStatus {
 }
 
 export type EffectLevel = 'acrylic' | 'mica' | 'solid';
+
+/// 面板可视不透明度的明/暗两套 CSS alpha（0~1），跟托盘"透明度"三档挂钩，
+/// 见 Rust 侧 window_fx.rs 的 `TransparencyTier`/`GlassAlpha`。
+export interface GlassAlpha {
+	light: number;
+	dark: number;
+}

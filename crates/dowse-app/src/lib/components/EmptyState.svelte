@@ -45,8 +45,8 @@
 		align-items: center;
 		justify-content: center;
 		text-align: center;
-		gap: 6px;
-		padding: 32px;
+		gap: 8px;
+		padding: 36px;
 	}
 
 	.title {
@@ -65,7 +65,7 @@
 	}
 
 	.pick {
-		margin-top: 10px;
+		margin-top: 12px;
 		font: inherit;
 		font-size: 12px;
 		font-weight: 500;
