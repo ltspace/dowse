@@ -383,9 +383,7 @@ pub fn watch_roots_auto(
                 // 一路扣到 slow_handle.join() 之后才让调用方知道——这段时间里
                 // 这些根本来会完全没人监听。下次启动时仍然会重新探测，重新
                 // 尝试快车道，这里只影响"这一次运行"。
-                eprintln!(
-                    "快车道启动失败，本次运行把这些根并入慢车道继续: {err}"
-                );
+                eprintln!("快车道启动失败，本次运行把这些根并入慢车道继续: {err}");
                 for root in &fast_roots_for_fallback {
                     let mut guard = updater_for_fallback.lock().expect("updater mutex poisoned");
                     if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {

@@ -200,11 +200,17 @@ fn upsert_tree_expands_directory_into_every_file_inside() -> Result<()> {
     std::fs::write(moved_in.join("a.md"), "子文件甲 watermelon")?;
     std::fs::write(moved_in.join("b.md"), "子文件乙 watermelon")?;
     std::fs::create_dir(moved_in.join("nested"))?;
-    std::fs::write(moved_in.join("nested").join("c.md"), "嵌套子文件 watermelon")?;
+    std::fs::write(
+        moved_in.join("nested").join("c.md"),
+        "嵌套子文件 watermelon",
+    )?;
 
     let mut updater = IndexUpdater::open(index_dir.path())?;
     let outcome = updater.apply(&[upsert_tree(&moved_in)])?;
-    assert_eq!(outcome.upserted, 3, "目录下三个文件（含嵌套）都应被展开收录");
+    assert_eq!(
+        outcome.upserted, 3,
+        "目录下三个文件（含嵌套）都应被展开收录"
+    );
 
     assert_eq!(
         count_hits(index_dir.path(), "watermelon"),
