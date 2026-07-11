@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["crates/dowse-core", "crates/dowse-cli"]
+
+[workspace.dependencies]
+anyhow = "1"
