@@ -67,6 +67,9 @@ fn main() -> Result<()> {
 }
 
 /// 把命中区间染成黄色。区间是字节偏移，tantivy 保证落在 UTF-8 边界上。
+/// 依赖 `SearchHit.highlighted` 的契约：区间已按起点排序且互不重叠
+/// （由 dowse-core::searcher::normalize_ranges 保证），这里游标只前进不回退，
+/// 不重复处理有序不重叠的假设。
 fn render_snippet(fragment: &str, ranges: &[std::ops::Range<usize>]) -> String {
     let mut out = String::with_capacity(fragment.len() + ranges.len() * 10);
     let mut cursor = 0;
