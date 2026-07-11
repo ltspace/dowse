@@ -348,7 +348,7 @@
 	}
 
 	.search-input::placeholder {
-		color: var(--fg-tertiary);
+		color: var(--fg-placeholder);
 	}
 
 	/* 装饰性光标：呼出瞬间从 0 高度弹到全高的那一下手感，见 playCaretFlourish。
@@ -391,7 +391,7 @@
 
 	.toast {
 		position: absolute;
-		bottom: 42px;
+		bottom: 50px;
 		left: 50%;
 		transform: translateX(-50%);
 		background: var(--toast-bg);
