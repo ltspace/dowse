@@ -39,6 +39,9 @@ impl Searcher {
     pub fn open(index_dir: &Path) -> Result<Self> {
         let index = Index::open_in_dir(index_dir)
             .context("打不开索引目录，先跑 `dowse index <目录>` 建一次索引")?;
+        // schema 版本对不上（旧索引缺 mtime/size 字段）直接报错、提示重建，
+        // 不拿旧字段布局硬搜——搜出来的结果不可靠。
+        crate::meta::ensure_schema_version(index_dir)?;
         register_tokenizers(&index);
 
         let (_, fields) = build_schema();
