@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SearchHit, TextSegment } from '../types';
+	import { kindOf } from '$lib/fileKind';
 	import FileIcon from './FileIcon.svelte';
 	import Segments from './Segments.svelte';
 
@@ -12,11 +13,15 @@
 		segments: TextSegment[] | null;
 		loading: boolean;
 	} = $props();
+
+	// 代码类文件的正文用等宽字体排——对齐缩进、行号视觉上更容易对上，
+	// 文档类（md/txt 等）保持正文字体不变。
+	let isCode = $derived(hit !== null && kindOf(hit.path) === 'code');
 </script>
 
 <div class="preview">
 	{#if !hit}
-		<p class="hint">选中左侧结果查看预览</p>
+		<p class="hint">选中结果后在此查看预览。</p>
 	{:else}
 		<div class="header">
 			<FileIcon path={hit.path} />
@@ -27,9 +32,9 @@
 			{#if loading}
 				<p class="hint">加载中…</p>
 			{:else if segments && segments.length > 0}
-				<p class="context"><Segments {segments} /></p>
+				<p class="context" class:mono={isCode}><Segments {segments} /></p>
 			{:else}
-				<p class="hint">没有可预览的文本上下文</p>
+				<p class="hint">没有可预览的文本内容。</p>
 			{/if}
 		</div>
 	{/if}
@@ -60,6 +65,7 @@
 	}
 
 	.path {
+		font-family: var(--font-mono);
 		font-size: 11px;
 		color: var(--fg-tertiary);
 		word-break: break-all;
@@ -79,6 +85,11 @@
 		color: var(--fg-secondary);
 		white-space: pre-wrap;
 		word-break: break-word;
+	}
+
+	.context.mono {
+		font-family: var(--font-mono);
+		font-size: 12px;
 	}
 
 	.hint {
