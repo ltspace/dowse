@@ -112,8 +112,23 @@ fn main() -> Result<()> {
             }
             let searcher = Searcher::open(&index_dir()?)?;
             let sort_mode = SortMode::parse(sort.as_deref());
+            // SortMode::parse 对未知值静默回退到相关性排序（其契约被浮窗等前端共用，
+            // 不能改）。CLI 这层补一句提示：用户显式给了 --sort、却落回了默认档，且给
+            // 的又不是 "relevance" 本身，说明这个值没被识别，别让用户以为标志生效了。
+            if let Some(raw) = sort.as_deref()
+                && sort_mode == SortMode::Relevance
+                && raw != "relevance"
+            {
+                eprintln!("未知的排序方式 \"{raw}\"，已回退到相关性排序。");
+            }
             // clap 的 value_delimiter 已经按逗号拆好；空 Vec 表示不过滤扩展名。
-            let ext_refs: Vec<&str> = ext.iter().map(String::as_str).collect();
+            // 过滤掉空串：`--ext md,,txt` 这类多逗号会拆出 ""，若不剔除会去匹配"没有
+            // 扩展名"的文件，悄悄放宽结果。省略 --ext（空 Vec）仍表示不过滤。
+            let ext_refs: Vec<&str> = ext
+                .iter()
+                .map(String::as_str)
+                .filter(|s| !s.is_empty())
+                .collect();
             let ext_group = (!ext_refs.is_empty()).then_some(ext_refs.as_slice());
             let hits = searcher.search_advanced(&query_str, limit, ext_group, sort_mode)?;
 
