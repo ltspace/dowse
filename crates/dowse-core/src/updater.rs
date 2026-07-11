@@ -83,6 +83,17 @@ impl IndexUpdater {
         Ok(outcome)
     }
 
+    /// 内部索引句柄，供启动对账枚举当前所有文档时开只读 reader 用。
+    /// 对账和实时更新共用同一个 updater、同一个 index，避免开第二个 writer。
+    pub(crate) fn index(&self) -> &Index {
+        &self.index
+    }
+
+    /// 字段句柄，供对账读回文档的 path/mtime/size。
+    pub(crate) fn fields(&self) -> &Fields {
+        &self.fields
+    }
+
     /// 按精确 path 删一篇文档。删不存在的 term 是空操作，幂等无害。
     fn delete_exact(&self, path: &Path) {
         let term = Term::from_field_text(self.fields.path, &path.to_string_lossy());
