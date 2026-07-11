@@ -21,6 +21,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import GhostDropdown from '$lib/components/GhostDropdown.svelte';
 	import PinButton from '$lib/components/PinButton.svelte';
+	import AnimatedNumber from '$lib/components/AnimatedNumber.svelte';
 	import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
 	import { formatHotkey } from '$lib/hotkey';
 
@@ -519,7 +520,7 @@
 		{:else}
 			<div class="results">
 				<div class="results-heading">
-					<span>结果 · {hits.length} 条</span>
+					<span>结果 · <AnimatedNumber value={hits.length} /> 条</span>
 					{#if lastSearchMs !== null}
 						<span class="search-ms">{Math.round(lastSearchMs)}ms</span>
 					{/if}
