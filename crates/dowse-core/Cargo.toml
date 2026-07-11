@@ -19,3 +19,11 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+# OCR 管线只在 Windows 上跑（Windows.Media.Ocr 是系统自带 API），target 限定的依赖块
+# 让非 Windows 平台上 cargo check 完全不用拉这几个包——ocr.rs 里对应代码也用
+# #[cfg(windows)] 隔开，非 Windows 走一个"不可用"的桩实现。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Media_Ocr", "Globalization", "Graphics_Imaging", "Storage", "Storage_Streams", "Foundation", "Foundation_Collections"] }
+windows-future = "0.3"
+pollster = "0.4"
