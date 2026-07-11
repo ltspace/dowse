@@ -31,26 +31,60 @@ impl EffectLevelState {
     }
 }
 
+/// 是不是在远程会话（RDP/AVD/VDI）里跑。Windows 的 DWM 在远程会话下会把
+/// Acrylic/Mica 系统材质悄悄换成一块不透明的纯色回退——`DwmSetWindowAttribute`
+/// 调用本身仍然返回成功，应用层没有公开 API 能查到"其实没在磨砂"，
+/// 所以没法靠 `set_effects` 的返回值判断。用 `SESSIONNAME` 环境变量识别：
+/// 本机控制台会话固定是 "Console"，RDP 会话是 "RDP-Tcp#<id>"。
+fn is_remote_session() -> bool {
+    std::env::var("SESSIONNAME")
+        .map(|name| !name.eq_ignore_ascii_case("console"))
+        .unwrap_or(false)
+}
+
 /// 材质降级链：Acrylic → Mica → 纯色。玻璃效果是锦上添花，
 /// 拿不到就退一级，绝不能让"要不到 Acrylic"变成窗口显示不出来。
 /// `transparency_enabled = false` 时（用户在托盘关了透明效果）直接落纯色。
+///
+/// 注意：`window.set_effects(..).is_ok()` 只反映"把请求发给了 DWM"，不反映
+/// 材质是否真的生效——Tauri 内部把 `DwmSetWindowAttribute` 的 HRESULT 直接丢掉了，
+/// 永远返回 `Ok`。所以这条链天然测不出"申请到了但显示成纯色"这种情况，
+/// 远程会话就是最典型的例子，得单独识别、单独处理。
 pub fn apply_with_fallback(window: &WebviewWindow, transparency_enabled: bool) -> EffectLevel {
     if !transparency_enabled {
         let _ = window.set_effects(None);
+        eprintln!("材质降级：用户在托盘关闭了透明效果，直接落纯色");
+        return EffectLevel::Solid;
+    }
+
+    if is_remote_session() {
+        // 材质请求照发（不影响功能，万一某些远程会话其实支持），但已知
+        // DWM 在这种场景下大概率会把 Acrylic/Mica 悄悄渲染成不透明纯色——
+        // 与其让前端顶着"acrylic"的名头显示一块来源不明的纯色，不如如实
+        // 上报 Solid，让前端走我们自己设计过的深灰兜底，观感可控。
+        let acrylic = EffectsBuilder::new().effect(Effect::Acrylic).build();
+        let _ = window.set_effects(acrylic);
+        eprintln!(
+            "材质降级：检测到远程会话（SESSIONNAME={}），Acrylic/Mica 在此场景下会被 DWM 渲染成不透明纯色，直接落纯色",
+            std::env::var("SESSIONNAME").unwrap_or_default()
+        );
         return EffectLevel::Solid;
     }
 
     let acrylic = EffectsBuilder::new().effect(Effect::Acrylic).build();
     if window.set_effects(acrylic).is_ok() {
+        eprintln!("材质降级：Acrylic 申请已发出");
         return EffectLevel::Acrylic;
     }
 
     let mica = EffectsBuilder::new().effect(Effect::Mica).build();
     if window.set_effects(mica).is_ok() {
+        eprintln!("材质降级：Acrylic 申请失败，落到 Mica");
         return EffectLevel::Mica;
     }
 
     let _ = window.set_effects(None);
+    eprintln!("材质降级：Acrylic 和 Mica 都申请失败，落到纯色");
     EffectLevel::Solid
 }
 
