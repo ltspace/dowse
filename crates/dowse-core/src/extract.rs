@@ -313,4 +313,162 @@ mod tests {
 
         assert!(extract_text(&path).is_none());
     }
+
+    // --- 编码探测（read_text_smart）---
+
+    #[test]
+    fn gbk_encoded_chinese_txt_is_decoded_to_utf8() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gbk_sample.txt");
+        // 一段足够长的中文，探测器才有把握判成 GBK 而不是别的单字节编码。
+        let content = "这是一段用于编码探测的中文测试文本，\
+包含足够多的汉字以便字符集识别器把它判定为国标编码而不是别的编码，\
+季度对账哨兵词也在这里出现。";
+        let (gbk_bytes, _, unmappable) = encoding_rs::GBK.encode(content);
+        assert!(!unmappable, "测试文本应能完整编码成 GBK");
+        fs::write(&path, &gbk_bytes).unwrap();
+
+        let text = read_text_smart(&path).expect("GBK 文件应能解码出文本");
+        assert!(text.contains("季度对账哨兵词"), "应还原出原始中文: {text}");
+        assert!(text.contains("国标编码"));
+    }
+
+    #[test]
+    fn utf8_bom_file_is_decoded_without_leading_bom_char() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bom_sample.txt");
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice("带 BOM 的内容 marker-bom".as_bytes());
+        fs::write(&path, &bytes).unwrap();
+
+        let text = read_text_smart(&path).expect("带 BOM 的 UTF-8 文件应能解码");
+        assert!(text.contains("marker-bom"));
+        assert!(text.contains("带 BOM 的内容"));
+        assert!(!text.starts_with('\u{FEFF}'), "BOM 应被剥掉，不进正文");
+    }
+
+    #[test]
+    fn empty_text_file_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty_sample.txt");
+        fs::write(&path, b"").unwrap();
+        assert!(read_text_smart(&path).is_none());
+    }
+
+    #[test]
+    fn file_over_size_limit_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oversized_sample.txt");
+        // 用 set_len 造一个刚超过上限的稀疏文件，只撑大小、不真写 20MB 数据。
+        let f = fs::File::create(&path).unwrap();
+        f.set_len(MAX_FILE_BYTES + 1).unwrap();
+        drop(f);
+        assert!(extract_text(&path).is_none(), "超过体积上限的文件应被跳过");
+    }
+
+    #[test]
+    fn misdetected_encoding_falls_back_to_lossy_utf8() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("misdetect_sample.txt");
+        // 先放一大段合法 GBK 中文，让探测器有把握判成 GBK；结尾附一个非法的 GBK
+        // 多字节序列（0x81 是前导字节，0x20 不是合法后继），逼 encoding_rs 解码时
+        // had_errors=true，从而走 read_text_smart 里"猜错后有损回退"那条分支。
+        let (gbk, _, _) = encoding_rs::GBK
+            .encode("编码探测有损回退分支覆盖用例需要一段足够长的国标中文来稳定命中 GBK 判定");
+        let mut buf = b"FALLBACK_MARKER_".to_vec();
+        buf.extend_from_slice(&gbk);
+        buf.extend_from_slice(&[0x81, 0x20]);
+        fs::write(&path, &buf).unwrap();
+
+        let text = read_text_smart(&path).expect("回退分支也要返回 Some");
+        // 有损回退把整段字节当 UTF-8 读：ASCII 前缀存活，GBK 中文变成替换符，
+        // 因此不会出现正确解出来的中文——以此证明走的是回退而非正常 GBK 解码。
+        assert!(text.contains("FALLBACK_MARKER_"));
+        assert!(
+            !text.contains("国标中文"),
+            "若走了正常 GBK 解码就会出现真中文，说明没命中回退分支: {text}"
+        );
+    }
+
+    // --- 畸形 Office 文件 ---
+
+    #[test]
+    fn docx_missing_document_entry_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("no_document.docx");
+        // 合法 zip，但缺少 word/document.xml 这个正文条目。
+        write_zip(&path, &[("docProps/core.xml", "<coreProperties/>")]);
+        assert!(extract_text(&path).is_none());
+    }
+
+    #[test]
+    fn docx_with_truncated_xml_keeps_text_before_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("truncated.docx");
+        // 正文先给一段合法内容，再接一个对不上的结束标签，触发 XML 解析中途出错
+        // （extract_tagged_text 里的 Err(_) => break 兜底分支）。
+        let document_xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>partial-before-corruption</w:t></w:r></w:p></w:bogusEnd>"#;
+        write_zip(&path, &[("word/document.xml", document_xml)]);
+
+        let text = extract_text(&path).expect("损坏前已抽到的文本应保留");
+        assert!(text.contains("partial-before-corruption"));
+    }
+
+    #[test]
+    fn whitespace_only_docx_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blank.docx");
+        let document_xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>    </w:t></w:r></w:p></w:body></w:document>"#;
+        write_zip(&path, &[("word/document.xml", document_xml)]);
+        assert!(extract_text(&path).is_none());
+    }
+
+    #[test]
+    fn xlsx_skips_unreadable_sheet_and_processes_the_rest() {
+        use zip::CompressionMethod;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial_sheets.xlsx");
+
+        // sheet1 用 Stored（不压缩）写入，稍后直接改坏它的明文字节，读取时 CRC
+        // 校验失败 → read_to_end 返回 Err → 命中 extract_xlsx 里的 continue 分支。
+        // sheet2 正常，验证坏掉一个 sheet 不影响其它 sheet 的抽取。
+        {
+            let file = fs::File::create(&path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            zip.start_file("xl/worksheets/sheet1.xml", stored).unwrap();
+            zip.write_all(
+                br#"<worksheet><sheetData><row><c t="inlineStr"><is><t>CORRUPTME_SHEET1_UNIQUE</t></is></c></row></sheetData></worksheet>"#,
+            )
+            .unwrap();
+            zip.start_file("xl/worksheets/sheet2.xml", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(
+                br#"<worksheet><sheetData><row><c t="inlineStr"><is><t>survivor-sheet2-text</t></is></c></row></sheetData></worksheet>"#,
+            )
+            .unwrap();
+            zip.finish().unwrap();
+        }
+
+        // 把 sheet1 的 Stored 明文里某个字节改掉，让它和存档记录的 CRC 对不上。
+        let mut raw = fs::read(&path).unwrap();
+        let needle = b"CORRUPTME_SHEET1_UNIQUE";
+        let pos = raw
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .expect("应能在 zip 明文里找到 sheet1 的标记");
+        raw[pos] ^= 0xFF;
+        fs::write(&path, &raw).unwrap();
+
+        let text = extract_text(&path).expect("坏掉一个 sheet 后其它 sheet 仍应产出文本");
+        assert!(
+            text.contains("survivor-sheet2-text"),
+            "健康 sheet 的文本应被抽出"
+        );
+        assert!(
+            !text.contains("CORRUPTME_SHEET1_UNIQUE"),
+            "坏掉的 sheet 内容不应出现在结果里"
+        );
+    }
 }
