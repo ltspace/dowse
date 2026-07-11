@@ -68,9 +68,8 @@ Overlay app (released; current v0.2.1, v0.3.0 coming soon): `Alt+\`` to summon, 
                  └──────┬──────────┬──────────┬────────────┘
                         │          │          │
                  ┌──────┴───┐ ┌────┴─────┐ ┌──┴───────────┐
-                 │ dowse-app │ │ dowse-cli │ │ MCP server*  │
+                 │ dowse-app │ │ dowse-cli │ │ MCP server   │
                  └──────────┘ └──────────┘ └──────────────┘
-                                               * planned
 ```
 
 One index core, three consumers. dowse-app is a Tauri 2 + Svelte 5 resident overlay; the CLI is for scripting and debugging; the MCP server exposes the local index to AI agents.
@@ -85,7 +84,7 @@ Index updates run on a two-tier scheme: while running, file system events drive 
 | 2 | Overlay: global hotkey, Acrylic material, keyboard navigation | In progress |
 | 3 | Incremental indexing: file watching, startup reconciliation | Done |
 | 4 | OCR pipeline: screenshot text into the index | Technical validation done |
-| 5 | MCP server | Planned |
+| 5 | MCP server | Done |
 | 6 | NTFS MFT / USN Journal fast path | Planned |
 
 ## Stack
