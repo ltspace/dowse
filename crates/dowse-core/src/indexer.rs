@@ -355,11 +355,7 @@ pub fn rebuild_index_with_progress(
     // 重复识别一张 pending 图片是幂等无害的，方向反过来才会丢数据，见
     // `commit_index_tail` 的文档。
     commit_index_tail(
-        || {
-            ocr_queue
-                .save()
-                .context("保存 OCR 队列状态失败")
-        },
+        || ocr_queue.save().context("保存 OCR 队列状态失败"),
         || writer.commit().map(|_| ()).context("索引提交失败"),
     )?;
 
@@ -509,7 +505,8 @@ mod tests {
     fn remove_dir_all_retrying_propagates_non_permission_errors() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist");
-        let err = remove_dir_all_retrying(&missing).expect_err("目录不存在应该报错，不应该重试掩盖");
+        let err =
+            remove_dir_all_retrying(&missing).expect_err("目录不存在应该报错，不应该重试掩盖");
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 }
