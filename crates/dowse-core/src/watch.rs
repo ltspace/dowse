@@ -403,7 +403,9 @@ pub fn watch_roots_auto(
                 // 尝试快车道，这里只影响"这一次运行"。
                 eprintln!("快车道启动失败，本次运行把这些根并入慢车道继续: {err}");
                 for root in &fast_roots_for_fallback {
-                    let mut guard = updater_for_fallback.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut guard = updater_for_fallback
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {
                         eprintln!("启动对账 {} 失败: {err}", root.display());
                     }

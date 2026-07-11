@@ -163,15 +163,18 @@ async fn run_mcp_async() -> Result<()> {
 /// 占多大盘、注册了哪些根、最近一次更新在什么时候。
 fn status() -> Result<()> {
     let dir = index_dir()?;
-    let status = index_status(&dir)
-        .context("读不到索引状态，先跑 `dowse index <目录>` 建一次索引")?;
+    let status =
+        index_status(&dir).context("读不到索引状态，先跑 `dowse index <目录>` 建一次索引")?;
 
     println!("索引位置: {}", dir.display());
     println!("文档总数: {}", status.num_docs);
     println!("落盘体积: {}", human_bytes(status.disk_size_bytes));
     if let Some(t) = status.last_updated {
         // elapsed() 只在系统时钟回拨这种罕见情况会 Err，退化成"刚刚"即可。
-        let ago = t.elapsed().map(human_ago).unwrap_or_else(|_| "刚刚".to_owned());
+        let ago = t
+            .elapsed()
+            .map(human_ago)
+            .unwrap_or_else(|_| "刚刚".to_owned());
         println!("最近更新: {ago}");
     }
     if status.roots.is_empty() {
