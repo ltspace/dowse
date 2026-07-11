@@ -26,6 +26,14 @@ export interface IndexStats {
 	indexed: number;
 	skipped: number;
 	seconds: number;
+	/** 建索引结束时 OCR 队列里还没识别完的图片数，0 表示没有存量。 */
+	ocr_pending: number;
+}
+
+/** `dowse://rebuild-progress` 事件载荷——建索引期间每处理若干文件推一次。 */
+export interface IndexProgress {
+	processed: number;
+	path: string;
 }
 
 export interface IndexStatus {
