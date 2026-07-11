@@ -58,6 +58,11 @@
 		null
 	);
 
+	// 本次搜索耗时（发起请求到结果上屏），页脚小字用；null 表示还没有可展示
+	// 的一次搜索（空查询/首次挂载）。刻意不做滚动动画——每次搜索都变，
+	// 动画反而晃眼。
+	let lastSearchMs = $state<number | null>(null);
+
 	let extGroup = $state<ExtGroup>('all');
 	let sortOption = $state<SortOption>('relevance');
 	let typeMenuOpen = $state(false);
@@ -106,17 +111,23 @@
 		if (q.trim().length === 0) {
 			hits = [];
 			selectedIndex = 0;
+			lastSearchMs = null;
 			return;
 		}
 		const timer = setTimeout(async () => {
+			// 计时窗口：从这里"发起请求"到下面结果赋值"上屏"，不含防抖等待——
+			// 页脚毫秒数是给用户看引擎有多快，不是给他们看输了多久的字。
+			const startedAt = performance.now();
 			try {
 				const results = await api.search(q, 50, group, sort);
 				if (token !== searchToken) return;
 				hits = results;
 				selectedIndex = 0;
+				lastSearchMs = performance.now() - startedAt;
 			} catch (err) {
 				if (token !== searchToken) return;
 				hits = [];
+				lastSearchMs = null;
 				console.error('search failed', err);
 			}
 		}, 30);
@@ -480,7 +491,12 @@
 			/>
 		{:else}
 			<div class="results">
-				<div class="results-heading">结果 · {hits.length} 条</div>
+				<div class="results-heading">
+					<span>结果 · {hits.length} 条</span>
+					{#if lastSearchMs !== null}
+						<span class="search-ms">{Math.round(lastSearchMs)}ms</span>
+					{/if}
+				</div>
 				<ResultList
 					{hits}
 					{selectedIndex}
@@ -608,10 +624,23 @@
 	   分支，不会渲染到这里。 */
 	.results-heading {
 		flex-shrink: 0;
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
 		padding: 12px 16px 8px;
 		font-size: 11px;
 		letter-spacing: 0.04em;
 		color: var(--fg-tertiary);
+	}
+
+	/* 页脚毫秒数：不解释、不加图标，比小标题本身再淡一档，等宽数字继承
+	   全局 body 的 tabular-nums。刻意不做滚动动画（AnimatedNumber）——
+	   每次搜索都变，滚一下反而晃眼，见 +page.svelte 顶部 lastSearchMs 的注释。 */
+	.search-ms {
+		flex-shrink: 0;
+		opacity: 0.7;
+		letter-spacing: 0;
 	}
 
 	.divider-v {
