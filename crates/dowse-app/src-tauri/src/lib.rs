@@ -10,6 +10,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 use config::ConfigState;
 use state::SearchState;
+use window_fx::EffectLevelState;
 
 /// 全局呼出快捷键：Alt+Space。已跟用户确认过，不做成可配置项（M2 范围内）。
 fn toggle_shortcut() -> Shortcut {
@@ -48,6 +49,7 @@ pub fn run() {
             commands::open_file,
             commands::reveal_in_folder,
             commands::rebuild_index,
+            commands::get_effect_level,
         ])
         .setup(move |app| {
             // 快捷键抢注册失败（常见原因：被输入法或别的常驻工具占用了 Alt+Space）
@@ -61,7 +63,8 @@ pub fn run() {
                 .expect("tauri.conf.json 里定义的 main 窗口应该存在");
 
             let transparency_enabled = app.state::<ConfigState>().get().transparency_enabled;
-            window_fx::apply_with_fallback(&window, transparency_enabled);
+            let level = window_fx::apply_with_fallback(&window, transparency_enabled);
+            app.manage(EffectLevelState::new(level));
             let _ = window_fx::position_upper_center(&window);
 
             tray::build(app.handle())?;
