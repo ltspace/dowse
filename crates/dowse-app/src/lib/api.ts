@@ -47,6 +47,12 @@ export function rebuildIndex(dir: string): Promise<IndexStats> {
 	return invoke('rebuild_index', { dir });
 }
 
+/// 添加一个索引根（多根索引）：不动现有内容，只对新目录做一次收录。
+/// 空态"添加文件夹"链接走这个，跟 rebuildIndex 是姊妹命令，返回同一套统计。
+export function addRoot(dir: string): Promise<IndexStats> {
+	return invoke('add_root', { dir });
+}
+
 export function getEffectLevel(): Promise<EffectLevel> {
 	return invoke('get_effect_level');
 }

@@ -37,9 +37,12 @@ pub struct PreviewDto {
 pub struct IndexStatusDto {
     pub has_index: bool,
     pub num_docs: u64,
-    /// 上次成功建索引的目录，回显在"重建索引"引导上，也是空态"当前索引根"
-    /// 那行小字的数据来源（症状 5：选完目录之后要能看得见）。
-    pub last_target_dir: Option<String>,
+    /// 已注册的全部索引根，已经过 `dowse_core::display_path` 清洗（剥掉
+    /// Windows 扩展长度路径的 `\\?\`/`\\?\UNC\` 前缀）——这是"给人看的路径
+    /// 一律过 display_path"这条规矩在多根场景下唯一的出口，前端拿到手就是
+    /// 可以直接渲染的文本，不用（也不应该）自己再处理一遍。空态浮窗据此列出
+    /// 全部根（症状 5：选完目录之后要能看得见）。
+    pub roots: Vec<String>,
 }
 
 fn file_name_of(path: &str) -> String {
@@ -77,21 +80,27 @@ pub fn get_hotkey(config: State<ConfigState>) -> String {
 }
 
 /// 前端打开浮窗/挂载时调用一次，用来决定空输入/无索引/有索引三种引导状态。
+/// 根列表直接读索引的 meta（`dowse_core::registered_roots`），不是走
+/// `ConfigState::target_dir`——多根索引之后 meta 里的 roots 才是唯一可信的
+/// 来源（`ConfigState::target_dir` 只在"从没建过索引"的引导流程里还有用）。
 #[tauri::command]
-pub fn index_status(search: State<SearchState>, config: State<ConfigState>) -> IndexStatusDto {
+pub fn index_status(search: State<SearchState>) -> IndexStatusDto {
     let guard = search.0.lock().expect("search state mutex poisoned");
     let (has_index, num_docs) = match guard.as_ref() {
         Some(s) => (true, s.num_docs()),
         None => (false, 0),
     };
-    let last_target_dir = config
-        .get()
-        .target_dir
-        .map(|p| p.to_string_lossy().into_owned());
+    let roots = crate::config::index_dir()
+        .ok()
+        .and_then(|dir| dowse_core::registered_roots(&dir).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| dowse_core::display_path(&p.to_string_lossy()))
+        .collect();
     IndexStatusDto {
         has_index,
         num_docs,
-        last_target_dir,
+        roots,
     }
 }
 
@@ -232,6 +241,22 @@ pub fn rebuild_index(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto
     })?;
 
     let result = crate::rebuild::perform_rebuild(&app, target);
+    app.state::<RebuildGuard>().end();
+    result
+}
+
+/// 添加一个索引根（多根索引，里程碑 7）。浮窗空态"添加文件夹"链接走这个
+/// 命令——跟 `rebuild_index` 是姊妹命令：都由 `rebuild::perform_*` 实现、
+/// 都用 `RebuildGuard` 防并发、都靠 `dowse://rebuild-progress` 事件直播进度，
+/// 唯一区别是这个不动现有索引内容，只对新根做一次目录树 upsert。
+#[tauri::command]
+pub fn add_root(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto, String> {
+    if !app.state::<RebuildGuard>().try_begin() {
+        return Err("已有一次建索引正在进行中，请稍候".to_string());
+    }
+    let target = PathBuf::from(&dir);
+
+    let result = crate::rebuild::perform_add_root(&app, target);
     app.state::<RebuildGuard>().end();
     result
 }

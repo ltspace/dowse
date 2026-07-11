@@ -47,7 +47,8 @@
 	let selectedIndex = $state(0);
 	let hasIndex = $state<boolean | null>(null);
 	let numDocs = $state(0);
-	let lastTargetDir = $state<string | null>(null);
+	/** 已注册的全部索引根（已过 display_path 清洗），空态逐行列出。 */
+	let roots = $state<string[]>([]);
 	let previewSegments = $state<TextSegment[] | null>(null);
 	let previewLoading = $state(false);
 	let rebuildState = $state<'idle' | 'rebuilding' | 'error'>('idle');
@@ -114,11 +115,11 @@
 			const status = await api.indexStatus();
 			hasIndex = status.has_index;
 			numDocs = status.num_docs;
-			lastTargetDir = status.last_target_dir;
+			roots = status.roots;
 		} catch {
 			hasIndex = false;
 			numDocs = 0;
-			lastTargetDir = null;
+			roots = [];
 		}
 	}
 
@@ -246,6 +247,38 @@
 			applyOcrPending(stats.ocr_pending);
 			// 冷报告替换掉实时计数，停留片刻后收回整个引导层——用户看得见
 			// "完成了"，不需要再点一下才能回到搜索态。
+			const report = { indexed: stats.indexed, seconds: stats.seconds };
+			indexingReport = report;
+			setTimeout(() => {
+				if (indexingReport !== report) return;
+				rebuildState = 'idle';
+				indexingReport = null;
+			}, 1800);
+		} catch (err) {
+			rebuildState = 'error';
+			rebuildError = String(err);
+			indexingPhase = 'idle';
+		}
+	}
+
+	/// 空态"添加文件夹"链接：多根索引场景下追加一个根，不动现有内容——跟
+	/// pickDirectoryAndRebuild 走的是同一套"实时直播 + 冷报告"UI 节奏
+	/// （同一批 dowse://rebuild-progress 事件），唯一区别是调用的命令
+	/// （add_root 而不是 rebuild_index）和完成后不整体替换 hasIndex/roots，
+	/// 而是照常刷新（roots 会多出这一项）。
+	async function pickDirectoryAndAddRoot() {
+		const dir = await open({ directory: true, multiple: false, title: '选择要添加的文件夹' });
+		if (!dir || Array.isArray(dir)) return;
+
+		rebuildState = 'rebuilding';
+		indexingPhase = 'text';
+		indexingProcessed = 0;
+		indexingCurrentFile = '';
+		indexingReport = null;
+		try {
+			const stats = await api.addRoot(dir);
+			refreshIndexStatus();
+			applyOcrPending(stats.ocr_pending);
 			const report = { indexed: stats.indexed, seconds: stats.seconds };
 			indexingReport = report;
 			setTimeout(() => {
@@ -507,6 +540,13 @@
 			refreshIndexingStatus();
 			showToast(`索引重建失败：${evt.payload}`);
 		});
+		// 托盘"移除"文件夹的成功回执——移除没有"收录数"可言，走独立事件而不是
+		// 复用 dowse://rebuild-done（那个的 toast 文案是"收录 N 个文件"，套用
+		// 到移除操作上语义是反的）。
+		const unlistenRootRemoved = listen<number>('dowse://root-removed', (evt) => {
+			refreshIndexStatus();
+			showToast(`已移除该文件夹，删除 ${evt.payload} 篇文档。`);
+		});
 		// 建索引"实时直播"：全程监听，不只在 rebuildState === 'rebuilding' 时才挂——
 		// 事件只在 rebuild_index 命令执行期间才会发出，不重建时这个监听器闲置无害。
 		const unlistenRebuildProgress = listen<IndexProgress>('dowse://rebuild-progress', (evt) => {
@@ -528,6 +568,7 @@
 			unlistenGlassAlpha.then((f) => f());
 			unlistenRebuildDone.then((f) => f());
 			unlistenRebuildError.then((f) => f());
+			unlistenRootRemoved.then((f) => f());
 			unlistenRebuildProgress.then((f) => f());
 			unlistenOcrProgress.then((f) => f());
 		};
@@ -594,9 +635,9 @@
 				{indexingProcessed}
 				{indexingCurrentFile}
 				{indexingReport}
-				{lastTargetDir}
+				{roots}
 				onpick={pickDirectoryAndRebuild}
-				onchangefolder={pickDirectoryAndRebuild}
+				onaddfolder={pickDirectoryAndAddRoot}
 			/>
 		{:else}
 			<div class="results">
