@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use dowse_core::{IndexUpdater, NotifyEventSource, Searcher, rebuild_index, run_watch};
 
+mod common;
+
 /// 单文件修改到可搜索的性能预算：< 3s（含 500ms 防抖）。这条预算只在本地
 /// 验证——CI 共享跑机的 I/O/调度抖动没法保证 3s 内完成，跑机繁忙时曾经
 /// 超时炸过（GitHub Actions run 29163364914）。CI 环境下跳过预算断言，
@@ -112,6 +114,10 @@ fn end_to_end_watch_add_delete_rename_latency() -> Result<()> {
     stop.store(true, Ordering::Relaxed);
     let _ = watch_handle.join();
 
+    // 线程已经 join 完，watch 线程内那份 Arc 克隆也跟着线程退出被 drop 了；
+    // 这里 drop 的是最后一份引用，真正释放 IndexUpdater 持有的索引写入端句柄。
+    drop(updater);
+
     // —— 打印实测耗时，供最终汇报 ——
     println!("\n===== M3 端到端实测耗时（预算：单文件修改到可搜索 < 3s）=====");
     println!("写入到可搜索:      {:>6} ms", t_add.as_millis());
@@ -142,5 +148,8 @@ fn end_to_end_watch_add_delete_rename_latency() -> Result<()> {
             t_rename_new.as_millis()
         );
     }
+
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
