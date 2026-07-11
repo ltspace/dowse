@@ -3,6 +3,7 @@
 	import { listen } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { open } from '@tauri-apps/plugin-dialog';
+	import { animate } from 'motion';
 
 	import * as api from '$lib/api';
 	import type { EffectLevel, SearchHit, TextSegment } from '$lib/types';
@@ -22,6 +23,7 @@
 	let toast = $state('');
 
 	let inputEl: HTMLInputElement | undefined = $state();
+	let panelEl: HTMLDivElement | undefined = $state();
 
 	let selectedHit = $derived(hits[selectedIndex] ?? null);
 
@@ -177,6 +179,18 @@
 		inputEl?.select();
 	}
 
+	// 呼出的手感：轻微放大 + 淡入，全程压在 120ms 以内的弹簧物理，不是缓动曲线。
+	// 用显式 keyframe（而不是读当前样式）保证每次呼出都从同一个起点播，
+	// 不会因为上一次动画没播完就被打断而出现错位。
+	function playShowAnimation() {
+		if (!panelEl) return;
+		animate(
+			panelEl,
+			{ opacity: [0, 1], scale: [0.98, 1] },
+			{ type: 'spring', bounce: 0.2, duration: 0.12 }
+		);
+	}
+
 	onMount(() => {
 		refreshIndexStatus();
 		focusAndSelectAll();
@@ -188,6 +202,7 @@
 		const unlistenShown = listen('dowse://shown', () => {
 			refreshIndexStatus();
 			focusAndSelectAll();
+			playShowAnimation();
 		});
 		const unlistenEffect = listen<EffectLevel>('dowse://effect-level', (evt) => {
 			document.documentElement.dataset.effect = evt.payload;
@@ -209,7 +224,7 @@
 	});
 </script>
 
-<div class="panel">
+<div class="panel" bind:this={panelEl}>
 	<div class="search-row">
 		<svg class="search-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
 			<circle cx="8" cy="8" r="5.4" stroke="currentColor" stroke-width="1.4" />
@@ -332,5 +347,17 @@
 		padding: 7px 14px;
 		border-radius: 8px;
 		pointer-events: none;
+		animation: toast-in 0.12s ease-out;
+	}
+
+	@keyframes toast-in {
+		from {
+			opacity: 0;
+			transform: translate(-50%, 4px);
+		}
+		to {
+			opacity: 1;
+			transform: translate(-50%, 0);
+		}
 	}
 </style>
