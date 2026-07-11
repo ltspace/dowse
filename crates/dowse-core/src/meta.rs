@@ -1,3 +1,8 @@
+//! 索引目录旁的元数据文件（`<index_dir>-meta.json`）：schema 版本号、已注册
+//! 的索引根目录列表（[`IndexMeta::roots`]）、每个卷的 USN 游标基线。打开索引
+//! 前用 [`ensure_schema_version`] 校验版本，不匹配就报错提示重建，不做静默
+//! 迁移。[`registered_roots`] 是对外读根列表的入口。
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

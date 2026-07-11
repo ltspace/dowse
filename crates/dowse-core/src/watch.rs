@@ -1,3 +1,9 @@
+//! 实时文件监听主循环。[`EventSource`] 是事件源抽象（当前实现
+//! [`NotifyEventSource`]，基于 notify 库），[`run_watch`] 消费事件源产出的
+//! [`crate::WatchEvent`]，经防抖队列合并后批量提交给 `IndexUpdater`。
+//! [`watch_roots_auto`] 是给宿主用的高层入口：按每个根的卷能力自动选事件源
+//! （NTFS 快车道或 notify 慢车道），并在内部起对账线程追平启动前的变化。
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, Sender};

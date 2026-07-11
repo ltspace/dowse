@@ -1,3 +1,7 @@
+//! 只读索引状态查询。[`index_status`] 汇总文档总数、已注册根目录、索引落盘
+//! 体积、最近更新时间（[`IndexStatus`]），供 CLI/MCP 一类查询命令使用，
+//! 不修改索引任何状态。
+
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 

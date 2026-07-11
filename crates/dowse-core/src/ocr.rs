@@ -1,3 +1,8 @@
+//! 图片文件判定（[`is_image`]）、OCR 原始输出的清洗（[`clean_cjk_spaces`]/
+//! [`dual_form_content`]，去掉 Windows OCR 引擎在中文单字之间插入的空格），
+//! 以及 Windows OCR 引擎的薄封装（`engine_impl` 子模块；非 Windows 平台是
+//! 返回"不可用"的桩实现，让 dowse-core 在其他平台上也能正常编译）。
+
 use std::path::Path;
 
 /// 支持 OCR 的图片扩展名（不含点，小写）。见设计文档第三节"索引侧变化"。

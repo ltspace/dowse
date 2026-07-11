@@ -1,3 +1,8 @@
+//! 文件系统事件的归一类型（[`WatchEvent`]）和防抖合并队列（[`Debouncer`]）。
+//! 事件源（notify 或 USN Journal）产出 `WatchEvent`，`Debouncer` 在静默窗口
+//! 内把同一路径的多次事件合并成一条最终意图（[`PendingChange`]），供
+//! `IndexUpdater` 批量落进索引。纯内存逻辑，不碰时钟也不碰磁盘。
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

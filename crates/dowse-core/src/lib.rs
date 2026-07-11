@@ -1,3 +1,44 @@
+//! Windows 本地全文搜索引擎的核心库。
+//!
+//! 索引层基于 tantivy 倒排索引，内容分词用 `tokenizer` 模块把文本按"汉字/
+//! 非汉字"切段：汉字段接 jieba 按中文习惯分词，非汉字段按字母数字切词并统一
+//! 小写。`extract` 模块负责文本抽取——纯文本用 chardetng/encoding_rs 探测
+//! 编码，另外支持 PDF、Office（docx/xlsx/pptx）等常见格式。`ocr`/`ocr_worker`
+//! 模块接入 Windows 系统自带的 OCR 引擎，让截图和图片里的文字也能被搜到
+//! （仅 Windows；其余平台是诚实报"不可用"的桩实现）。`mft`/`usn` 模块在
+//! NTFS 卷 + 管理员权限下走 MFT 快速枚举和 USN Journal 增量监听，跳过全盘
+//! 目录遍历；拿不到这个前提条件就诚实降级到基于 walkdir + notify 的目录
+//! 遍历/文件监听，两条路径产出的索引结果完全一致，调用方感知不到差别。
+//!
+//! # 核心入口
+//!
+//! - 建索引：[`rebuild_index`] 全量重建；多根索引的增删见 [`add_root`]/
+//!   [`remove_root`]。
+//! - 搜索：[`Searcher::open`] 打开一个索引的只读句柄，[`Searcher::search`]
+//!   执行查询（`search_filtered`/`search_advanced` 支持扩展名过滤和排序）。
+//! - 实时监听：[`watch_roots_auto`] 按卷能力自动选快车道或慢车道，持续把
+//!   文件系统变化落进索引。
+//! - 启动对账：[`reconcile`]，追平程序未运行期间发生的文件变化。
+//! - OCR：[`drain_ocr_queue`] 一次性处理完当前排队的图片；
+//!   [`OcrPipeline::start`] 启动后台 worker 池持续处理新入队的图片。
+//!
+//! # 示例
+//!
+//! ```no_run
+//! use std::path::Path;
+//! use dowse_core::{Searcher, rebuild_index};
+//!
+//! let index_dir = Path::new("./my-index");
+//! let target_dir = Path::new("./my-documents");
+//!
+//! rebuild_index(index_dir, target_dir).unwrap();
+//!
+//! let searcher = Searcher::open(index_dir).unwrap();
+//! for hit in searcher.search("关键词", 20).unwrap() {
+//!     println!("{}: {}", hit.path, hit.snippet);
+//! }
+//! ```
+
 mod cursor;
 mod events;
 mod ext_groups;

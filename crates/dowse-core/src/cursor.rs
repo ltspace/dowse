@@ -1,3 +1,7 @@
+//! USN 游标：判定一个持久化的读取位置是否还能用来回放追平 USN Journal
+//! （[`cursor_is_usable`]），以及多卷并发读取线程和 `run_watch` 消费者之间
+//! "游标只能在对应变更确认提交后才允许前移"的同步机制（[`CursorSync`]）。
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::sync::mpsc::{SendError, Sender};

@@ -1,3 +1,9 @@
+//! FRN（文件参照号）表：MFT/USN 记录只带"这一层"的信息（父是谁、自己叫
+//! 什么），完整路径要顺着父链拼上去。[`FrnTable`] 维护 FRN → (父 FRN, 名字)
+//! 的内存表，配一份"监听根 FRN → 根路径"的锚点表，从任意 FRN 往上找到锚点
+//! 就能拼出完整路径（[`FrnTable::reconstruct_path`]）；链断了返回 `None`，
+//! 调用方自己决定是丢弃还是用 FRN 打开句柄反查兜底。
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

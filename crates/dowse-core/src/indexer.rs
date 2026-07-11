@@ -1,3 +1,9 @@
+//! 全量重建索引（[`rebuild_index`]/[`rebuild_index_with_progress`]）：删掉旧
+//! 索引目录、按卷能力选文件枚举方式（MFT 快速枚举或 walkdir 遍历）、逐个
+//! 文件抽取内容建文档。也提供文本/图片文档的建文档逻辑（[`add_file_document`]
+//! 等），供增量更新（`updater.rs`）复用，保证全量重建和增量更新写进索引的
+//! 字段完全一致。
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
