@@ -3,6 +3,8 @@
    在玻璃上叠一层薄的中性色调（不是自己画假磨砂），以及"关闭透明效果"
    或降级到纯色时的兜底背景。面板底色刻意留得比较透——背景大片透进来，
    可读性靠 Acrylic 的重度模糊 + 前景色对比度撑住，不是靠堆高底色不透明度。
+   实测过一版 alpha 0.55，糊成一片死灰——玻璃感是模糊本身做的功，这层
+   滤镜只该薄薄一层，压到 0.30～0.42 区间（参照 docs/DESIGN-UI-TOKENS.md 第一节）。
 
    品牌色：很淡的水蓝（呼应"探水杖"的意象），只用在活跃元素上——
    选中态背景/描边、输入框光标与聚焦态、命中词高亮。大面积的玻璃和
@@ -30,7 +32,7 @@
 	--fg-secondary: #6b6b75;
 	--fg-tertiary: #9494a0;
 	--divider: rgba(0, 0, 0, 0.08);
-	--glass-tint: rgba(255, 255, 255, 0.65);
+	--glass-tint: rgba(255, 255, 255, 0.42);
 	--solid-bg: #f3f3f6;
 	--row-hover: rgba(0, 0, 0, 0.035);
 	--scrollbar-thumb: rgba(0, 0, 0, 0.16);
@@ -45,6 +47,10 @@
 
 	--toast-bg: rgba(28, 28, 32, 0.92);
 	--toast-fg: #f1f1f4;
+
+	/* 占位符字色：不是单独一档浅灰，而是前景色本身降到 40～50% 不透明度——
+	   Raycast 的输入框占位符就是这么处理的，颜色跟主题走，不需要单独调。 */
+	--fg-placeholder: color-mix(in srgb, var(--fg-primary) 45%, transparent);
 
 	/* Win11 系统原生窗口圆角半径，跟 DWM 的 DWMWCP_ROUND 裁切对齐——
 	   面板自己的圆角和窗口本体被裁掉的形状必须是同一个数，否则四角
@@ -79,8 +85,8 @@
 		--fg-primary: #f5f5f7;
 		--fg-secondary: #9d9da6;
 		--fg-tertiary: #77777f;
-		--divider: rgba(255, 255, 255, 0.09);
-		--glass-tint: rgba(20, 20, 24, 0.55);
+		--divider: rgba(255, 255, 255, 0.1);
+		--glass-tint: rgba(18, 18, 22, 0.32);
 		--solid-bg: #1c1c20;
 		--row-hover: rgba(255, 255, 255, 0.045);
 		--scrollbar-thumb: rgba(255, 255, 255, 0.18);
@@ -165,7 +171,7 @@ input {
 mark.hl {
 	background: var(--accent-soft);
 	color: var(--accent-strong);
-	font-weight: 600;
+	font-weight: 500;
 	border-radius: 3px;
 	box-decoration-break: clone;
 	-webkit-box-decoration-break: clone;
