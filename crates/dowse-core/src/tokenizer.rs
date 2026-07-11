@@ -229,4 +229,46 @@ mod tests {
             vec!["gpt", "4"]
         );
     }
+
+    #[test]
+    fn empty_input_produces_no_tokens() {
+        assert!(collect("").is_empty());
+    }
+
+    #[test]
+    fn punctuation_and_whitespace_only_produce_no_tokens() {
+        assert!(collect("   \t\r\n").is_empty());
+        assert!(collect(" !@#$%^&*()_+-=[]{};:'\",.<>/?\\|`~ ").is_empty());
+    }
+
+    #[test]
+    fn cjk_punctuation_only_produces_no_tokens() {
+        // 全角/CJK 标点不算汉字（不进 jieba），也不是字母数字（非汉字段不产 token）。
+        assert!(collect("，。！？；：、（）《》「」【】").is_empty());
+    }
+
+    #[test]
+    fn pure_digits_form_a_single_token() {
+        let tokens = collect("1234567890");
+        let texts: Vec<&str> = tokens.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, vec!["1234567890"]);
+        assert_eq!(tokens[0].offset_from, 0);
+        assert_eq!(tokens[0].offset_to, "1234567890".len());
+    }
+
+    #[test]
+    fn very_long_single_line_does_not_panic_and_tokenizes_each_run() {
+        let unit = "alpha-99 ";
+        let reps = 20_000;
+        let text = unit.repeat(reps);
+        let tokens = collect(&text);
+        // 每个重复单元产出两个 token：字母段 alpha 和数字段 99。
+        assert_eq!(tokens.len(), reps * 2);
+        assert_eq!(tokens.first().unwrap().text, "alpha");
+        assert_eq!(tokens.last().unwrap().text, "99");
+        // position 仍是全程顺序递增的。
+        for (i, t) in tokens.iter().enumerate() {
+            assert_eq!(t.position, i);
+        }
+    }
 }
