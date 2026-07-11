@@ -3,6 +3,7 @@ mod config;
 mod highlight;
 mod state;
 mod tray;
+mod watcher;
 mod window_fx;
 
 use tauri::{Manager, WindowEvent};
@@ -11,6 +12,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 use config::ConfigState;
 use state::SearchState;
+use watcher::WatchController;
 use window_fx::EffectLevelState;
 
 /// 默认全局呼出快捷键：Alt+`（反引号）。原先是 Alt+Space，跟部分用户机器上的
@@ -53,6 +55,7 @@ pub fn run() {
         )
         .manage(ConfigState::new())
         .manage(SearchState::load_initial())
+        .manage(WatchController::new())
         .invoke_handler(tauri::generate_handler![
             commands::index_status,
             commands::search,
@@ -94,6 +97,15 @@ pub fn run() {
             }
 
             tray::build(app.handle())?;
+
+            // 常驻监听：读索引里注册的根，先对账补齐停机期间的变更、再挂实时监听。
+            // 索引不存在或 schema 需重建时读不到根，直接跳过——等用户重建后由
+            // rebuild 流程把监听挂上。
+            if let Ok(index_dir) = config::index_dir()
+                && let Ok(roots) = dowse_core::registered_roots(&index_dir)
+            {
+                app.state::<WatchController>().start(index_dir, roots);
+            }
 
             Ok(())
         })
