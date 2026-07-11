@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 
@@ -5,10 +6,12 @@ use anyhow::{Context, Result};
 use tantivy::{Index, IndexWriter, doc};
 use walkdir::WalkDir;
 
+use crate::cursor::{UsnCursor, VolumeKey};
 use crate::extract::extract_text;
 use crate::meta::{IndexMeta, SCHEMA_VERSION, save_meta};
 use crate::ocr;
 use crate::ocr_queue::OcrQueue;
+use crate::volume::{self, RootCapability};
 use crate::{Fields, build_schema, register_tokenizers};
 
 /// 一次重建索引的统计结果，CLI 拿去打报告。
@@ -54,6 +57,61 @@ pub(crate) fn walk_index_files(root: &Path) -> impl Iterator<Item = PathBuf> {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .map(|e| e.path().to_path_buf())
+}
+
+/// 按卷能力探测选文件清单的产出方式：NTFS + 管理员权限就用 MFT 快速枚举，
+/// 拿不到就退回 [`walk_index_files`]（设计文档第一节的降级判定）。
+///
+/// MFT 枚举失败（探测通过了，但真枚举时出于某种原因失败——比如探测和枚举
+/// 之间权限被收回）时也静默退回 walkdir，不让一次枚举失败拖垮整个建索引
+/// 流程——诚实降级不只是"没权限就降级"，"权限看着有、用起来失败"也要兜底。
+fn collect_index_files(target_dir: &Path) -> (Vec<PathBuf>, HashMap<VolumeKey, UsnCursor>) {
+    if let RootCapability::Fast { volume } = volume::probe_root_capability(target_dir)
+        && let Some(result) = collect_via_mft(&volume, target_dir)
+    {
+        return result;
+    }
+    (walk_index_files(target_dir).collect(), HashMap::new())
+}
+
+#[cfg(windows)]
+fn collect_via_mft(
+    volume: &VolumeKey,
+    target_dir: &Path,
+) -> Option<(Vec<PathBuf>, HashMap<VolumeKey, UsnCursor>)> {
+    // 先拍游标快照、再枚举——顺序很关键：枚举期间如果有并发改动写进了
+    // USN Journal，只要它们的 usn >= 这个快照的 next_usn，后续补账/live
+    // 监听就一定会重放到；反过来"枚举完再拍快照"会漏掉枚举过程中发生的变更。
+    let cursor = match crate::usn::snapshot_journal(volume) {
+        Ok(cursor) => cursor,
+        Err(err) => {
+            eprintln!("拍 USN 游标快照失败（{volume}），MFT 快速路径整体回退: {err}");
+            return None;
+        }
+    };
+    let (_table, files, stats) =
+        match crate::mft::enumerate(volume, std::slice::from_ref(&target_dir.to_path_buf())) {
+            Ok(result) => result,
+            Err(err) => {
+                eprintln!("MFT 快速枚举失败（{volume}），回退到目录遍历: {err}");
+                return None;
+            }
+        };
+    eprintln!(
+        "MFT 快速枚举（{volume}）：整卷扫到 {} 条记录，落在监听根内 {} 条",
+        stats.scanned, stats.matched
+    );
+    let mut cursors = HashMap::new();
+    cursors.insert(volume.clone(), cursor);
+    Some((files, cursors))
+}
+
+#[cfg(not(windows))]
+fn collect_via_mft(
+    _volume: &VolumeKey,
+    _target_dir: &Path,
+) -> Option<(Vec<PathBuf>, HashMap<VolumeKey, UsnCursor>)> {
+    None
 }
 
 /// 读文件的 (mtime 毫秒, size 字节)，喂给 schema 的 mtime/size 字段和启动对账。
@@ -210,7 +268,12 @@ pub fn rebuild_index_with_progress(
     let mut indexed = 0usize;
     let mut skipped = 0usize;
 
-    for path in walk_index_files(target_dir) {
+    // 按卷判定走 MFT 快速枚举还是现有的 walkdir 遍历（设计文档第一节）。
+    // 两条路径产出的文件清单语义一致——下面的收录循环完全不用关心是哪条路径
+    // 来的，这正是"上层感知不到差别"要的效果。
+    let (files, usn_cursors) = collect_index_files(target_dir);
+
+    for path in files {
         if add_file_document(&writer, &fields, &path, index_dir)? {
             indexed += 1;
         } else {
@@ -228,13 +291,15 @@ pub fn rebuild_index_with_progress(
     // commit 才是真正落盘的时刻；之前 add_document 都只进内存缓冲
     writer.commit().context("索引提交失败")?;
 
-    // 全量重建后重写 meta.json：记下当前 schema 版本和这次索引的根目录。
-    // 索引根列表是启动对账和监听要监视哪些目录的依据。
+    // 全量重建后重写 meta.json：记下当前 schema 版本、这次索引的根目录，
+    // 以及（如果走了快速路径）刚建好的 USN 游标基线——后面启动监听时读到它
+    // 就能从这一刻开始回放追平，不用退回 mtime 全扫对账（设计文档第四节）。
     save_meta(
         index_dir,
         &IndexMeta {
             schema_version: SCHEMA_VERSION,
             roots: vec![target_dir.to_path_buf()],
+            usn_cursors,
         },
     )?;
 

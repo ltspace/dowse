@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use dowse_core::{
-    DEFAULT_WORKERS, IndexUpdater, NotifyEventSource, OcrPipeline, Searcher, WatchProgress,
-    drain_ocr_queue, rebuild_index_with_progress, registered_roots, run_watch,
+    DEFAULT_WORKERS, IndexUpdater, OcrPipeline, Searcher, WatchProgress, drain_ocr_queue,
+    rebuild_index_with_progress, registered_roots, watch_roots_auto,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -173,25 +173,19 @@ fn watch(dir: Option<PathBuf>) -> Result<()> {
     // 时 start() 返回 None，打印一行提示，watch 主流程照常继续（不因此报错退出）。
     let ocr_pipeline = OcrPipeline::start(updater.clone(), index.clone(), DEFAULT_WORKERS);
 
-    run_watch(
-        NotifyEventSource,
-        &roots,
-        updater,
-        stop,
-        |progress| match progress {
-            WatchProgress::Received(ev) => println!("  事件  {ev:?}"),
-            WatchProgress::Committed {
-                batch_size,
-                outcome,
-            } => println!(
-                "提交一批：{batch_size} 项 → 收录 {} / 删除 {} / 跳过 {}",
-                outcome.upserted, outcome.removed, outcome.skipped
-            ),
-            WatchProgress::CommitFailed(err) => {
-                eprintln!("提交失败（已退回队列，下个窗口重试）：{err}")
-            }
-        },
-    )?;
+    watch_roots_auto(&index, &roots, updater, stop, |progress| match progress {
+        WatchProgress::Received(ev) => println!("  事件  {ev:?}"),
+        WatchProgress::Committed {
+            batch_size,
+            outcome,
+        } => println!(
+            "提交一批：{batch_size} 项 → 收录 {} / 删除 {} / 跳过 {}",
+            outcome.upserted, outcome.removed, outcome.skipped
+        ),
+        WatchProgress::CommitFailed(err) => {
+            eprintln!("提交失败（已退回队列，下个窗口重试）：{err}")
+        }
+    })?;
 
     if let Some(pipeline) = ocr_pipeline {
         pipeline.stop();
