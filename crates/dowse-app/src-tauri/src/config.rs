@@ -19,10 +19,19 @@ pub struct AppConfig {
     /// 这边问的是"要不要在启动时把它摆回默认开"。
     #[serde(default)]
     pub autostart_user_disabled: bool,
+    /// 全局呼出快捷键，格式跟 tauri-plugin-global-shortcut 的 `Shortcut::from_str`
+    /// 一致（如 "Alt+Backquote"）。默认 Alt+`（反引号），原先的 Alt+Space
+    /// 跟部分用户机器上的 PowerToys Run 冲突。
+    #[serde(default = "default_hotkey")]
+    pub hotkey: String,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_hotkey() -> String {
+    "Alt+Backquote".to_string()
 }
 
 impl Default for AppConfig {
@@ -31,6 +40,7 @@ impl Default for AppConfig {
             target_dir: None,
             transparency_enabled: true,
             autostart_user_disabled: false,
+            hotkey: default_hotkey(),
         }
     }
 }
