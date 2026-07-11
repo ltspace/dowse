@@ -8,13 +8,23 @@
 		hit,
 		selected,
 		onhover,
-		onselect
+		onselect,
+		oncontextmenu
 	}: {
 		hit: SearchHit;
 		selected: boolean;
 		onhover: () => void;
 		onselect: () => void;
+		oncontextmenu: () => void;
 	} = $props();
+
+	// 右键先把这一行选中（跟资源管理器的习惯一致），再交给父组件弹原生菜单——
+	// 菜单本身是 Win32 原生绘制的（见 Rust 侧 context_menu.rs），这里只负责触发。
+	function handleContextMenu(e: MouseEvent) {
+		e.preventDefault();
+		onhover();
+		oncontextmenu();
+	}
 
 	// 目录部分给路径行用：文件名已经单独占一行了，路径行只需要目录。
 	// 用 display_path（已剥掉 \\?\ 前缀）而不是 path——这一行是纯展示，
@@ -37,6 +47,7 @@
 	onmouseenter={onhover}
 	onclick={onselect}
 	ondblclick={onselect}
+	oncontextmenu={handleContextMenu}
 >
 	<span class="row-icon"><FileIcon path={hit.path} /></span>
 	<span class="row-text">

@@ -8,12 +8,14 @@
 		hits,
 		selectedIndex,
 		onhover,
-		onselect
+		onselect,
+		oncontextmenu
 	}: {
 		hits: SearchHit[];
 		selectedIndex: number;
 		onhover: (i: number) => void;
 		onselect: (i: number) => void;
+		oncontextmenu: (i: number) => void;
 	} = $props();
 
 	let listEl: HTMLDivElement | undefined = $state();
@@ -50,7 +52,13 @@
 <div class="list" bind:this={listEl} role="listbox" aria-label="搜索结果">
 	{#each hits as hit, i (hit.path)}
 		<div data-idx={i}>
-			<ResultRow {hit} selected={i === selectedIndex} onhover={() => onhover(i)} onselect={() => onselect(i)} />
+			<ResultRow
+				{hit}
+				selected={i === selectedIndex}
+				onhover={() => onhover(i)}
+				onselect={() => onselect(i)}
+				oncontextmenu={() => oncontextmenu(i)}
+			/>
 		</div>
 	{/each}
 </div>

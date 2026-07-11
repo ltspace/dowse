@@ -82,6 +82,8 @@ pub(crate) fn add_file_document(
         fields.content => content,
         fields.mtime => mtime,
         fields.size => size,
+        // 本版文本抽取管线只产出 "text"；"image" 留给里程碑 4 OCR 接入后使用。
+        fields.kind => "text",
     ))?;
     Ok(true)
 }
