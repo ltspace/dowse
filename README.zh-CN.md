@@ -66,9 +66,8 @@ cargo run -p dowse -- search "精确短语"   # 短语查询
                  └──────┬──────────┬──────────┬────────────┘
                         │          │          │
                  ┌──────┴───┐ ┌────┴─────┐ ┌──┴───────────┐
-                 │ dowse-app │ │ dowse-cli │ │ MCP server*  │
+                 │ dowse-app │ │ dowse-cli │ │ MCP server   │
                  └──────────┘ └──────────┘ └──────────────┘
-                                               * 规划中
 ```
 
 单一索引核心，三个消费端。dowse-app 是 Tauri 2 + Svelte 5 的常驻浮窗；
@@ -85,7 +84,7 @@ CLI 用于脚本和调试；MCP server 将本地索引暴露给 AI agent。
 | 2 | 浮窗：全局快捷键、Acrylic 材质、键盘导航 | 开发中 |
 | 3 | 增量索引：文件监听、启动对账 | 完成 |
 | 4 | OCR 管线：截图文字入索引 | 技术验证完成 |
-| 5 | MCP server | 规划 |
+| 5 | MCP server | 完成 |
 | 6 | NTFS MFT / USN Journal 快速路径 | 规划 |
 
 ## 技术栈

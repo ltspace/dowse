@@ -1,3 +1,5 @@
+mod mcp;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -8,6 +10,8 @@ use dowse_core::{
     IndexUpdater, NotifyEventSource, Searcher, WatchProgress, rebuild_index, registered_roots,
     run_watch,
 };
+use rmcp::ServiceExt;
+use rmcp::transport::stdio;
 
 #[derive(Parser)]
 #[command(name = "dowse", about = "探水杖：Windows 本地全盘搜索", version)]
@@ -36,10 +40,20 @@ enum Command {
         /// 要监听的目录；不给就用上次建索引时注册的根目录
         dir: Option<PathBuf>,
     },
+    /// 启动只读 MCP server（stdio 传输），把本地索引暴露给 AI agent
+    ///
+    /// 例：`claude mcp add dowse -- dowse mcp`
+    Mcp,
 }
 
-/// 索引统一放在 %LOCALAPPDATA%\dowse\index，跟被索引的目录无关
+/// 索引统一放在 %LOCALAPPDATA%\dowse\index，跟被索引的目录无关。
+///
+/// `DOWSE_INDEX_DIR` 环境变量可以覆盖这个位置——只给集成测试用，好让子进程指向
+/// 一个临时索引而不是碰用户机器上真的那份；正常使用不应该设这个变量。
 fn index_dir() -> Result<PathBuf> {
+    if let Ok(dir) = std::env::var("DOWSE_INDEX_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
     let dirs = directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
     Ok(dirs.data_local_dir().join("index"))
 }
@@ -72,7 +86,28 @@ fn main() -> Result<()> {
             }
         }
         Command::Watch { dir } => watch(dir)?,
+        Command::Mcp => run_mcp()?,
     }
+    Ok(())
+}
+
+/// `dowse mcp`：只读 MCP server 是这个二进制里唯一需要异步运行时的子命令，
+/// 所以只在这一条分支上起 tokio runtime，其它子命令继续走同步路径——
+/// 没必要给整个 main 套 #[tokio::main]，那样会让所有子命令都背上 tokio 的初始化成本。
+/// 用多线程 runtime：工具处理函数里调的是 dowse-core 的同步阻塞 I/O，
+/// 单线程 runtime 下阻塞调用会卡住整个 server（stdio 收发都跑不动）。
+fn run_mcp() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("起 tokio runtime 失败")?
+        .block_on(run_mcp_async())
+}
+
+async fn run_mcp_async() -> Result<()> {
+    let server = mcp::DowseMcpServer::new(index_dir()?);
+    let service = server.serve(stdio()).await.context("MCP server 启动失败")?;
+    service.waiting().await.context("MCP server 异常退出")?;
     Ok(())
 }
 
