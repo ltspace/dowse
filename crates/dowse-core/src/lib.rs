@@ -4,6 +4,7 @@ mod indexer;
 mod meta;
 mod reconcile;
 mod searcher;
+mod status;
 mod updater;
 mod watch;
 
@@ -12,6 +13,7 @@ pub use indexer::{IndexStats, rebuild_index};
 pub use meta::registered_roots;
 pub use reconcile::{ReconcileStats, reconcile};
 pub use searcher::{PreviewHit, SearchHit, Searcher};
+pub use status::{IndexStatus, index_status};
 pub use updater::{BatchOutcome, IndexUpdater};
 pub use watch::{EventSource, NotifyEventSource, WatchGuard, WatchProgress, run_watch};
 

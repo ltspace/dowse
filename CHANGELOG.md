@@ -2,6 +2,12 @@
 
 本文件记录 dowse 的版本变更，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [未发布]
+
+### 新增
+
+- M5：MCP server——`dowse mcp` 子命令，stdio 传输，只读暴露 search/preview/index_status 三个工具给 AI agent
+
 ## [0.4.0]
 
 ### 新增
