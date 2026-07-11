@@ -107,8 +107,14 @@ fn snapshot_indexed(updater: &IndexUpdater, root: &Path) -> Result<HashMap<PathB
         if !pbuf.starts_with(root) {
             continue;
         }
-        let mtime = doc.get_first(fields.mtime).and_then(|v| v.as_i64()).unwrap_or(0);
-        let size = doc.get_first(fields.size).and_then(|v| v.as_u64()).unwrap_or(0);
+        let mtime = doc
+            .get_first(fields.mtime)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let size = doc
+            .get_first(fields.size)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         map.insert(pbuf, (mtime, size));
     }
     Ok(map)

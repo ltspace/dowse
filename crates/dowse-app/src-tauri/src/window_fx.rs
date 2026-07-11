@@ -93,7 +93,9 @@ fn apply_rounded_corners(window: &WebviewWindow) {
         )
     };
     if hr != 0 {
-        eprintln!("圆角裁切：DwmSetWindowAttribute 返回 HRESULT 0x{hr:x}，可能是系统版本太老（Win10 v20H1 以前没有这个属性）");
+        eprintln!(
+            "圆角裁切：DwmSetWindowAttribute 返回 HRESULT 0x{hr:x}，可能是系统版本太老（Win10 v20H1 以前没有这个属性）"
+        );
     }
 }
 

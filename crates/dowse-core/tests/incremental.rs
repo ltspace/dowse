@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use dowse_core::{rebuild_index, IndexUpdater, PendingChange, PendingOp, Searcher};
+use dowse_core::{IndexUpdater, PendingChange, PendingOp, Searcher, rebuild_index};
 
 /// 建索引用的目标目录名不能带 "." 前缀——walk_index_files 会整棵跳过隐藏目录，
 /// 而 tempfile 默认给临时目录起 ".tmpXXXX" 这种名字。
@@ -86,15 +86,27 @@ fn rename_file_old_name_gone_new_name_and_content_searchable() -> Result<()> {
     std::fs::write(&old, "改名测试的正文内容 mango")?;
 
     rebuild_index(index_dir.path(), target.path())?;
-    assert_eq!(count_hits(index_dir.path(), "oldname"), 1, "旧文件名应能搜到");
+    assert_eq!(
+        count_hits(index_dir.path(), "oldname"),
+        1,
+        "旧文件名应能搜到"
+    );
 
     // 物理改名，再按"删旧名 + 加新名"落进索引
     std::fs::rename(&old, &new)?;
     let mut updater = IndexUpdater::open(index_dir.path())?;
     updater.apply(&[remove(&old), upsert(&new)])?;
 
-    assert_eq!(count_hits(index_dir.path(), "oldname"), 0, "旧文件名应搜不到");
-    assert_eq!(count_hits(index_dir.path(), "newname"), 1, "新文件名应能搜到");
+    assert_eq!(
+        count_hits(index_dir.path(), "oldname"),
+        0,
+        "旧文件名应搜不到"
+    );
+    assert_eq!(
+        count_hits(index_dir.path(), "newname"),
+        1,
+        "新文件名应能搜到"
+    );
     assert_eq!(count_hits(index_dir.path(), "mango"), 1, "正文内容照常命中");
     Ok(())
 }
@@ -115,7 +127,11 @@ fn remove_tree_prefix_deletes_whole_subdirectory() -> Result<()> {
     std::fs::write(target.path().join("top.md"), "顶层文件 alpha")?;
 
     rebuild_index(index_dir.path(), target.path())?;
-    assert_eq!(count_hits(index_dir.path(), "alpha"), 4, "初始四篇都含 alpha");
+    assert_eq!(
+        count_hits(index_dir.path(), "alpha"),
+        4,
+        "初始四篇都含 alpha"
+    );
 
     // 前缀圈选删除整个 sub 目录（updater 内部用 term 范围查询，不逐文件比对）
     let mut updater = IndexUpdater::open(index_dir.path())?;
@@ -131,7 +147,11 @@ fn remove_tree_prefix_deletes_whole_subdirectory() -> Result<()> {
         "删完 sub 只剩兄弟目录和顶层两篇"
     );
     // 兄弟目录 sub2 不能被误删（前缀末尾补分隔符的意义）
-    assert_eq!(count_hits(index_dir.path(), "丙"), 1, "兄弟目录 sub2 不受影响");
+    assert_eq!(
+        count_hits(index_dir.path(), "丙"),
+        1,
+        "兄弟目录 sub2 不受影响"
+    );
     assert_eq!(count_hits(index_dir.path(), "顶层"), 1, "顶层文件不受影响");
     assert_eq!(count_hits(index_dir.path(), "甲"), 0, "sub 下文件已删");
     Ok(())

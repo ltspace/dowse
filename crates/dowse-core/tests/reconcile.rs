@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use dowse_core::{reconcile, rebuild_index, IndexUpdater, ReconcileStats, Searcher};
+use dowse_core::{IndexUpdater, ReconcileStats, Searcher, rebuild_index, reconcile};
 
 fn target_dir() -> tempfile::TempDir {
     tempfile::Builder::new()
@@ -57,10 +57,26 @@ fn reconcile_catches_offline_add_modify_delete() -> Result<()> {
 
     // —— 断言索引已追平文件系统实际状态 ——
     assert_eq!(count_hits(index_dir.path(), "durian"), 1, "新增文件应可搜");
-    assert_eq!(count_hits(index_dir.path(), "dragonfruit"), 1, "改后内容应可搜");
-    assert_eq!(count_hits(index_dir.path(), "apricot"), 0, "改前内容应搜不到");
-    assert_eq!(count_hits(index_dir.path(), "blueberry"), 0, "已删文件应搜不到");
-    assert_eq!(count_hits(index_dir.path(), "cherry"), 1, "未变文件照常可搜");
+    assert_eq!(
+        count_hits(index_dir.path(), "dragonfruit"),
+        1,
+        "改后内容应可搜"
+    );
+    assert_eq!(
+        count_hits(index_dir.path(), "apricot"),
+        0,
+        "改前内容应搜不到"
+    );
+    assert_eq!(
+        count_hits(index_dir.path(), "blueberry"),
+        0,
+        "已删文件应搜不到"
+    );
+    assert_eq!(
+        count_hits(index_dir.path(), "cherry"),
+        1,
+        "未变文件照常可搜"
+    );
     Ok(())
 }
 

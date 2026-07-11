@@ -41,12 +41,12 @@ impl FileIconCache {
 
 #[cfg(target_os = "windows")]
 fn fetch_icon_data_uri(ext: &str) -> Option<String> {
-    use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
     use windows::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+        SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGetFileInfoW,
     };
     use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
+    use windows::core::PCWSTR;
 
     // SHGetFileInfoW 靠路径里的扩展名做关联查找，配 SHGFI_USEFILEATTRIBUTES
     // 之后完全不碰磁盘——传一个不存在的 "file.ext" 路径就够，不需要真文件。
@@ -90,8 +90,8 @@ fn fetch_icon_data_uri(ext: &str) -> Option<String> {
 #[cfg(target_os = "windows")]
 fn hicon_to_png(hicon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Vec<u8>> {
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
+        DeleteObject, GetDIBits, GetObjectW,
     };
     use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, ICONINFO};
 
@@ -193,7 +193,9 @@ fn apply_mask_alpha(
     height: i32,
     buf: &mut [u8],
 ) {
-    use windows::Win32::Graphics::Gdi::{GetDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS};
+    use windows::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, GetDIBits,
+    };
 
     // 1bpp DIB 每行按 4 字节对齐。
     let stride = (width as usize).div_ceil(32) * 4;
