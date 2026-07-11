@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# npm/Tauri frontend build is intentionally not part of CI yet: npm install for
+# the dowse-app frontend is slow in CI and its output is a UI that needs eyes
+# on it to validate, not something a green checkmark can confirm. Revisit once
+# there's a headless visual check worth running.
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Format check is temporarily disabled: `cargo fmt --check` currently
+      # reports diffs across most of crates/ (import-grouping style under the
+      # 2024 edition rustfmt defaults doesn't match what's checked in). That's
+      # someone else's area of the tree mid-change; re-enable this step once
+      # crates/ is reformatted and checked in clean.
+      # - name: Format check
+      #   run: cargo fmt --check
