@@ -13,7 +13,12 @@ use crate::window_fx::{EffectLevel, EffectLevelState, GlassAlpha};
 
 #[derive(Serialize)]
 pub struct SearchHitDto {
+    /// 打开文件、在资源管理器定位用这个原始值——canonicalize 出来的
+    /// `\\?\` 前缀不能剥，剥了长路径场景会重新撞上 Win32 的 MAX_PATH 限制。
     pub path: String,
+    /// 结果行、预览区渲染路径文本专用，`\\?\`/`\\?\UNC\` 前缀已经剥掉。
+    /// 只用于展示，不要拿去做文件操作。
+    pub display_path: String,
     /// 拆出来单独给前端渲染文件名那一行，省得前端再解析一遍路径。
     pub name: String,
     pub name_segments: Vec<TextSegment>,
@@ -103,6 +108,7 @@ pub fn search(
             let name_segments = highlight_name(&name, &query);
             let snippet_segments = segments_from_ranges(&hit.snippet, &hit.highlighted);
             SearchHitDto {
+                display_path: dowse_core::display_path(&hit.path),
                 path: hit.path,
                 name,
                 name_segments,
