@@ -33,14 +33,19 @@ The closest open-source implementation is sist2, but it targets Linux — on Win
 
 Design targets; exceeding them is treated as a defect:
 
-| Metric | Target | Note |
-|---|---|---|
-| Hotkey to window visible | < 50ms | Process stays resident; summon is show + focus |
-| Keystroke to results rendered | < 80ms | UI and index share a process, no IPC |
-| OCR | ~112ms / 1080p screenshot | Measured median, processed on a background thread pool |
-| Resident memory | < 150MB | Includes index reader |
-| Installer size | < 15MB | Tauri, not Electron |
-| File name index build (planned) | seconds | Direct NTFS MFT read, same approach as Everything |
+| Metric | Target | Measured (round 2, 2026-07-12) | Note |
+|---|---|---|---|
+| Hotkey to window visible | < 50ms | not measured this round | round 2 was a CLI-only benchmark, no overlay app instrumentation |
+| Keystroke to results rendered | < 80ms | not measured this round | same |
+| OCR | ~112ms / 1080p screenshot | ~100–125ms / image | 100 synthetic 480×200 PNGs with rendered CJK/EN text, drained via `dowse index`'s OCR queue; not a literal 1080p-screenshot test |
+| Resident memory | < 150MB | not measured this round (see indexing peak below) | this target is overlay-app idle memory; the CLI benchmark only measured indexing-time peak working set |
+| Installer size | < 15MB | not measured this round | no packaging step in this benchmark |
+| File name index build (planned) | seconds | 27–34s for a 10,000-file / 437MB **content** index | not the planned filename-only MFT fast path — this is the current full-text `dowse index` command |
+| Full-corpus index throughput (new) | — | ~13–16MB/s, ~300–375 files/s | same 10k-file/437MB corpus as the previous benchmark round, which measured ~47MB/s |
+| Search latency, P50 (new) | — | ~250–450ms across common-word/sentinel/phrase queries | CLI process-per-query cost including startup; phrase-query latency improved substantially since the previous round, simple-query latency increased |
+| Index size ÷ corpus size (new) | — | ~0.64–0.66 | down from ~0.76 in the previous benchmark round |
+
+Full-corpus rows measured on a 10,000-file / 437MB synthetic mixed Chinese/English corpus (i7-13700K, 24 logical cores, 64GB RAM), single machine, single session.
 
 ## Usage
 
