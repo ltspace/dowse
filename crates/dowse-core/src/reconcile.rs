@@ -10,6 +10,7 @@ use tantivy::{ReloadPolicy, TantivyDocument};
 use crate::events::{PendingChange, PendingOp};
 use crate::extract::is_extractable;
 use crate::indexer::{file_stat, walk_index_files};
+use crate::ocr::is_image;
 use crate::updater::IndexUpdater;
 
 /// 一次启动对账的差异统计。
@@ -42,7 +43,10 @@ pub fn reconcile(root: &Path, updater: &mut IndexUpdater) -> Result<ReconcileSta
     let mut stats = ReconcileStats::default();
     let mut seen: HashSet<PathBuf> = HashSet::with_capacity(indexed.len());
 
-    for path in walk_index_files(root).filter(|p| is_extractable(p)) {
+    // 图片和文本文件共用同一套 (path,mtime,size) 三态比对——图片这条腿只是把
+    // "有没有变化"判断出来，真正的 OCR 识别延后到 updater.apply() 内部按 upsert
+    // 落到 OCR 队列，这里不碰 OCR 相关逻辑。
+    for path in walk_index_files(root).filter(|p| is_extractable(p) || is_image(p)) {
         let Some((mtime, size)) = file_stat(&path) else {
             continue;
         };

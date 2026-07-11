@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use dowse_core::{IndexUpdater, NotifyEventSource, reconcile, run_watch};
+use dowse_core::{
+    DEFAULT_WORKERS, IndexUpdater, NotifyEventSource, OcrPipeline, reconcile, run_watch,
+};
 
 /// 常驻文件监听的启停控制器。托盘常驻程序启动时先对账、再挂实时监听。
 ///
@@ -87,9 +89,20 @@ fn watch_thread(index_dir: PathBuf, roots: Vec<PathBuf>, stop: Arc<AtomicBool>) 
         }
     }
 
-    // 2) 挂实时监听，阻塞到 stop 置位。提交后 Searcher 的 reader 自动重载，
+    // 2) 常驻程序不赶时间：图片交给独立的后台 worker 池慢慢消化，跟文本监听并行
+    //    跑、互不阻塞。没有可用语言包时返回 None，只打一行日志，不影响文本监听。
+    let ocr_pipeline = OcrPipeline::start(updater.clone(), index_dir, DEFAULT_WORKERS);
+
+    // 3) 挂实时监听，阻塞到 stop 置位。提交后 Searcher 的 reader 自动重载，
     //    所以不用往前端推事件，搜索结果自然就追上了。
     if let Err(err) = run_watch(NotifyEventSource, &roots, updater, stop, |_progress| {}) {
         eprintln!("文件监听退出: {err}");
+    }
+
+    // 文本监听停了，OCR 管线也跟着收尾——两者共用同一个后台线程的生命周期，
+    // WatchController::stop() 的 join() 会等到这里才返回，保证重建索引前
+    // OCR worker 也已经放掉了索引写入端的句柄。
+    if let Some(pipeline) = ocr_pipeline {
+        pipeline.stop();
     }
 }
