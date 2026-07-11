@@ -57,11 +57,12 @@
 
 <style>
 	.list {
-		height: 100%;
+		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
 		gap: 1px;
-		padding: 6px;
+		padding: 8px;
 	}
 </style>

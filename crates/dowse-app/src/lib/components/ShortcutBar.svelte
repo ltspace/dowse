@@ -34,9 +34,9 @@
 	.bar {
 		display: flex;
 		align-items: center;
-		gap: 14px;
-		padding: 0 14px;
-		height: 40px;
+		gap: 16px;
+		padding: 0 16px;
+		height: 44px;
 		border-top: 1px solid var(--divider);
 		font-size: 11px;
 		color: var(--fg-secondary);
@@ -46,7 +46,7 @@
 	.brand {
 		display: inline-flex;
 		align-items: center;
-		gap: 6px;
+		gap: 8px;
 		flex-shrink: 0;
 		opacity: 0.85;
 	}
@@ -93,7 +93,7 @@
 		font-family: inherit;
 		font-size: 10.5px;
 		line-height: 1;
-		padding: 3px 5px;
+		padding: 4px 8px;
 		border-radius: var(--radius-chip);
 		background: var(--shortcut-chip-bg);
 		color: var(--shortcut-chip-fg);

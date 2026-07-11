@@ -1,5 +1,7 @@
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem};
+use tauri::menu::{
+    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu,
+};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
@@ -7,7 +9,7 @@ use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use crate::config::ConfigState;
 use crate::state::SearchState;
 use crate::watcher::WatchController;
-use crate::window_fx::{self, EffectLevelState};
+use crate::window_fx::{self, EffectLevelState, TransparencyTier};
 
 /// 任务栏是浅色还是深色，决定托盘剪影用哪一版（见图标说明第 4 节）。只在
 /// 托盘图标构建时读一次，不做动态监听——运行中途切系统主题需要重启应用
@@ -91,10 +93,33 @@ const MENU_SHOW: &str = "show";
 const MENU_REBUILD: &str = "rebuild";
 const MENU_AUTOSTART: &str = "autostart";
 const MENU_TRANSPARENCY: &str = "transparency";
+const MENU_TRANSPARENCY_LOW: &str = "transparency_low";
+const MENU_TRANSPARENCY_MID: &str = "transparency_mid";
+const MENU_TRANSPARENCY_HIGH: &str = "transparency_high";
 const MENU_QUIT: &str = "quit";
 
-/// 托盘图标 + 右键菜单：呼出 / 重建索引 / 开机自启开关 / 透明效果开关 / 退出。
-/// 进程常驻，浮窗只是 show/hide——托盘是用户确认"它还活着"和做少数配置的入口。
+/// "透明度"子菜单里三个互斥的档位勾选项。Tauri/muda 没有原生的单选菜单项
+/// 类型，这里用三个 `CheckMenuItem` 手动模拟单选组——选中一个就要把另外
+/// 两个的勾去掉，这三个句柄需要在选中变化时能重新拿到手，所以存进
+/// `app.manage()` 供 `handle_menu_event` 复用，而不是建完就丢。
+struct TransparencyMenuItems {
+    low: CheckMenuItem<tauri::Wry>,
+    mid: CheckMenuItem<tauri::Wry>,
+    high: CheckMenuItem<tauri::Wry>,
+}
+
+impl TransparencyMenuItems {
+    /// 把三个勾选项的状态同步到给定档位——目标档位打勾，另外两个去勾。
+    fn sync_checked(&self, tier: TransparencyTier) {
+        let _ = self.low.set_checked(tier == TransparencyTier::Low);
+        let _ = self.mid.set_checked(tier == TransparencyTier::Mid);
+        let _ = self.high.set_checked(tier == TransparencyTier::High);
+    }
+}
+
+/// 托盘图标 + 右键菜单：呼出 / 重建索引 / 开机自启开关 / 透明效果开关 /
+/// 透明度三档子菜单 / 退出。进程常驻，浮窗只是 show/hide——托盘是用户确认
+/// "它还活着"和做少数配置的入口。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let cfg = app.state::<ConfigState>().get();
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
@@ -107,6 +132,25 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let transparency_item = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY, "关闭透明效果")
         .checked(!cfg.transparency_enabled)
         .build(app)?;
+
+    let tier = cfg.transparency_tier;
+    let tier_low = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_LOW, "低")
+        .checked(tier == TransparencyTier::Low)
+        .build(app)?;
+    let tier_mid = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_MID, "中")
+        .checked(tier == TransparencyTier::Mid)
+        .build(app)?;
+    let tier_high = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_HIGH, "高")
+        .checked(tier == TransparencyTier::High)
+        .build(app)?;
+    let tier_submenu =
+        Submenu::with_items(app, "透明度", true, &[&tier_low, &tier_mid, &tier_high])?;
+    app.manage(TransparencyMenuItems {
+        low: tier_low,
+        mid: tier_mid,
+        high: tier_high,
+    });
+
     let quit_item = MenuItemBuilder::with_id(MENU_QUIT, "退出").build(app)?;
 
     let menu = Menu::with_items(
@@ -117,6 +161,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &autostart_item,
             &transparency_item,
+            &tier_submenu,
             &PredefinedMenuItem::separator(app)?,
             &quit_item,
         ],
@@ -173,11 +218,41 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             let config = app.state::<ConfigState>();
             let now_enabled = !config.get().transparency_enabled;
             let _ = config.set_transparency_enabled(now_enabled);
+            let tier = config.get().transparency_tier;
             if let Some(window) = app.get_webview_window("main") {
-                let level = window_fx::apply_with_fallback(&window, now_enabled);
+                let level = window_fx::apply_with_fallback(&window, now_enabled, tier);
                 app.state::<EffectLevelState>().set(level);
                 let _ = window.emit("dowse://effect-level", level);
             }
+        }
+        MENU_TRANSPARENCY_LOW | MENU_TRANSPARENCY_MID | MENU_TRANSPARENCY_HIGH => {
+            let tier = match event.id().as_ref() {
+                MENU_TRANSPARENCY_LOW => TransparencyTier::Low,
+                MENU_TRANSPARENCY_MID => TransparencyTier::Mid,
+                _ => TransparencyTier::High,
+            };
+            let config = app.state::<ConfigState>();
+            let _ = config.set_transparency_tier(tier);
+
+            if let Some(items) = app.try_state::<TransparencyMenuItems>() {
+                items.sync_checked(tier);
+            }
+
+            // 挡位无论透明效果当前开没开都先存下来；只有透明效果开着的时候
+            // 才需要立刻重新申请 Acrylic 把新 alpha 应用到 DWM 那一层——
+            // 关着的话已经是纯色，档位只是记下来等下次重新打开时生效。
+            let transparency_enabled = config.get().transparency_enabled;
+            if transparency_enabled && let Some(window) = app.get_webview_window("main") {
+                let level = window_fx::apply_with_fallback(&window, true, tier);
+                app.state::<EffectLevelState>().set(level);
+                let _ = window.emit("dowse://effect-level", level);
+            }
+
+            // CSS 那一层的 alpha 不管透明效果开没开都要广播给前端——纯色档
+            // 下 app.css 的 `data-effect='solid'` 规则会整体覆盖掉
+            // `--glass-tint`，这里更新变量不会有副作用，且能保证下次切回
+            // 玻璃档时前端已经是最新值，不用等一次额外的往返。
+            let _ = app.emit("dowse://glass-alpha", tier.glass_alpha());
         }
         MENU_QUIT => app.exit(0),
         _ => {}

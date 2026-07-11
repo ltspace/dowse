@@ -9,7 +9,7 @@ use crate::file_icons::FileIconCache;
 use crate::highlight::{TextSegment, highlight_name, segments_from_ranges};
 use crate::state::SearchState;
 use crate::watcher::WatchController;
-use crate::window_fx::{EffectLevel, EffectLevelState};
+use crate::window_fx::{EffectLevel, EffectLevelState, GlassAlpha};
 
 #[derive(Serialize)]
 pub struct SearchHitDto {
@@ -54,6 +54,15 @@ fn file_name_of(path: &str) -> String {
 #[tauri::command]
 pub fn get_effect_level(state: State<EffectLevelState>) -> EffectLevel {
     state.get()
+}
+
+/// 前端启动时查一次当前透明度挡位对应的 CSS alpha（明/暗两套主题各一个
+/// 数），用来给 `--glass-alpha-light`/`--glass-alpha-dark` 赋初值。托盘切
+/// 挡位之后的更新走 `dowse://glass-alpha` 事件，这个 command 只覆盖启动时
+/// 的初值——跟 `get_effect_level` 是同一套"启动查询 + 事件更新"分工。
+#[tauri::command]
+pub fn get_glass_alpha(config: State<ConfigState>) -> GlassAlpha {
+    config.get().transparency_tier.glass_alpha()
 }
 
 /// 前端打开浮窗/挂载时调用一次，用来决定空输入/无索引/有索引三种引导状态。

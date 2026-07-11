@@ -6,7 +6,7 @@
 	import { animate } from 'motion';
 
 	import * as api from '$lib/api';
-	import type { EffectLevel, SearchHit, TextSegment } from '$lib/types';
+	import type { EffectLevel, GlassAlpha, SearchHit, TextSegment } from '$lib/types';
 	import ResultList from '$lib/components/ResultList.svelte';
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
 	import ShortcutBar from '$lib/components/ShortcutBar.svelte';
@@ -184,6 +184,15 @@
 		inputEl?.select();
 	}
 
+	// 面板可视不透明度收拢到这一个入口：两个数字（明/暗主题各一个 alpha）
+	// 直接写进 CSS 变量，具体哪个生效由 app.css 的 prefers-color-scheme
+	// 媒体查询决定，这里不用猜当前是明是暗。托盘切透明度档位时走
+	// dowse://glass-alpha 事件复用同一个函数。
+	function applyGlassAlpha(alpha: GlassAlpha) {
+		document.documentElement.style.setProperty('--glass-alpha-light', String(alpha.light));
+		document.documentElement.style.setProperty('--glass-alpha-dark', String(alpha.dark));
+	}
+
 	// 呼出的手感：轻微放大 + 淡入，全程压在 120ms 以内的弹簧物理，不是缓动曲线。
 	// 用显式 keyframe（而不是读当前样式）保证每次呼出都从同一个起点播，
 	// 不会因为上一次动画没播完就被打断而出现错位。
@@ -206,7 +215,7 @@
 		if (!caretFlourishEl) return;
 		animate(
 			caretFlourishEl,
-			{ height: ['0px', '17px'] },
+			{ height: ['0px', '20px'] },
 			{ type: 'spring', bounce: 0.15, duration: 0.1 }
 		).then(() => {
 			if (!caretFlourishEl) return;
@@ -221,6 +230,7 @@
 		api.getEffectLevel().then((level: EffectLevel) => {
 			document.documentElement.dataset.effect = level;
 		});
+		api.getGlassAlpha().then(applyGlassAlpha);
 
 		const unlistenShown = listen('dowse://shown', () => {
 			refreshIndexStatus();
@@ -229,6 +239,9 @@
 		});
 		const unlistenEffect = listen<EffectLevel>('dowse://effect-level', (evt) => {
 			document.documentElement.dataset.effect = evt.payload;
+		});
+		const unlistenGlassAlpha = listen<GlassAlpha>('dowse://glass-alpha', (evt) => {
+			applyGlassAlpha(evt.payload);
 		});
 		const unlistenRebuildDone = listen<number>('dowse://rebuild-done', (evt) => {
 			refreshIndexStatus();
@@ -241,6 +254,7 @@
 		return () => {
 			unlistenShown.then((f) => f());
 			unlistenEffect.then((f) => f());
+			unlistenGlassAlpha.then((f) => f());
 			unlistenRebuildDone.then((f) => f());
 			unlistenRebuildError.then((f) => f());
 		};
@@ -249,7 +263,7 @@
 
 <div class="panel" bind:this={panelEl}>
 	<div class="search-row">
-		<svg class="search-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+		<svg class="search-icon" width="20" height="20" viewBox="0 0 18 18" fill="none" aria-hidden="true">
 			<circle cx="8" cy="8" r="5.4" stroke="currentColor" stroke-width="1.4" />
 			<path d="M12.2 12.2 16 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
 		</svg>
@@ -279,6 +293,7 @@
 			/>
 		{:else}
 			<div class="results">
+				<div class="results-heading">结果 · {hits.length} 条</div>
 				<ResultList
 					{hits}
 					{selectedIndex}
@@ -304,23 +319,30 @@
 </div>
 
 <style>
+	/* .panel 不再是 100vw/100vh 贴满整个窗口——窗口本体比它大一圈
+	   （inset: var(--panel-margin)），多出来的这一圈透明区域专门留给
+	   --panel-shadow 画阴影，窗口是透明的所以这圈边距不会露出任何东西。
+	   position: absolute 以窗口（初始包含块）为参照，而不是随便找一个
+	   祖先元素——html/body 都没有设 position，天然就是这个参照系。 */
 	.panel {
-		width: 100vw;
-		height: 100vh;
+		position: absolute;
+		inset: var(--panel-margin);
 		display: flex;
 		flex-direction: column;
 		background: var(--glass-tint);
 		border-radius: var(--radius-window);
-		border: 1px solid var(--divider);
+		border: 1px solid var(--panel-border);
+		box-shadow: var(--panel-shadow);
 		overflow: hidden;
-		position: relative;
 	}
 
+	/* 输入区刻意不做"框"——没有边框、没有底色块，大字号裸排；下面这条
+	   1px 低对比发丝线才是分隔输入区和结果区的唯一视觉边界，Raycast 同款。 */
 	.search-row {
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		padding: 14px 20px;
+		padding: 16px 24px;
 		border-bottom: 1px solid var(--divider);
 		flex-shrink: 0;
 	}
@@ -342,7 +364,7 @@
 		border: none;
 		outline: none;
 		background: transparent;
-		font-size: 19px;
+		font-size: 22px;
 		font-weight: 400;
 		caret-color: var(--accent-caret);
 	}
@@ -374,7 +396,20 @@
 	.results {
 		flex: 0 0 58%;
 		min-width: 0;
+		display: flex;
+		flex-direction: column;
 		overflow: hidden;
+	}
+
+	/* 区分小标题：只在真的有结果时出现（showGuidance 为假意味着 hits 非空，
+	   见 +page.svelte 顶部的 guidanceKind 推导），空态/建索引态走 EmptyState
+	   分支，不会渲染到这里。 */
+	.results-heading {
+		flex-shrink: 0;
+		padding: 12px 16px 8px;
+		font-size: 11px;
+		letter-spacing: 0.04em;
+		color: var(--fg-tertiary);
 	}
 
 	.divider-v {
@@ -385,19 +420,19 @@
 
 	.preview-col {
 		flex: 1;
-		min-width: 0;
+		min-width: 240px;
 		overflow: hidden;
 	}
 
 	.toast {
 		position: absolute;
-		bottom: 50px;
+		bottom: 48px;
 		left: 50%;
 		transform: translateX(-50%);
 		background: var(--toast-bg);
 		color: var(--toast-fg);
 		font-size: 12px;
-		padding: 7px 14px;
+		padding: 8px 16px;
 		border-radius: 8px;
 		pointer-events: none;
 		animation: toast-in 0.12s ease-out;

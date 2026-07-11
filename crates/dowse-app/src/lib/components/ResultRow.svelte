@@ -53,9 +53,9 @@
 	.row {
 		display: flex;
 		align-items: flex-start;
-		gap: 10px;
+		gap: 12px;
 		width: 100%;
-		padding: 9px 12px;
+		padding: 8px 12px;
 		border: 1px solid transparent;
 		border-radius: var(--radius-row);
 		background: transparent;
