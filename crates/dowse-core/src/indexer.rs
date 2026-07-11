@@ -18,6 +18,20 @@ pub struct IndexStats {
     pub seconds: f64,
 }
 
+/// 全量重建索引期间的进度汇报节奏：每处理这么多个文件（收录 + 跳过一起算）
+/// 才回调一次，不是逐文件都报——浮窗那头要把这个数字实时刷到界面上，逐文件
+/// 报在几十万文件的目录上会把 Tauri 的事件 IPC 打爆。CLI 在这个基础上再自己
+/// 降频到每千个文件打一行（是 PROGRESS_INTERVAL 的整数倍），两端共用同一处
+/// 回调，只是各自选了不同的上报/打印间隔，逻辑不重复一份。
+pub const PROGRESS_INTERVAL: usize = 50;
+
+/// 单次进度汇报：累计处理数（收录 + 跳过），和刚处理完的那个文件路径。
+#[derive(Debug, Clone)]
+pub struct IndexProgress {
+    pub processed: usize,
+    pub path: PathBuf,
+}
+
 /// 这些目录整棵跳过：要么是依赖/构建产物，要么是仓库内部数据。
 const SKIP_DIRS: &[&str] = &["node_modules", "target", ".git", ".venv", "__pycache__"];
 
@@ -164,7 +178,21 @@ pub(crate) fn add_image_document_with_content(
 
 /// v0 策略：全量重建。删掉旧索引目录，从头扫一遍。
 /// 增量更新是里程碑 3 的事，现在先把"能搜"跑通。
+///
+/// 不需要进度直播的调用方（测试、内部各处对账/重建路径）走这个薄封装，
+/// 回调是空操作——真正的实现和进度上报都在 `rebuild_index_with_progress`。
 pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> {
+    rebuild_index_with_progress(index_dir, target_dir, |_| {})
+}
+
+/// 同 `rebuild_index`，多一个进度回调：每处理 `PROGRESS_INTERVAL` 个文件就报一次
+/// 累计处理数和当前文件路径。CLI 的 `dowse index` 和浮窗的"建索引"都走这个，
+/// 一份实现两处消费，避免两端各自维护一份遍历+回调逻辑。
+pub fn rebuild_index_with_progress(
+    index_dir: &Path,
+    target_dir: &Path,
+    mut on_progress: impl FnMut(IndexProgress),
+) -> Result<IndexStats> {
     let start = Instant::now();
 
     if index_dir.exists() {
@@ -187,6 +215,13 @@ pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> 
             indexed += 1;
         } else {
             skipped += 1;
+        }
+        let processed = indexed + skipped;
+        if processed.is_multiple_of(PROGRESS_INTERVAL) {
+            on_progress(IndexProgress {
+                processed,
+                path: path.clone(),
+            });
         }
     }
 
@@ -232,6 +267,47 @@ mod tests {
         let stats = rebuild_index(index_dir.path(), target_dir.path())?;
 
         assert_eq!(stats.indexed, 1);
+        Ok(())
+    }
+
+    /// 进度回调应该每 PROGRESS_INTERVAL 个文件触发一次，累计处理数正确，
+    /// 不多不少——这是浮窗"实时直播"和 CLI 千行打印共用的节奏保证。
+    #[test]
+    fn rebuild_index_with_progress_reports_every_interval() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::tempdir()?;
+
+        let total = PROGRESS_INTERVAL * 2 + 3;
+        for i in 0..total {
+            std::fs::write(target_dir.path().join(format!("f{i}.txt")), "内容")?;
+        }
+
+        let mut reports = Vec::new();
+        let stats = rebuild_index_with_progress(index_dir.path(), target_dir.path(), |p| {
+            reports.push(p.processed);
+        })?;
+
+        assert_eq!(stats.indexed, total);
+        assert_eq!(
+            reports,
+            vec![PROGRESS_INTERVAL, PROGRESS_INTERVAL * 2],
+            "总数不是间隔整数倍时，最后一段不足一个间隔的尾巴不应触发额外回调"
+        );
+        Ok(())
+    }
+
+    /// 文件总数不到一个 PROGRESS_INTERVAL 时，进度回调一次都不该触发——
+    /// 完整结果由返回的 IndexStats 兜底，不依赖至少一次回调。
+    #[test]
+    fn rebuild_index_with_progress_below_interval_reports_nothing() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::tempdir()?;
+        std::fs::write(target_dir.path().join("only.txt"), "内容")?;
+
+        let mut calls = 0usize;
+        rebuild_index_with_progress(index_dir.path(), target_dir.path(), |_| calls += 1)?;
+
+        assert_eq!(calls, 0);
         Ok(())
     }
 }
