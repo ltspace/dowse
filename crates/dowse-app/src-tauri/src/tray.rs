@@ -5,7 +5,7 @@ use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 use crate::config::ConfigState;
 use crate::state::SearchState;
-use crate::window_fx;
+use crate::window_fx::{self, EffectLevelState};
 
 const MENU_SHOW: &str = "show";
 const MENU_REBUILD: &str = "rebuild";
@@ -91,6 +91,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             let _ = config.set_transparency_enabled(now_enabled);
             if let Some(window) = app.get_webview_window("main") {
                 let level = window_fx::apply_with_fallback(&window, now_enabled);
+                app.state::<EffectLevelState>().set(level);
                 let _ = window.emit("dowse://effect-level", level);
             }
         }

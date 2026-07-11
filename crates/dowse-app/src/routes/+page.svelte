@@ -1,156 +1,336 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+	import { onMount } from 'svelte';
+	import { listen } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
+	import { open } from '@tauri-apps/plugin-dialog';
 
-  let name = $state("");
-  let greetMsg = $state("");
+	import * as api from '$lib/api';
+	import type { EffectLevel, SearchHit, TextSegment } from '$lib/types';
+	import ResultList from '$lib/components/ResultList.svelte';
+	import PreviewPane from '$lib/components/PreviewPane.svelte';
+	import ShortcutBar from '$lib/components/ShortcutBar.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
-  }
+	let query = $state('');
+	let hits = $state<SearchHit[]>([]);
+	let selectedIndex = $state(0);
+	let hasIndex = $state<boolean | null>(null);
+	let previewSegments = $state<TextSegment[] | null>(null);
+	let previewLoading = $state(false);
+	let rebuildState = $state<'idle' | 'rebuilding' | 'error'>('idle');
+	let rebuildError = $state('');
+	let toast = $state('');
+
+	let inputEl: HTMLInputElement | undefined = $state();
+
+	let selectedHit = $derived(hits[selectedIndex] ?? null);
+
+	let guidanceKind = $derived.by((): 'idle' | 'no-index' | 'no-results' | 'rebuilding' | 'error' => {
+		if (rebuildState === 'rebuilding') return 'rebuilding';
+		if (rebuildState === 'error') return 'error';
+		if (query.trim().length === 0) return 'idle';
+		if (hasIndex === false) return 'no-index';
+		if (hits.length === 0) return 'no-results';
+		return 'idle';
+	});
+	let showGuidance = $derived(guidanceKind !== 'idle' || query.trim().length === 0);
+
+	async function refreshIndexStatus() {
+		try {
+			const status = await api.indexStatus();
+			hasIndex = status.has_index;
+		} catch {
+			hasIndex = false;
+		}
+	}
+
+	// 键入 30ms 防抖即搜——查询词变了就重新发起，过期响应用 token 挡掉。
+	let searchToken = 0;
+	$effect(() => {
+		const q = query;
+		const token = ++searchToken;
+		if (q.trim().length === 0) {
+			hits = [];
+			selectedIndex = 0;
+			return;
+		}
+		const timer = setTimeout(async () => {
+			try {
+				const results = await api.search(q, 50);
+				if (token !== searchToken) return;
+				hits = results;
+				selectedIndex = 0;
+			} catch (err) {
+				if (token !== searchToken) return;
+				hits = [];
+				console.error('search failed', err);
+			}
+		}, 30);
+		return () => clearTimeout(timer);
+	});
+
+	// 选中行变了就换一份更长的预览上下文；轻微防抖避免按住方向键连续刷。
+	let previewToken = 0;
+	$effect(() => {
+		const hit = selectedHit;
+		const q = query;
+		if (!hit) {
+			previewSegments = null;
+			previewLoading = false;
+			return;
+		}
+		previewLoading = true;
+		const token = ++previewToken;
+		const timer = setTimeout(async () => {
+			try {
+				const result = await api.preview(hit.path, q);
+				if (token !== previewToken) return;
+				previewSegments = result?.segments ?? null;
+			} catch (err) {
+				if (token !== previewToken) return;
+				previewSegments = null;
+				console.error('preview failed', err);
+			} finally {
+				if (token === previewToken) previewLoading = false;
+			}
+		}, 40);
+		return () => clearTimeout(timer);
+	});
+
+	function showToast(msg: string) {
+		toast = msg;
+		setTimeout(() => {
+			if (toast === msg) toast = '';
+		}, 2400);
+	}
+
+	async function pickDirectoryAndRebuild() {
+		const dir = await open({ directory: true, multiple: false, title: '选择要索引的目录' });
+		if (!dir || Array.isArray(dir)) return;
+
+		rebuildState = 'rebuilding';
+		try {
+			const stats = await api.rebuildIndex(dir);
+			rebuildState = 'idle';
+			hasIndex = true;
+			showToast(`建好了，共收录 ${stats.indexed} 个文件`);
+		} catch (err) {
+			rebuildState = 'error';
+			rebuildError = String(err);
+		}
+	}
+
+	function openSelected() {
+		if (!selectedHit) return;
+		api.openFile(selectedHit.path).catch((err) => showToast(`打开失败：${err}`));
+	}
+
+	function revealSelected() {
+		if (!selectedHit) return;
+		api.revealInFolder(selectedHit.path).catch((err) => showToast(`跳转失败：${err}`));
+	}
+
+	function copySelectedPath() {
+		if (!selectedHit) return;
+		navigator.clipboard
+			.writeText(selectedHit.path)
+			.then(() => showToast('路径已复制'))
+			.catch(() => showToast('复制失败'));
+	}
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			getCurrentWindow().hide();
+			return;
+		}
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			if (hits.length > 0) selectedIndex = Math.min(selectedIndex + 1, hits.length - 1);
+			return;
+		}
+		if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			if (hits.length > 0) selectedIndex = Math.max(selectedIndex - 1, 0);
+			return;
+		}
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			if (e.ctrlKey) revealSelected();
+			else openSelected();
+			return;
+		}
+		if (e.key.toLowerCase() === 'c' && e.ctrlKey) {
+			// 输入框里有正在编辑的文本选区时，让浏览器按正常复制处理，
+			// 不要抢用户的编辑操作。
+			const hasTextSelection =
+				inputEl && inputEl.selectionStart !== null && inputEl.selectionStart !== inputEl.selectionEnd;
+			if (!hasTextSelection && selectedHit) {
+				e.preventDefault();
+				copySelectedPath();
+			}
+		}
+	}
+
+	function focusAndSelectAll() {
+		inputEl?.focus();
+		inputEl?.select();
+	}
+
+	onMount(() => {
+		refreshIndexStatus();
+		focusAndSelectAll();
+
+		api.getEffectLevel().then((level: EffectLevel) => {
+			document.documentElement.dataset.effect = level;
+		});
+
+		const unlistenShown = listen('dowse://shown', () => {
+			refreshIndexStatus();
+			focusAndSelectAll();
+		});
+		const unlistenEffect = listen<EffectLevel>('dowse://effect-level', (evt) => {
+			document.documentElement.dataset.effect = evt.payload;
+		});
+		const unlistenRebuildDone = listen<number>('dowse://rebuild-done', (evt) => {
+			refreshIndexStatus();
+			showToast(`托盘重建索引完成，共收录 ${evt.payload} 个文件`);
+		});
+		const unlistenRebuildError = listen<string>('dowse://rebuild-error', (evt) => {
+			showToast(`托盘重建索引失败：${evt.payload}`);
+		});
+
+		return () => {
+			unlistenShown.then((f) => f());
+			unlistenEffect.then((f) => f());
+			unlistenRebuildDone.then((f) => f());
+			unlistenRebuildError.then((f) => f());
+		};
+	});
 </script>
 
-<main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
+<div class="panel">
+	<div class="search-row">
+		<svg class="search-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+			<circle cx="8" cy="8" r="5.4" stroke="currentColor" stroke-width="1.4" />
+			<path d="M12.2 12.2 16 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+		</svg>
+		<input
+			bind:this={inputEl}
+			type="text"
+			class="search-input"
+			placeholder="搜文件名或内容…"
+			bind:value={query}
+			onkeydown={handleKeydown}
+			autocomplete="off"
+			spellcheck="false"
+		/>
+	</div>
 
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
-  </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
+	<div class="body">
+		{#if showGuidance}
+			<EmptyState kind={guidanceKind} {query} errorMessage={rebuildError} onpick={pickDirectoryAndRebuild} />
+		{:else}
+			<div class="results">
+				<ResultList
+					{hits}
+					{selectedIndex}
+					onhover={(i) => (selectedIndex = i)}
+					onselect={(i) => {
+						selectedIndex = i;
+						openSelected();
+					}}
+				/>
+			</div>
+			<div class="divider-v"></div>
+			<div class="preview-col">
+				<PreviewPane hit={selectedHit} segments={previewSegments} loading={previewLoading} />
+			</div>
+		{/if}
+	</div>
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
-</main>
+	<ShortcutBar hasSelection={selectedHit !== null} />
+
+	{#if toast}
+		<div class="toast">{toast}</div>
+	{/if}
+</div>
 
 <style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
+	.panel {
+		width: 100vw;
+		height: 100vh;
+		display: flex;
+		flex-direction: column;
+		background: var(--glass-tint);
+		border-radius: var(--radius-window);
+		border: 1px solid var(--divider);
+		overflow: hidden;
+		position: relative;
+	}
 
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
+	.search-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 14px 20px;
+		border-bottom: 1px solid var(--divider);
+		flex-shrink: 0;
+	}
 
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
+	.search-icon {
+		color: var(--fg-tertiary);
+		flex-shrink: 0;
+	}
 
-  color: #0f0f0f;
-  background-color: #f6f6f6;
+	.search-input {
+		flex: 1;
+		border: none;
+		outline: none;
+		background: transparent;
+		font-size: 19px;
+		font-weight: 400;
+		caret-color: var(--accent-caret);
+	}
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
+	.search-input::placeholder {
+		color: var(--fg-tertiary);
+	}
 
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
+	.body {
+		flex: 1;
+		display: flex;
+		min-height: 0;
+	}
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
+	.results {
+		flex: 0 0 58%;
+		min-width: 0;
+		overflow: hidden;
+	}
 
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
+	.divider-v {
+		width: 1px;
+		background: var(--divider);
+		flex-shrink: 0;
+	}
 
-.row {
-  display: flex;
-  justify-content: center;
-}
+	.preview-col {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+	}
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
+	.toast {
+		position: absolute;
+		bottom: 42px;
+		left: 50%;
+		transform: translateX(-50%);
+		background: var(--toast-bg);
+		color: var(--toast-fg);
+		font-size: 12px;
+		padding: 7px 14px;
+		border-radius: 8px;
+		pointer-events: none;
+	}
 </style>

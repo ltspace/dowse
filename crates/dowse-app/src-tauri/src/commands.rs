@@ -7,6 +7,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::config::ConfigState;
 use crate::highlight::{highlight_name, segments_from_ranges, TextSegment};
 use crate::state::SearchState;
+use crate::window_fx::{EffectLevel, EffectLevelState};
 
 #[derive(Serialize)]
 pub struct SearchHitDto {
@@ -43,6 +44,14 @@ fn file_name_of(path: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string())
+}
+
+/// 前端启动时查一次当前生效的材质级别（Acrylic/Mica/纯色），
+/// 决定要不要自己叠一层纯色背景兜底。托盘切换透明开关之后的更新走
+/// `dowse://effect-level` 事件，这个 command 只覆盖启动时的初值。
+#[tauri::command]
+pub fn get_effect_level(state: State<EffectLevelState>) -> EffectLevel {
+    state.get()
 }
 
 /// 前端打开浮窗/挂载时调用一次，用来决定空输入/无索引/有索引三种引导状态。
