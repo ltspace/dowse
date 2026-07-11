@@ -6,6 +6,13 @@
 
 ### 新增
 
+- M4：OCR 管线——截图/图片里的文字进索引可搜索。Windows 自带 OCR 引擎
+  （Windows.Media.Ocr），独立于文本管线的低优先级队列 + 2~4 线程 worker 池
+  （各自持有独立 OcrEngine，不跨线程共享）；队列持久化在
+  `<index_dir>-ocr-queue.json`，程序中途退出重启不重复识别；双形态入索引
+  （OCR 原始输出 + 去 CJK 间空格拼接），对冲拆字误差与分词间隙；范围
+  png/jpg/jpeg/webp/bmp，20MB 上限；无 OCR 语言包时管线整体停用、打一行日志，
+  不崩溃。浮窗预览区新增图片原图展示（Tauri asset 协议）+ 命中的 OCR 文本段
 - M5：MCP server——`dowse mcp` 子命令，stdio 传输，只读暴露 search/preview/index_status 三个工具给 AI agent
 
 ## [0.4.0]
