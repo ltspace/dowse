@@ -38,7 +38,7 @@ pub use roots::{
     AddRootStats, RemoveRootStats, add_root, add_root_with_progress, rebuild_root,
     rebuild_root_with_progress, remove_root,
 };
-pub use searcher::{PreviewHit, SearchHit, Searcher, SortMode};
+pub use searcher::{PreviewHit, SearchHit, Searcher, SortMode, normalize_ranges};
 pub use status::{IndexStatus, index_status};
 pub use updater::{BatchOutcome, IndexUpdater};
 pub use volume::ntfs_fast_path_available;
