@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 
 mod common;
 
-/// 轮询上限：见下面 `ocr_queue_survives_restart_and_resumes_pending_work` 的
+/// 轮询上限：见下面 `ocr_restart_recognized_sentinels_are_searchable` 的
 /// 排障记录——两个 worker 并发处理两张图片时，索引提交到能被一个全新打开的
 /// `Searcher` 读到之间偶发有 CI 才会撞上的短暂延迟，这条测试原来直接开
 /// `Searcher::open` 后立即断言，是本仓库里唯一一处对"刚写完的索引"不走轮询
@@ -159,23 +159,20 @@ fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
     Ok(())
 }
 
-/// 断点续传：先建索引让图片入队但不处理，模拟"进程在 OCR 队列半程时退出"；
-/// 重新打开一次 IndexUpdater（模拟"再启动"）之后，drain_ocr_queue 应该能把
-/// 剩下的队列跑完，而不是从头重来——用处理耗时的粗略上界间接验证没有重复识别
-/// （重复识别同一张图会让 processed 计数超过图片总数，这里直接断言计数）。
-// 断点续传的队列/重启逻辑本身（processed==2、second_pass==0）是可靠的，但结尾
-// 断言"两张合成图的哨兵词都能搜到"依赖 Windows OCR 对渲染文字的识别精度——不同
-// 机器/语言包版本对个别字形（如 quokka 里的字母组合）识别有系统性差异，会让这条
-// 精确匹配断言偶发失败（见文件头注释记录的 0/O、l/1 一类误差）。标 ignore 避免
-// 这类环境相关抖动污染 `cargo test`；需要时用 `cargo test -- --ignored` 手动跑。
-#[ignore = "依赖 OCR 对合成图片的识别精度，环境相关，用 --ignored 手动触发"]
+/// 断点续传的队列/重启逻辑：先建索引让图片入队但不处理，模拟"进程在 OCR 队列
+/// 半程时退出"；重新打开一次 IndexUpdater（模拟"再启动"）之后，drain_ocr_queue
+/// 应该能把剩下的队列跑完，而不是从头重来——第二次 drain 的 processed==0 间接
+/// 验证没有重复识别（重复识别同一张图会让计数超过图片总数）。
+///
+/// 这部分只验队列/持久化逻辑，不依赖 OCR 识别精度，所以**不 ignore**：没装 OCR
+/// 语言包时靠开头的 is_available() 守卫安静跳过（no-op），装了就在 CI 里如常跑。
 #[test]
-fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
+fn ocr_queue_resumes_pending_work_without_reprocessing() -> Result<()> {
     common::force_slow_lane_for_tests();
 
     if !dowse_core::is_available() {
         eprintln!(
-            "跳过 ocr_queue_survives_restart_and_resumes_pending_work：\
+            "跳过 ocr_queue_resumes_pending_work_without_reprocessing：\
              本机没有检测到可用的 OCR 语言包"
         );
         return Ok(());
@@ -202,6 +199,45 @@ fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
     // 再跑一次：队列应该已经空了，不会把同样两张图重新识别一遍。
     let second_pass = dowse_core::drain_ocr_queue(index_dir.path(), 2)?;
     assert_eq!(second_pass.processed, 0, "队列应已清空，不该重复处理");
+
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target_dir);
+    Ok(())
+}
+
+/// 断点续传的识别结果落地：队列跑完后，断言两张合成图各自的哨兵词都能搜到。
+///
+/// 这条断言依赖 Windows OCR 对渲染文字的识别精度——不同机器/语言包版本对个别
+/// 字形（如 quokka 里的字母组合）识别有系统性差异，会让这条精确匹配断言偶发
+/// 失败（见文件头注释记录的 0/O、l/1 一类误差）。所以单独标 ignore，避免这类
+/// 环境相关抖动污染 `cargo test`；需要时用 `cargo test -- --ignored` 手动跑。
+#[ignore = "依赖 OCR 对合成图片的识别精度，环境相关，用 --ignored 手动触发"]
+#[test]
+fn ocr_restart_recognized_sentinels_are_searchable() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
+    if !dowse_core::is_available() {
+        eprintln!(
+            "跳过 ocr_restart_recognized_sentinels_are_searchable：\
+             本机没有检测到可用的 OCR 语言包"
+        );
+        return Ok(());
+    }
+
+    let index_dir = tempfile::tempdir()?;
+    let target_dir = tempfile::Builder::new()
+        .prefix("dowse-ocr-restart-")
+        .tempdir()?;
+
+    let shot_sentinels = [SENTINEL_SHOT0, SENTINEL_SHOT1];
+    for (i, sentinel) in shot_sentinels.iter().enumerate() {
+        let path = target_dir.path().join(format!("shot{i}.png"));
+        generate_test_image(&path, sentinel)?;
+    }
+
+    // 入队后一次性把队列跑完，再校验识别结果落到了对应文档上。
+    dowse_core::rebuild_index(index_dir.path(), target_dir.path())?;
+    dowse_core::drain_ocr_queue(index_dir.path(), 2)?;
 
     for (i, sentinel) in shot_sentinels.iter().enumerate() {
         assert!(
