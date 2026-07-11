@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use tantivy::{doc, Index, IndexWriter};
+use tantivy::{Index, IndexWriter, doc};
 use walkdir::WalkDir;
 
 use crate::extract::extract_text;
-use crate::meta::{save_meta, IndexMeta, SCHEMA_VERSION};
-use crate::{build_schema, register_tokenizers, Fields};
+use crate::meta::{IndexMeta, SCHEMA_VERSION, save_meta};
+use crate::{Fields, build_schema, register_tokenizers};
 
 /// 一次重建索引的统计结果，CLI 拿去打报告。
 pub struct IndexStats {
@@ -56,7 +56,11 @@ pub(crate) fn file_stat(path: &Path) -> Option<(i64, u64)> {
 
 /// 抽取一个文件并写进索引（不 commit）。返回 true=收录、false=没有可索引文本被跳过。
 /// 全量重建和增量更新共用这一处建文档逻辑，保证两条路径写进去的字段完全一致。
-pub(crate) fn add_file_document(writer: &IndexWriter, fields: &Fields, path: &Path) -> Result<bool> {
+pub(crate) fn add_file_document(
+    writer: &IndexWriter,
+    fields: &Fields,
+    path: &Path,
+) -> Result<bool> {
     let Some(content) = extract_text(path) else {
         return Ok(false);
     };

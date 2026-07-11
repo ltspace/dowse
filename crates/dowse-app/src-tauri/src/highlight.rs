@@ -180,7 +180,10 @@ mod tests {
     #[test]
     fn highlight_name_case_insensitive_ascii() {
         let segs = highlight_name("Rate-Limiter.rs", "limiter");
-        assert!(segs.iter().any(|s| s.highlighted && s.text.eq_ignore_ascii_case("Limiter")));
+        assert!(
+            segs.iter()
+                .any(|s| s.highlighted && s.text.eq_ignore_ascii_case("Limiter"))
+        );
     }
 
     #[test]

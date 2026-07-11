@@ -166,7 +166,13 @@ mod tests {
         let p = under(&r, "tmp.md");
         d.push(WatchEvent::Upsert(p.clone()));
         d.push(WatchEvent::Remove(p.clone()));
-        assert_eq!(d.drain(), vec![PendingChange { path: p, op: PendingOp::Remove }]);
+        assert_eq!(
+            d.drain(),
+            vec![PendingChange {
+                path: p,
+                op: PendingOp::Remove
+            }]
+        );
     }
 
     #[test]
@@ -183,8 +189,14 @@ mod tests {
 
         let batch = d.drain();
         assert_eq!(batch.len(), 2, "双边都在监听内：删旧 + 加新，共两条");
-        assert!(batch.contains(&PendingChange { path: from, op: PendingOp::Remove }));
-        assert!(batch.contains(&PendingChange { path: to, op: PendingOp::Upsert }));
+        assert!(batch.contains(&PendingChange {
+            path: from,
+            op: PendingOp::Remove
+        }));
+        assert!(batch.contains(&PendingChange {
+            path: to,
+            op: PendingOp::Upsert
+        }));
     }
 
     #[test]
@@ -206,7 +218,10 @@ mod tests {
 
         assert_eq!(
             d.drain(),
-            vec![PendingChange { path: to, op: PendingOp::Upsert }],
+            vec![PendingChange {
+                path: to,
+                op: PendingOp::Upsert
+            }],
             "只有新名在监听内，应只产生一条 Upsert"
         );
     }
@@ -230,7 +245,10 @@ mod tests {
 
         assert_eq!(
             d.drain(),
-            vec![PendingChange { path: from, op: PendingOp::Remove }],
+            vec![PendingChange {
+                path: from,
+                op: PendingOp::Remove
+            }],
             "只有旧名在监听内，应只产生一条 Remove"
         );
     }
@@ -244,7 +262,10 @@ mod tests {
         for i in 0..WATER_LEVEL {
             forced = d.push(WatchEvent::Upsert(under(&r, &format!("f{i}.md"))));
         }
-        assert!(forced, "攒到水位阈值时最后一次 push 应返回 true 提示强制刷批");
+        assert!(
+            forced,
+            "攒到水位阈值时最后一次 push 应返回 true 提示强制刷批"
+        );
         assert_eq!(d.len(), WATER_LEVEL);
 
         // 水位以下不触发
@@ -264,7 +285,10 @@ mod tests {
         d.push(WatchEvent::RemoveDir(dir.clone()));
         assert_eq!(
             d.drain(),
-            vec![PendingChange { path: dir, op: PendingOp::RemoveTree }]
+            vec![PendingChange {
+                path: dir,
+                op: PendingOp::RemoveTree
+            }]
         );
     }
 }

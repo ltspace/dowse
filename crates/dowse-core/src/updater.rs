@@ -9,7 +9,7 @@ use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Te
 
 use crate::events::{PendingChange, PendingOp};
 use crate::indexer::add_file_document;
-use crate::{build_schema, register_tokenizers, Fields};
+use crate::{Fields, build_schema, register_tokenizers};
 
 /// 一批增量更新的处理结果，给日志/调试看。
 #[derive(Debug, Default, Clone, Copy)]
@@ -39,8 +39,7 @@ impl IndexUpdater {
     /// 打开已有索引的写入端。先校验 schema 版本，不匹配就报错提示重建。
     pub fn open(index_dir: &Path) -> Result<Self> {
         crate::meta::ensure_schema_version(index_dir)?;
-        let index = Index::open_in_dir(index_dir)
-            .context("打不开索引目录，先建一次索引再监听")?;
+        let index = Index::open_in_dir(index_dir).context("打不开索引目录，先建一次索引再监听")?;
         register_tokenizers(&index);
         let (_, fields) = build_schema();
         // 50MB 写缓冲：增量场景一批就几个到几千个文件，不用像全量重建那样开 200MB。

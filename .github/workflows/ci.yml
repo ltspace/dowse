@@ -30,10 +30,5 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # Format check is temporarily disabled: `cargo fmt --check` currently
-      # reports diffs across most of crates/ (import-grouping style under the
-      # 2024 edition rustfmt defaults doesn't match what's checked in). That's
-      # someone else's area of the tree mid-change; re-enable this step once
-      # crates/ is reformatted and checked in clean.
-      # - name: Format check
-      #   run: cargo fmt --check
+      - name: Format check
+        run: cargo fmt --check
