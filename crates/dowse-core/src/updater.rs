@@ -3,8 +3,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use tantivy::collector::DocSetCollector;
-use tantivy::query::RangeQuery;
-use tantivy::schema::Value;
+use tantivy::query::{BooleanQuery, Occur, Query, RangeQuery, TermQuery};
+use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 use crate::events::{PendingChange, PendingOp};
@@ -75,7 +75,7 @@ impl IndexUpdater {
                     outcome.removed += 1;
                 }
                 PendingOp::RemoveTree => {
-                    outcome.removed += self.delete_prefix(&change.path)?;
+                    outcome.removed += self.delete_tree(&change.path)?;
                 }
             }
         }
@@ -100,25 +100,39 @@ impl IndexUpdater {
         self.writer.delete_term(term);
     }
 
-    /// 目录删除：前缀圈选删掉整棵子树。
+    /// 删除一个路径及其整棵子树。既删这个 path 本身（它若是文件，删掉文件文档），
+    /// 也前缀圈选删掉它名下的全部文档（它若是目录，删掉子树）——一个操作同时覆盖
+    /// "删文件"和"删目录"两种情形，所以监听侧分不清是文件还是目录时发这一个就够，
+    /// 不用再发一条精确删除（发两条会在防抖队列里按同一 path 合并、互相覆盖）。
     ///
-    /// path 字段是 STRING（整条路径存成一个 term），对它做 `[dir+分隔符, dir+分隔符+U+10FFFF)`
-    /// 的范围查询，一次圈出该目录下的全部文档，逐个 delete_term——不是逐文件比对，
-    /// 目录再大也只走一遍倒排。末尾补分隔符很关键：圈的是"这个目录里的东西"，
-    /// 不会误伤同前缀的兄弟目录（`log` 不会连 `log2/...` 一起删）。
-    fn delete_prefix(&self, dir: &Path) -> Result<usize> {
-        let mut prefix = dir.to_string_lossy().into_owned();
+    /// 实现：对 STRING 的 path 字段查 `path == dir` 或 `path ∈ [dir+分隔符, dir+分隔符+U+10FFFF)`，
+    /// 收集命中文档逐个 delete_term——用 term 查询而不是逐文件比对，目录再大也只走
+    /// 一遍倒排。子树范围末尾补分隔符很关键：圈的是"这个目录里的东西"，不会误伤
+    /// 同前缀的兄弟（`log` 不会连 `log2/...` 一起删；精确项也只命中 `log` 自己，
+    /// 不会碰到兄弟文件 `log2`）。
+    fn delete_tree(&self, path: &Path) -> Result<usize> {
+        let exact = path.to_string_lossy().into_owned();
+        let mut prefix = exact.clone();
         if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
             prefix.push(std::path::MAIN_SEPARATOR);
         }
         let upper = format!("{prefix}\u{10FFFF}");
 
-        let lower_term = Term::from_field_text(self.fields.path, &prefix);
-        let upper_term = Term::from_field_text(self.fields.path, &upper);
-        let query = RangeQuery::new(Bound::Included(lower_term), Bound::Excluded(upper_term));
+        let exact_query = TermQuery::new(
+            Term::from_field_text(self.fields.path, &exact),
+            IndexRecordOption::Basic,
+        );
+        let subtree_query = RangeQuery::new(
+            Bound::Included(Term::from_field_text(self.fields.path, &prefix)),
+            Bound::Excluded(Term::from_field_text(self.fields.path, &upper)),
+        );
+        let query = BooleanQuery::new(vec![
+            (Occur::Should, Box::new(exact_query) as Box<dyn Query>),
+            (Occur::Should, Box::new(subtree_query) as Box<dyn Query>),
+        ]);
 
-        // 用一个手动重载的只读 reader 收集命中：反映的是当前已提交的索引状态，
-        // 目录删除针对的正是这些已入索引的旧文档。Manual 策略不起后台监听线程。
+        // 手动重载的只读 reader 反映当前已提交状态，删的正是这些已入索引的旧文档。
+        // Manual 策略不起后台监听线程。
         let reader: IndexReader = self
             .index
             .reader_builder()

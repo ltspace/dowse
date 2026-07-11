@@ -1,12 +1,16 @@
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use notify::event::{ModifyKind, RemoveKind, RenameMode};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 
-use crate::events::WatchEvent;
+use crate::events::{Debouncer, WatchEvent, QUIET_WINDOW_MS};
 use crate::indexer::walk_index_files;
+use crate::updater::{BatchOutcome, IndexUpdater};
 
 /// 文件系统事件源抽象。里程碑 3 用 notify 做第一个实现；里程碑 6 的 NTFS
 /// USN Journal 快速路径只要再实现这个 trait，就能接进同一条"防抖 → 更新"流水线，
@@ -99,19 +103,17 @@ fn emit_upsert(path: &Path, tx: &Sender<WatchEvent>) {
     }
 }
 
-/// 一个路径的删除。notify 能分清文件/目录时精确处理；分不清（Any/Other，
-/// 而且路径已删没法 stat）就两条都发——删单文件文档 + 前缀圈选删子树，
-/// 都是幂等的，删不存在的 term 是空操作。
+/// 一个路径的删除。notify 能分清文件/目录时精确处理；分不清（Any/Other，路径已删
+/// 没法 stat）就发一条 RemoveDir——它在更新器里是"删这个 path 本身 + 前缀圈选删子树"，
+/// 文件和目录两种情形一并覆盖。**不能**再补发一条精确 Remove：同一 path 的两条事件
+/// 会在防抖队列里按 path 合并、后者覆盖前者，反而漏删。
 fn emit_remove(kind: RemoveKind, path: &Path, tx: &Sender<WatchEvent>) {
     match kind {
-        RemoveKind::Folder => {
-            let _ = tx.send(WatchEvent::RemoveDir(path.to_path_buf()));
-        }
         RemoveKind::File => {
             let _ = tx.send(WatchEvent::Remove(path.to_path_buf()));
         }
-        RemoveKind::Any | RemoveKind::Other => {
-            let _ = tx.send(WatchEvent::Remove(path.to_path_buf()));
+        // Folder / Any / Other 一律走 RemoveDir（= 删自身 + 删子树），一条搞定。
+        _ => {
             let _ = tx.send(WatchEvent::RemoveDir(path.to_path_buf()));
         }
     }
@@ -133,10 +135,10 @@ fn translate_rename(mode: RenameMode, paths: &[PathBuf], tx: &Sender<WatchEvent>
                 });
             }
         }
-        // 只有旧名（移出监听范围/改名的前半）：当删除。文件/目录分不清就两条都发。
+        // 只有旧名（移出监听范围/改名的前半）：当删除。文件/目录分不清，发一条
+        // RemoveDir（删自身 + 删子树）即可，别再补 Remove（同 path 会被合并覆盖）。
         RenameMode::From => {
             for p in paths {
-                let _ = tx.send(WatchEvent::Remove(p.to_path_buf()));
                 let _ = tx.send(WatchEvent::RemoveDir(p.to_path_buf()));
             }
         }
@@ -164,7 +166,97 @@ fn emit_best_effort(path: &Path, tx: &Sender<WatchEvent>) {
     if path.exists() {
         emit_upsert(path, tx);
     } else {
-        let _ = tx.send(WatchEvent::Remove(path.to_path_buf()));
+        // 一条 RemoveDir 覆盖文件+目录两种情形（见 emit_remove 的说明）。
         let _ = tx.send(WatchEvent::RemoveDir(path.to_path_buf()));
+    }
+}
+
+/// 监听循环对外汇报的进度，给 CLI 打日志、给托盘端刷新状态用。
+#[derive(Debug, Clone)]
+pub enum WatchProgress {
+    /// 收到一个原始事件（防抖前）。
+    Received(WatchEvent),
+    /// 一批防抖后的变更已提交入索引。
+    Committed {
+        batch_size: usize,
+        outcome: BatchOutcome,
+    },
+    /// 提交失败，这批已退回队列、下个窗口重试。
+    CommitFailed(String),
+}
+
+/// 监听主循环：把事件源 → 防抖队列 → 增量更新器串起来，阻塞运行直到 stop 置位。
+///
+/// - 500ms 静默窗口由 `recv_timeout` 驱动：每来一个事件就重置等待，静默满 500ms
+///   才刷一批；事件持续不断时靠水位（5000）强制刷批，不会无限攒着。
+/// - 一批一次 commit（commit 是重操作）。提交失败就把这批退回队列下轮重试。
+/// - stop 每个窗口 tick（≤500ms）检查一次，所以 Ctrl+C / 退出能及时生效。
+///
+/// updater 用 `Arc<Mutex<_>>` 传入，好和启动对账共用同一个 writer；搜索侧是独立
+/// reader，监听运行时索引照常可搜。
+pub fn run_watch(
+    source: impl EventSource,
+    roots: &[PathBuf],
+    updater: Arc<Mutex<IndexUpdater>>,
+    stop: Arc<AtomicBool>,
+    mut on_progress: impl FnMut(WatchProgress),
+) -> Result<()> {
+    let (tx, rx) = std::sync::mpsc::channel::<WatchEvent>();
+    // guard 留到函数结束：drop 掉它 notify 才停。
+    let _guard = source.watch(roots, tx)?;
+
+    let mut debouncer = Debouncer::new(roots.to_vec());
+    let window = Duration::from_millis(QUIET_WINDOW_MS);
+
+    while !stop.load(Ordering::Relaxed) {
+        match rx.recv_timeout(window) {
+            Ok(event) => {
+                on_progress(WatchProgress::Received(event.clone()));
+                // 水位到了就立刻刷，不等静默窗口
+                if debouncer.push(event) {
+                    flush_batch(&mut debouncer, &updater, &mut on_progress);
+                }
+            }
+            // 静默窗口到期：有攒着的就刷一批
+            Err(RecvTimeoutError::Timeout) => {
+                flush_batch(&mut debouncer, &updater, &mut on_progress);
+            }
+            // 事件源侧关闭了（watcher 出错退出等）：收尾退出
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    // 退出前把残留的刷掉，别把最后一批丢了
+    flush_batch(&mut debouncer, &updater, &mut on_progress);
+    Ok(())
+}
+
+/// 排干防抖队列、提交一批。空批直接返回。提交失败把这批退回队列下轮重试。
+fn flush_batch(
+    debouncer: &mut Debouncer,
+    updater: &Mutex<IndexUpdater>,
+    on_progress: &mut dyn FnMut(WatchProgress),
+) {
+    if debouncer.is_empty() {
+        return;
+    }
+    let batch = debouncer.drain();
+    let batch_size = batch.len();
+
+    let mut guard = updater.lock().expect("updater mutex poisoned");
+    match guard.apply(&batch) {
+        Ok(outcome) => {
+            drop(guard);
+            on_progress(WatchProgress::Committed {
+                batch_size,
+                outcome,
+            });
+        }
+        Err(err) => {
+            drop(guard);
+            // 本批退回队列，下个窗口再试；期间新来的同 path 事件优先。
+            debouncer.requeue(batch);
+            on_progress(WatchProgress::CommitFailed(err.to_string()));
+        }
     }
 }
