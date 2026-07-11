@@ -6,6 +6,7 @@ mod tray;
 mod window_fx;
 
 use tauri::{Manager, WindowEvent};
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 use config::ConfigState;
@@ -62,10 +63,22 @@ pub fn run() {
                 .get_webview_window("main")
                 .expect("tauri.conf.json 里定义的 main 窗口应该存在");
 
-            let transparency_enabled = app.state::<ConfigState>().get().transparency_enabled;
-            let level = window_fx::apply_with_fallback(&window, transparency_enabled);
+            let cfg = app.state::<ConfigState>().get();
+            let level = window_fx::apply_with_fallback(&window, cfg.transparency_enabled);
             app.manage(EffectLevelState::new(level));
             let _ = window_fx::position_upper_center(&window);
+
+            // 设计文档："开机自启（可在托盘菜单关掉）"——默认开。只在用户没有
+            // 主动关过的前提下才去抢着开，不然每次启动都会把用户关掉的选项
+            // 悄悄打开回去。
+            if !cfg.autostart_user_disabled {
+                let mgr = app.autolaunch();
+                if !mgr.is_enabled().unwrap_or(true)
+                    && let Err(err) = mgr.enable()
+                {
+                    eprintln!("默认开启开机自启失败: {err}");
+                }
+            }
 
             tray::build(app.handle())?;
 

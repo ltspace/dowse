@@ -81,8 +81,15 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             let mgr = app.autolaunch();
             let enabled = mgr.is_enabled().unwrap_or(false);
             let toggled = if enabled { mgr.disable() } else { mgr.enable() };
-            if let Err(err) = toggled {
-                eprintln!("切换开机自启失败: {err}");
+            match toggled {
+                Ok(()) => {
+                    // 记下用户是主动关的还是主动开的——下次启动时的默认开逻辑
+                    // 只在"用户没关过"的前提下生效，不能覆盖用户的选择。
+                    let _ = app
+                        .state::<ConfigState>()
+                        .set_autostart_user_disabled(enabled);
+                }
+                Err(err) => eprintln!("切换开机自启失败: {err}"),
             }
         }
         MENU_TRANSPARENCY => {
