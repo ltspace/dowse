@@ -299,7 +299,7 @@ mod tests {
         queue.enqueue(outside.clone(), 1, 2);
         std::fs::remove_file(&gone).unwrap(); // 模拟"文件已删"
 
-        queue.compact(&[root.clone()]);
+        queue.compact(std::slice::from_ref(&root));
 
         assert_eq!(
             queue.pending_len(),
@@ -330,7 +330,7 @@ mod tests {
         queue.mark_processed(outside.clone(), 1, 2, "内容".to_string());
         std::fs::remove_file(&gone).unwrap();
 
-        queue.compact(&[root.clone()]);
+        queue.compact(std::slice::from_ref(&root));
 
         assert!(
             queue.cached_content(&kept, 1, 2).is_some(),

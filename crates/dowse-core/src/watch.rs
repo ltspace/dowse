@@ -354,6 +354,19 @@ pub fn watch_roots_auto(
             }))
         };
 
+        // 留一份 fast_roots 自己的克隆：run_fast_lane 只在"连启动都失败"时才
+        // 返回 Err（正常运行期间碰到的单卷读取错误在 usn.rs 内部自己 eprintln
+        // 后收工，不会让这个 Result 变成 Err）——一旦真的启动失败，之前的写法
+        // 是原样把这个 Err 返回给调用方，同时下面还要等 slow_handle join 完才
+        // 真正返回：如果这次运行本来就没有慢车道根（slow_handle 是 None），
+        // 调用方在此期间完全拿不到任何反馈，而这些快车道根从此在本次运行里
+        // 彻底没人监听，直到外部调用方察觉到 Err、决定要不要重启整个监听——
+        // 这段"错误静默 + 快车道卷失聪"的空窗期不该存在。
+        let updater_for_fallback = updater.clone();
+        let stop_for_fallback = stop.clone();
+        let on_progress_for_fallback = on_progress.clone();
+        let fast_roots_for_fallback = fast_roots.clone();
+
         let result = crate::usn::run_fast_lane(
             index_dir,
             &fast_roots,
@@ -362,6 +375,32 @@ pub fn watch_roots_auto(
             stop,
             on_progress,
         );
+
+        let result = match result {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                // 立即日志 + 把这几个根并入慢车道继续跑本次运行，而不是把 Err
+                // 一路扣到 slow_handle.join() 之后才让调用方知道——这段时间里
+                // 这些根本来会完全没人监听。下次启动时仍然会重新探测，重新
+                // 尝试快车道，这里只影响"这一次运行"。
+                eprintln!(
+                    "快车道启动失败，本次运行把这些根并入慢车道继续: {err}"
+                );
+                for root in &fast_roots_for_fallback {
+                    let mut guard = updater_for_fallback.lock().expect("updater mutex poisoned");
+                    if let Err(err) = crate::reconcile::reconcile(root, &mut guard) {
+                        eprintln!("启动对账 {} 失败: {err}", root.display());
+                    }
+                }
+                run_watch(
+                    NotifyEventSource,
+                    &fast_roots_for_fallback,
+                    updater_for_fallback,
+                    stop_for_fallback,
+                    move |p| on_progress_for_fallback(p),
+                )
+            }
+        };
 
         if let Some(handle) = slow_handle {
             let _ = handle.join();
