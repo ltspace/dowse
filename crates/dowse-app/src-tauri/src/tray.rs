@@ -5,6 +5,7 @@ use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 use crate::config::ConfigState;
 use crate::state::SearchState;
+use crate::watcher::WatchController;
 use crate::window_fx::{self, EffectLevelState};
 
 const MENU_SHOW: &str = "show";
@@ -122,11 +123,16 @@ fn rebuild_from_last_dir(app: &AppHandle) {
         let Ok(index_dir) = crate::config::index_dir() else {
             return;
         };
+        // 重建前先停监听，放掉旧索引的写锁/文件句柄（Windows 删不掉被占用的目录）。
+        app.state::<WatchController>().stop();
         match dowse_core::rebuild_index(&index_dir, &target_dir) {
             Ok(stats) => {
                 if let Ok(searcher) = dowse_core::Searcher::open(&index_dir) {
                     app.state::<SearchState>().replace(searcher);
                 }
+                // 重建完盯住新索引根，重新挂上对账 + 实时监听。
+                app.state::<WatchController>()
+                    .start(index_dir, vec![target_dir]);
                 let _ = app.emit("dowse://rebuild-done", stats.indexed);
             }
             Err(err) => {
