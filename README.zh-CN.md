@@ -89,12 +89,12 @@ CLI 用于脚本和调试；MCP server 将本地索引暴露给 AI agent。
 | 3 | 增量索引：文件监听、启动对账 | 完成 |
 | 4 | OCR 管线：截图文字入索引 | 完成 |
 | 5 | MCP server | 完成 |
-| 6 | NTFS MFT / USN Journal 快速路径 | 规划 |
+| 6 | NTFS MFT / USN Journal 快速路径 | 完成（管理员权限下的快车道未经真机验证，见设计文档"实施备注"） |
 
 ## 技术栈
 
 Rust · [tantivy](https://github.com/quickwit-oss/tantivy) · jieba ·
-Tauri 2 · Svelte 5 · Windows.Media.Ocr · notify
+Tauri 2 · Svelte 5 · Windows.Media.Ocr · notify · Win32（MFT/USN Journal）
 
 ## 设计文档
 
@@ -102,6 +102,7 @@ Tauri 2 · Svelte 5 · Windows.Media.Ocr · notify
 - [docs/DESIGN-M3-增量索引.md](docs/DESIGN-M3-增量索引.md)
 - [docs/DESIGN-M4-OCR管线.md](docs/DESIGN-M4-OCR管线.md)
 - [docs/DESIGN-M5-MCP.md](docs/DESIGN-M5-MCP.md)
+- [docs/DESIGN-M6-NTFS快速层.md](docs/DESIGN-M6-NTFS快速层.md)
 
 ## 隐私
 
