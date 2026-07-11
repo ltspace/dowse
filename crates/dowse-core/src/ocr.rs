@@ -128,6 +128,15 @@ mod engine_impl {
         block_on(decoder.GetSoftwareBitmapAsync())
     }
 
+    /// 对一张图片跑 OCR，返回原始识别文本（未清洗，调用方自己过 dual_form_content）。
+    pub fn recognize(engine: &Engine, path: &Path) -> anyhow::Result<String> {
+        let bitmap = load_software_bitmap(path)
+            .map_err(|e| anyhow::anyhow!("加载图片失败 {}: {e}", path.display()))?;
+        let result = block_on(engine.0.RecognizeAsync(&bitmap))
+            .map_err(|e| anyhow::anyhow!("OCR 识别失败 {}: {e}", path.display()))?;
+        Ok(result.Text()?.to_string())
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -155,15 +164,6 @@ mod engine_impl {
                 PathBuf::from(r"C:\a\b.png")
             );
         }
-    }
-
-    /// 对一张图片跑 OCR，返回原始识别文本（未清洗，调用方自己过 dual_form_content）。
-    pub fn recognize(engine: &Engine, path: &Path) -> anyhow::Result<String> {
-        let bitmap = load_software_bitmap(path)
-            .map_err(|e| anyhow::anyhow!("加载图片失败 {}: {e}", path.display()))?;
-        let result = block_on(engine.0.RecognizeAsync(&bitmap))
-            .map_err(|e| anyhow::anyhow!("OCR 识别失败 {}: {e}", path.display()))?;
-        Ok(result.Text()?.to_string())
     }
 }
 
