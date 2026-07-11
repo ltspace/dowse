@@ -75,6 +75,7 @@ pub fn run() {
             commands::rebuild_index,
             commands::get_effect_level,
             commands::get_glass_alpha,
+            commands::get_hotkey,
             commands::file_icon,
             commands::set_pinned,
             context_menu::show_result_context_menu,

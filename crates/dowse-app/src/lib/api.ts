@@ -47,6 +47,12 @@ export function getGlassAlpha(): Promise<GlassAlpha> {
 	return invoke('get_glass_alpha');
 }
 
+/// 当前生效的全局呼出快捷键，`tauri-plugin-global-shortcut` 的原始格式
+/// （如 "Alt+Backquote"）——快捷键速查浮层拿去做人类可读的转换再显示。
+export function getHotkey(): Promise<string> {
+	return invoke('get_hotkey');
+}
+
 /// 按扩展名（不带点，小写与否都行）取系统关联图标的 PNG data URI，
 /// 取不到返回 null——由调用方（FileIcon 组件）回落到手绘图标。
 export function fileIcon(ext: string): Promise<string | null> {
