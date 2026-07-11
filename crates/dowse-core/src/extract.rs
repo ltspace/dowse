@@ -41,31 +41,39 @@ pub fn extract_text(path: &Path) -> Option<String> {
         return None;
     }
 
-    match ext.as_str() {
+    // 各格式的抽取都可能在底层库里 panic：PDF 走的 `pdf_extract`（及其底层
+    // `lopdf`）对某些畸形/深层嵌套的 PDF 不是返回 `Err`，而是内部 `unwrap`/`panic!`；
+    // docx/xlsx/pptx 共用的 zip + XML 解析同样可能对畸形输入 panic。而抽取是在
+    // 监听/OCR 线程持有共享 `IndexUpdater` 锁时调的：panic 一旦穿过持有的
+    // `MutexGuard`，就会把这把共享锁**毒化**，之后所有 `.lock()` 都 panic，连锁
+    // 拖垮整条监听 + OCR 管线（对常驻托盘程序是灾难性的）。
+    //
+    // 这里用 `catch_unwind` 把**任意**格式抽取过程中的 panic 兜成 `None`，让畸形
+    // 文件跟其它抽不出文本的文件一样安静跳过。（`updater.rs`/`watch.rs`/
+    // `ocr_worker.rs` 那侧的锁也已改成抗毒化的 `unwrap_or_else(|e| e.into_inner())`，
+    // 两层防御各自都能兜住。）
+    //
+    // 注意 `catch_unwind` 只能接住**栈展开式**的 panic（`unwrap`/`panic!` 这类）。
+    // 若畸形输入触发深度递归把线程栈撑爆，那是栈溢出，走的是 SIGABRT/进程 abort，
+    // `catch_unwind` 接不住，进程仍会整体退出——这一类只能靠上游解析库自身的
+    // 递归深度限制来防，不在本函数的兜底范围内。
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match ext.as_str() {
         "pdf" => extract_pdf(path),
         "docx" => extract_docx(path),
         "xlsx" => extract_xlsx(path),
         "pptx" => extract_pptx(path),
         e if TEXT_EXTS.contains(&e) => read_text_smart(path),
         _ => None,
-    }
-}
-
-/// 从 PDF 抽文本。`pdf_extract`（及其底层 `lopdf`）对某些畸形或深层嵌套的 PDF
-/// 不是返回 `Err`，而是内部 `unwrap`/`panic!`（甚至栈溢出）——`.ok()` 接不住 panic。
-/// 而抽取是在监听/OCR 线程持有共享 `IndexUpdater` 锁时调的：panic 一旦穿过持有的
-/// `MutexGuard`，就会把这把共享锁**毒化**，之后所有 `.lock()` 都 panic，连锁拖垮
-/// 整条监听 + OCR 管线（对常驻托盘程序是灾难性的）。
-///
-/// 这里用 `catch_unwind` 把 PDF 抽取的 panic 兜成 `None`，让畸形 PDF 跟其它抽不出
-/// 文本的文件一样安静跳过。（`updater.rs`/`watch.rs`/`ocr_worker.rs` 那侧的锁也已
-/// 改成抗毒化的 `unwrap_or_else(|e| e.into_inner())`，两层防御各自都能兜住。）
-fn extract_pdf(path: &Path) -> Option<String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        pdf_extract::extract_text(path).ok()
     }))
     .ok()
     .flatten()
+}
+
+/// 从 PDF 抽文本。畸形 PDF 触发的 panic 由 `extract_text` 那层统一的
+/// `catch_unwind` 兜底（见其文档），这里只走正常路径：`pdf_extract` 返回 `Err`
+/// 时（可正常识别的错误）用 `.ok()` 落成 `None`。
+fn extract_pdf(path: &Path) -> Option<String> {
+    pdf_extract::extract_text(path).ok()
 }
 
 /// 打开一个 zip 包里的单个条目，读成字节。条目不存在/包本身打不开（损坏、
