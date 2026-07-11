@@ -20,6 +20,15 @@
   png/jpg/jpeg/webp/bmp，20MB 上限；无 OCR 语言包时管线整体停用、打一行日志，
   不崩溃。浮窗预览区新增图片原图展示（Tauri asset 协议）+ 命中的 OCR 文本段
 - M5：MCP server——`dowse mcp` 子命令，stdio 传输，只读暴露 search/preview/index_status 三个工具给 AI agent
+- M6：NTFS 快速层——按卷判定（NTFS + 管理员权限）自动启用 MFT 快速枚举
+  （FSCTL_ENUM_USN_DATA，不走目录树）建初始索引、USN Journal 事件源替代
+  notify 做实时监听、USN 游标补账替代 mtime 全扫做启动对账；拿不到卷句柄
+  （非管理员/非 NTFS）静默退回现状的 walkdir + notify 路径，两条路径产出
+  完全一致，上层无感知；一台机器可以一块盘走快车道、另一块盘走慢车道；
+  重命名事件的配对状态机专门处理"改名后紧跟删除同一文件"的乱序场景，
+  不吞事件、不留孤儿文档；游标持久化保证"先提交索引、后写游标"的原子性，
+  崩溃后宁可重放（幂等）不可漏账。CLI 的 `dowse watch` 和托盘常驻程序共用
+  新入口 `watch_roots_auto`
 
 ### 变更
 
