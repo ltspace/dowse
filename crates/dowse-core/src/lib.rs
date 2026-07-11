@@ -67,3 +67,58 @@ pub(crate) fn register_tokenizers(index: &tantivy::Index) {
         .tokenizers()
         .register("jieba", tantivy_jieba::JiebaTokenizer::new());
 }
+
+/// 剥掉 Windows 扩展长度路径语法（`\\?\`/`\\?\UNC\`）的前缀，只给**展示层**用。
+///
+/// `PathBuf::canonicalize()` 在 Windows 上返回的路径天生带这个前缀——这是
+/// Rust 标准库刻意保留的行为，为的是让后续的文件 I/O（打开、监听、在
+/// 资源管理器里定位）自动绕开 Win32 的 `MAX_PATH`（260 字符）限制，对深层
+/// 路径也能正常工作。索引里存的 `path` 字段就是 canonicalize 之后的原样值，
+/// 所以搜索结果、预览区拿到的路径字符串都带着这个前缀——直接渲染给用户看
+/// 会露出 `\\?\E:\...` 这种内部实现细节。
+///
+/// 这个函数只用来生成给用户看的文本；真正参与文件操作（`open_file`/
+/// `reveal_in_folder`）的路径必须继续用没剥过的原始值，否则长路径场景会
+/// 重新触发 `MAX_PATH` 限制。
+pub fn display_path(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+#[cfg(test)]
+mod display_path_tests {
+    use super::display_path;
+
+    #[test]
+    fn strips_plain_verbatim_prefix() {
+        assert_eq!(display_path(r"\\?\E:\BLOG\post.md"), r"E:\BLOG\post.md");
+    }
+
+    #[test]
+    fn strips_unc_verbatim_prefix() {
+        assert_eq!(
+            display_path(r"\\?\UNC\server\share\file.txt"),
+            r"\\server\share\file.txt"
+        );
+    }
+
+    #[test]
+    fn leaves_normal_windows_path_untouched() {
+        assert_eq!(display_path(r"E:\BLOG\post.md"), r"E:\BLOG\post.md");
+    }
+
+    #[test]
+    fn leaves_unix_style_path_untouched() {
+        assert_eq!(display_path("/home/user/file.txt"), "/home/user/file.txt");
+    }
+
+    #[test]
+    fn leaves_empty_string_untouched() {
+        assert_eq!(display_path(""), "");
+    }
+}
