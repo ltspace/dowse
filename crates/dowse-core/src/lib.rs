@@ -1,11 +1,15 @@
+mod events;
 mod extract;
 mod indexer;
 mod meta;
 mod searcher;
+mod watch;
 
+pub use events::{Debouncer, PendingChange, PendingOp, WatchEvent, QUIET_WINDOW_MS, WATER_LEVEL};
 pub use indexer::{rebuild_index, IndexStats};
 pub use meta::registered_roots;
 pub use searcher::{PreviewHit, SearchHit, Searcher};
+pub use watch::{EventSource, NotifyEventSource, WatchGuard};
 
 use tantivy::schema::{
     IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, STORED, STRING,
