@@ -21,18 +21,15 @@ mod usn_translate;
 mod volume;
 mod watch;
 
-pub use events::{Debouncer, PendingChange, PendingOp, QUIET_WINDOW_MS, WATER_LEVEL, WatchEvent};
+pub use events::{Debouncer, PendingChange, PendingOp, WatchEvent};
 pub use ext_groups::by_name as ext_group_by_name;
 pub use indexer::{
-    IndexProgress, IndexStats, PROGRESS_INTERVAL, rebuild_index, rebuild_index_with_progress,
-    remove_dir_all_retrying,
+    IndexProgress, IndexStats, rebuild_index, rebuild_index_with_progress, remove_dir_all_retrying,
 };
 pub use meta::registered_roots;
 pub use ocr::is_available;
 pub use ocr_queue::OcrQueue;
-pub use ocr_worker::{
-    DEFAULT_WORKERS, MAX_WORKERS, MIN_WORKERS, OcrDrainStats, OcrPipeline, drain_ocr_queue,
-};
+pub use ocr_worker::{DEFAULT_WORKERS, OcrDrainStats, OcrPipeline, drain_ocr_queue};
 pub use reconcile::{ReconcileStats, reconcile, reconcile_orphans};
 pub use roots::{
     AddRootStats, RemoveRootStats, add_root, add_root_with_progress, rebuild_root,

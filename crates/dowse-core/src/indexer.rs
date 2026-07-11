@@ -26,7 +26,7 @@ pub struct IndexStats {
 /// 报在几十万文件的目录上会把 Tauri 的事件 IPC 打爆。CLI 在这个基础上再自己
 /// 降频到每千个文件打一行（是 PROGRESS_INTERVAL 的整数倍），两端共用同一处
 /// 回调，只是各自选了不同的上报/打印间隔，逻辑不重复一份。
-pub const PROGRESS_INTERVAL: usize = 50;
+pub(crate) const PROGRESS_INTERVAL: usize = 50;
 
 /// 单次进度汇报：累计处理数（收录 + 跳过），和刚处理完的那个文件路径。
 #[derive(Debug, Clone)]
