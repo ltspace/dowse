@@ -21,6 +21,8 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import GhostDropdown from '$lib/components/GhostDropdown.svelte';
 	import PinButton from '$lib/components/PinButton.svelte';
+	import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
+	import { formatHotkey } from '$lib/hotkey';
 
 	// 类型筛选 / 排序器两个幽灵态下拉的选项表——顺序即菜单里的显示顺序，
 	// 第一项永远是"默认值"（对应 GhostDropdown 的 defaultValue）。
@@ -70,6 +72,8 @@
 	let typeMenuIndex = $state(0);
 	let sortMenuIndex = $state(0);
 	let pinned = $state(false);
+	let shortcutOverlayOpen = $state(false);
+	let hotkeyLabel = $state('Alt+`');
 
 	let inputEl: HTMLInputElement | undefined = $state();
 	let panelEl: HTMLDivElement | undefined = $state();
@@ -250,8 +254,23 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		// Ctrl+P / Ctrl+S 开关类型/排序菜单——不进快捷键提示条（保持底部简洁），
-		// 只写进 README。两个菜单互斥：开一个就关另一个。
+		// 速查浮层打开期间，主输入完全不响应——任意键都只用来关掉浮层，
+		// 不会漏进搜索框变成一个字符，也不会触发下面任何快捷键分支。
+		if (shortcutOverlayOpen) {
+			e.preventDefault();
+			shortcutOverlayOpen = false;
+			return;
+		}
+		if (e.ctrlKey && e.key === '/') {
+			e.preventDefault();
+			closeMenus();
+			shortcutOverlayOpen = true;
+			return;
+		}
+
+		// Ctrl+P / Ctrl+S 开关类型/排序菜单，Ctrl+D 切换图钉——都不进底部快捷键
+		// 提示条（保持底部简洁），只在这份速查浮层里能查到。两个下拉菜单互斥：
+		// 开一个就关另一个。
 		if (e.ctrlKey && e.key.toLowerCase() === 'p') {
 			e.preventDefault();
 			openTypeMenu();
@@ -260,6 +279,11 @@
 		if (e.ctrlKey && e.key.toLowerCase() === 's') {
 			e.preventDefault();
 			openSortMenu();
+			return;
+		}
+		if (e.ctrlKey && e.key.toLowerCase() === 'd') {
+			e.preventDefault();
+			togglePinned();
 			return;
 		}
 
@@ -386,6 +410,9 @@
 			document.documentElement.dataset.effect = level;
 		});
 		api.getGlassAlpha().then(applyGlassAlpha);
+		api.getHotkey().then((raw) => {
+			hotkeyLabel = formatHotkey(raw);
+		});
 
 		document.addEventListener('click', handleDocumentClick);
 
@@ -519,6 +546,10 @@
 
 	{#if toast}
 		<div class="toast">{toast}</div>
+	{/if}
+
+	{#if shortcutOverlayOpen}
+		<ShortcutOverlay hotkey={hotkeyLabel} onclose={() => (shortcutOverlayOpen = false)} />
 	{/if}
 </div>
 
