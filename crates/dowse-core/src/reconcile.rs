@@ -88,6 +88,54 @@ pub fn reconcile(root: &Path, updater: &mut IndexUpdater) -> Result<ReconcileSta
     Ok(stats)
 }
 
+/// 孤儿文档清理（多根索引，里程碑 7）：索引里若存在 path 不属于 `roots`
+/// 任一根的文档，直接删除。
+///
+/// 这是"添加根"/"移除根"两个操作中途崩溃的兜底（设计文档"边界与失败"一节）：
+/// 添加根时 meta 要等目录树 upsert **完成后**才写入根，半路崩溃意味着索引里
+/// 已经多出一批文档、但 meta 还不认它们属于任何根；移除根时 meta **先于**
+/// 文档删除更新，半路崩溃意味着索引里还残留着一批文档、但 meta 已经不认
+/// 它们了。两种情形殊途同归：都留下了"在索引里、但不属于任何已注册根"的
+/// 孤儿文档，这条规则统一收尾，下次启动对账时随 `watch_roots_auto` 一并跑掉。
+///
+/// `roots` 为空时不做任何清理，直接返回 0——空根列表通常意味着索引还没建
+/// 或者刚被清空，不该把这解读成"什么都不属于任何根、全部删掉"。
+pub fn reconcile_orphans(roots: &[PathBuf], updater: &mut IndexUpdater) -> Result<usize> {
+    if roots.is_empty() {
+        return Ok(0);
+    }
+
+    let reader = updater
+        .index()
+        .reader_builder()
+        .reload_policy(ReloadPolicy::Manual)
+        .try_into()?;
+    let searcher = reader.searcher();
+    let fields = updater.fields();
+
+    let hits = searcher.search(&AllQuery, &DocSetCollector)?;
+    let mut batch: Vec<PendingChange> = Vec::new();
+    for addr in hits {
+        let doc: TantivyDocument = searcher.doc(addr)?;
+        let Some(path) = doc.get_first(fields.path).and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let pbuf = PathBuf::from(path);
+        if !roots.iter().any(|r| pbuf.starts_with(r)) {
+            batch.push(PendingChange {
+                path: pbuf,
+                op: PendingOp::Remove,
+            });
+        }
+    }
+
+    let removed = batch.len();
+    if !batch.is_empty() {
+        updater.apply(&batch)?;
+    }
+    Ok(removed)
+}
+
 /// 读出索引里 root 前缀下所有文档的 (path -> (mtime, size))。
 /// 用手动重载的只读 reader（不起后台线程），AllQuery 收集全部存活文档。
 fn snapshot_indexed(updater: &IndexUpdater, root: &Path) -> Result<HashMap<PathBuf, (i64, u64)>> {

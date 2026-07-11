@@ -20,6 +20,12 @@ pub(crate) const SCHEMA_VERSION: u32 = 3;
 /// 优化信息，不是索引字段布局，读不到/读到旧格式（没这个字段）都不该逼用户
 /// 重建索引，`#[serde(default)]` 让旧 meta.json 静默补一个空表，退回到
 /// mtime 全扫对账，行为上等价于这个卷从来没走过快速路径。
+///
+/// `roots` 的写入语义在多根索引（里程碑 7）之后从"单根整体替换"升级为
+/// "逐根增删"：全量重建（`finish_rebuild`）仍然整份覆盖，但 [`append_root`]/
+/// [`remove_root`] 只增删列表里的一项，其余字段原样保留。字段本身的类型/
+/// 序列化格式完全没变（一直就是 `Vec<PathBuf>`），旧版本写的单根 meta.json
+/// 不需要任何迁移，读出来就是一个长度为 1 的列表，向后兼容是自动的。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexMeta {
     pub schema_version: u32,
@@ -104,6 +110,71 @@ pub(crate) fn ensure_schema_version(index_dir: &Path) -> Result<IndexMeta> {
 /// 顺带校验 schema 版本——版本不对时直接报错，不返回一份不可信的根列表。
 pub fn registered_roots(index_dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(ensure_schema_version(index_dir)?.roots)
+}
+
+/// 校验候选根跟已有根之间不存在嵌套关系（含双向：候选是某个已有根的子目录，
+/// 或者候选是某个已有根的父目录），也拒绝跟已有根完全相同的重复添加。
+/// 嵌套会让 `delete_tree` 的前缀圈选删除和对账的孤儿清理语义变成泥潭
+/// （删 B 会连带删掉嵌在它里面的 A、反之亦然），产品上也没有正当需求
+/// （设计文档"核心操作语义"一节）。
+///
+/// 路径比较基于剥掉 Windows 扩展长度前缀（`\\?\`/`\\?\UNC\`）后的形态
+/// （见 [`crate::display_path`]）——不同调用路径传入的根可能一个带这个
+/// 前缀一个不带（`canonicalize()` 会加上，托盘"更改索引文件夹"目前不会），
+/// 直接按原始字符串比较会让真实存在的嵌套关系因为前缀不一致而被漏判。
+pub(crate) fn assert_no_root_nesting(existing: &[PathBuf], candidate: &Path) -> Result<()> {
+    let candidate_norm = PathBuf::from(crate::display_path(&candidate.to_string_lossy()));
+    for root in existing {
+        let root_norm = PathBuf::from(crate::display_path(&root.to_string_lossy()));
+        if root_norm == candidate_norm {
+            bail!("目录 {} 已经是索引根，不用重复添加", candidate.display());
+        }
+        if candidate_norm.starts_with(&root_norm) {
+            bail!(
+                "目录 {} 是已有根 {} 的子目录，不允许嵌套添加",
+                candidate.display(),
+                root.display()
+            );
+        }
+        if root_norm.starts_with(&candidate_norm) {
+            bail!(
+                "目录 {} 是已有根 {} 的父目录，不允许嵌套添加",
+                candidate.display(),
+                root.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// 把一个新根追加进 meta.json 的 roots 列表，其余字段（schema_version/
+/// usn_cursors）原样保留。调用方（`roots::add_root_with_progress`）必须先
+/// 完成目录树 upsert、再调这个函数——顺序不能反：设计文档"边界与失败"一节
+/// 要求半路崩溃不留幽灵根，只有 upsert 完成后才写 meta 才能保证这一点
+/// （半程崩溃时根本还没走到这一步，索引里那些孤儿文档由对账新增的孤儿
+/// 清理规则兜底清掉）。
+pub(crate) fn append_root(index_dir: &Path, root: &Path) -> Result<()> {
+    let mut meta = load_meta(index_dir)?;
+    assert_no_root_nesting(&meta.roots, root)?;
+    meta.roots.push(root.to_path_buf());
+    save_meta(index_dir, &meta)
+}
+
+/// 把一个根从 meta.json 的 roots 列表里移除，其余字段原样保留。不存在的根
+/// 直接报错（调用方应该先用 `registered_roots` 确认这个根确实注册过，避免
+/// 手误传错路径时静默什么都不做）。
+///
+/// 调用方（`roots::remove_root`）必须先调这个函数、再删文档——顺序同样不能
+/// 反：设计文档要求半路崩溃时残留文档由"不属于任何注册根就删"的对账规则
+/// 兜底，这要求 meta 先于文档删除完成落盘。
+pub(crate) fn remove_root_from_meta(index_dir: &Path, root: &Path) -> Result<()> {
+    let mut meta = load_meta(index_dir)?;
+    let before = meta.roots.len();
+    meta.roots.retain(|r| r != root);
+    if meta.roots.len() == before {
+        bail!("目录 {} 不是已注册的索引根", root.display());
+    }
+    save_meta(index_dir, &meta)
 }
 
 #[cfg(test)]
@@ -212,5 +283,104 @@ mod tests {
         let index_dir = tempfile::tempdir().unwrap();
         // 从没建过索引：不应该 panic，也不应该把错误传染给调用方。
         assert!(load_usn_cursors(index_dir.path()).is_empty());
+    }
+
+    #[test]
+    fn nesting_rejects_child_and_parent_both_directions() {
+        let existing = vec![PathBuf::from(r"C:\docs\project")];
+
+        let child = PathBuf::from(r"C:\docs\project\sub");
+        assert!(
+            assert_no_root_nesting(&existing, &child).is_err(),
+            "候选是已有根的子目录应该被拒绝"
+        );
+
+        let parent = PathBuf::from(r"C:\docs");
+        assert!(
+            assert_no_root_nesting(&existing, &parent).is_err(),
+            "候选是已有根的父目录应该被拒绝"
+        );
+
+        let duplicate = PathBuf::from(r"C:\docs\project");
+        assert!(
+            assert_no_root_nesting(&existing, &duplicate).is_err(),
+            "跟已有根完全相同应该被拒绝"
+        );
+
+        let sibling = PathBuf::from(r"C:\docs\other");
+        assert!(
+            assert_no_root_nesting(&existing, &sibling).is_ok(),
+            "兄弟目录不该被误判为嵌套"
+        );
+    }
+
+    /// 一边带 `\\?\` 扩展长度前缀、一边不带的同一个目录也应该判定为嵌套——
+    /// `canonicalize()` 会加这个前缀，托盘"更改索引文件夹"目前不会，两条
+    /// 路径产出的根写法不一致，嵌套校验不能因为这个漏判。
+    #[test]
+    fn nesting_check_normalizes_extended_length_prefix() {
+        let existing = vec![PathBuf::from(r"\\?\C:\docs\project")];
+        let child = PathBuf::from(r"C:\docs\project\sub");
+        assert!(assert_no_root_nesting(&existing, &child).is_err());
+    }
+
+    #[test]
+    fn append_and_remove_root_round_trip() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("note.md"), "内容")?;
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+
+        let second = tempfile::Builder::new().prefix("dowse-test2-").tempdir()?;
+        append_root(index_dir.path(), second.path())?;
+
+        let meta = load_meta(index_dir.path())?;
+        assert_eq!(
+            meta.roots,
+            vec![target_dir.path().to_path_buf(), second.path().to_path_buf()],
+            "追加根不应该动到已有的根"
+        );
+
+        remove_root_from_meta(index_dir.path(), target_dir.path())?;
+        let meta = load_meta(index_dir.path())?;
+        assert_eq!(
+            meta.roots,
+            vec![second.path().to_path_buf()],
+            "移除根不应该动到剩下的根"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn append_root_rejects_nested_candidate() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("note.md"), "内容")?;
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+
+        let nested = target_dir.path().join("sub");
+        let err = append_root(index_dir.path(), &nested)
+            .expect_err("子目录应该被拒绝，且不应该写入 meta");
+
+        assert!(err.to_string().contains("嵌套"));
+        let meta = load_meta(index_dir.path())?;
+        assert_eq!(
+            meta.roots,
+            vec![target_dir.path().to_path_buf()],
+            "校验失败时不应该污染已有的 roots"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn remove_root_from_meta_errors_on_unregistered_root() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("note.md"), "内容")?;
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+
+        let unrelated = tempfile::tempdir()?;
+        assert!(remove_root_from_meta(index_dir.path(), unrelated.path()).is_err());
+        Ok(())
     }
 }
