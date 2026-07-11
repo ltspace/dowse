@@ -37,6 +37,12 @@ fn key_of(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// 单例注册表的查找 key：规范化掉 `\\?\`/`\\?\UNC\` 前缀，让不同写法的
+/// 同一个索引目录路径落到同一个单例上（见 `for_index_dir` 的不变量说明）。
+fn registry_key(index_dir: &Path) -> PathBuf {
+    PathBuf::from(crate::display_path(&index_dir.to_string_lossy()))
+}
+
 /// OCR 队列：图片的 (path,mtime,size) 待处理表 + 已处理结果缓存，随索引目录持久化
 /// 在 `<index_dir>-ocr-queue.json`（跟 meta.rs 的 `<index_dir>-meta.json` 同一个
 /// "索引目录旁的兄弟文件"套路，不塞进 tantivy 自己管理的索引目录里）。
@@ -55,10 +61,20 @@ static REGISTRY: OnceLock<Mutex<HashMap<PathBuf, Arc<OcrQueue>>>> = OnceLock::ne
 impl OcrQueue {
     /// 取（或首次创建）某个索引目录对应的进程内单例。第一次调用时从磁盘加载已持久化
     /// 的状态；磁盘上没有（旧索引、或者这是第一次跑 M4 之后的代码）就是空队列，不算错误。
+    ///
+    /// 不变量：单例注册表按**规范化后**的路径（剥掉 `\\?\`/`\\?\UNC\` 扩展长度
+    /// 前缀，见 [`crate::display_path`]）去重。同一个索引目录可能被不同调用方
+    /// 用不同的路径语法传进来——比如 `E:\index` 和 `Path::canonicalize()` 在
+    /// Windows 上天生带前缀的 `\\?\E:\index`，两者指向磁盘上同一个目录。如果
+    /// key 原样比较，会各建出一份独立的 `OcrQueue`，谁后 `save()` 就把谁的
+    /// 进度覆盖掉。只有 map 的 key 做规范化；存进单例本体、参与文件 IO 的
+    /// `index_dir` 字段仍然是第一次创建它的调用方传入的原始路径——长路径场景
+    /// 要靠 `\\?\` 前缀绕开 Win32 MAX_PATH，不能剥。
     pub fn for_index_dir(index_dir: &Path) -> Arc<OcrQueue> {
         let registry = REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+        let key = registry_key(index_dir);
         let mut map = registry.lock().expect("ocr queue registry mutex poisoned");
-        if let Some(existing) = map.get(index_dir) {
+        if let Some(existing) = map.get(&key) {
             return existing.clone();
         }
         let state = load_state(index_dir);
@@ -66,7 +82,7 @@ impl OcrQueue {
             index_dir: index_dir.to_path_buf(),
             state: Mutex::new(state),
         });
-        map.insert(index_dir.to_path_buf(), queue.clone());
+        map.insert(key, queue.clone());
         queue
     }
 
@@ -217,6 +233,23 @@ mod tests {
         let state = load_state(&index_dir);
         assert!(state.pending.is_empty());
         assert!(state.processed.is_empty());
+    }
+
+    /// 同一个索引目录用两种路径写法（有无 `\\?\` 扩展长度前缀）传进来，应该
+    /// 落到同一个单例上——不然后保存的会把先保存的进度覆盖掉（P3 审查项）。
+    #[test]
+    fn for_index_dir_normalizes_extended_prefix_to_same_singleton() {
+        let dir = tempfile::tempdir().unwrap();
+        let index_dir = dir.path().join("index");
+        let prefixed = PathBuf::from(format!(r"\\?\{}", index_dir.display()));
+
+        let a = OcrQueue::for_index_dir(&index_dir);
+        let b = OcrQueue::for_index_dir(&prefixed);
+
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "两种路径写法应该命中同一个进程内单例，不能各建一份互相覆盖"
+        );
     }
 
     /// 断点续传的核心链路：入队 -> worker 取走 -> 标记已处理 -> 缓存命中；
