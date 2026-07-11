@@ -108,6 +108,15 @@ impl Debouncer {
             .map(|(path, op)| PendingChange { path, op })
             .collect()
     }
+
+    /// 提交失败时把一批变更退回队列、下个窗口重试。
+    /// 用 or_insert：若同一 path 在退回期间已经来了更新的事件，新事件（更晚的状态）
+    /// 优先，不被这批旧的覆盖，符合"保留最后状态"的防抖语义。
+    pub fn requeue(&mut self, changes: Vec<PendingChange>) {
+        for change in changes {
+            self.pending.entry(change.path).or_insert(change.op);
+        }
+    }
 }
 
 #[cfg(test)]
