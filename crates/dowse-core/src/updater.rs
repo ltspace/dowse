@@ -1,3 +1,9 @@
+//! 增量更新写入端。[`IndexUpdater`] 持有索引唯一的 `IndexWriter`，把防抖后
+//! 的一批变更（[`crate::PendingChange`]）落进索引，一批只 commit 一次
+//! （[`IndexUpdater::apply`]，返回 [`BatchOutcome`]）。启动对账和实时监听
+//! 必须共用同一个 `IndexUpdater`（宿主用 `Arc<Mutex<_>>` 串起来）——一个
+//! 索引同一时刻只能有一个写入端。
+
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::time::Duration;

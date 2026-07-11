@@ -1,3 +1,8 @@
+//! OCR 后台 worker 池：[`OcrPipeline::start`] 启动几个线程持续从
+//! [`crate::OcrQueue`] 取图片识别、批量写回索引（攒够一批或超过时间窗口才
+//! commit 一次，避免逐张 commit 打爆磁盘 IO）。[`drain_ocr_queue`] 是一次性
+//! 处理完当前排队图片的薄封装，给 CLI 等不需要常驻后台线程的场景用。
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

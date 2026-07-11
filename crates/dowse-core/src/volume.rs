@@ -1,3 +1,8 @@
+//! 卷能力探测：一个监听根该走 NTFS MFT/USN 快车道还是 walkdir/notify 慢车道
+//! （[`probe_root_capability`]，见 [`RootCapability`]）。判定结果按卷缓存，
+//! 进程生命周期内只探测一次——权限令牌和卷文件系统类型在进程运行期间不会
+//! 变化。诚实降级：拿不到卷句柄（非管理员）就静默走慢车道，不报错、不崩溃。
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};

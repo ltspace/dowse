@@ -1,3 +1,9 @@
+//! 启动对账：[`reconcile`] 把一个索引根按 (path, mtime, size) 三态比对索引
+//! 和磁盘的实际状态，补齐程序没运行期间发生的新增/修改/删除
+//! （[`ReconcileStats`]）。[`reconcile_orphans`] 处理孤儿文档——不属于任何
+//! 已注册索引根的残留记录。对账只读扫盘、复用传入的 `IndexUpdater` 写入端，
+//! 搜索侧不受影响，进行期间索引照常可搜。
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 

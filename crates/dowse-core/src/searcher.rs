@@ -1,3 +1,9 @@
+//! 只读搜索入口。[`Searcher::open`] 打开一个索引的只读句柄，
+//! [`Searcher::search`]/[`Searcher::search_filtered`]/[`Searcher::search_advanced`]
+//! 执行查询并返回 [`SearchHit`]（含 BM25 分数、命中片段、高亮区间），
+//! [`SortMode`] 控制按相关性还是按 mtime/size 排序。也提供按路径取更大窗口
+//! 预览内容的能力（[`PreviewHit`]）。
+
 use std::ops::{Bound, Range};
 use std::path::Path;
 

@@ -1,3 +1,9 @@
+//! 图片的 OCR 待处理/已处理状态，随索引目录持久化在
+//! `<index_dir>-ocr-queue.json`。[`OcrQueue`] 按索引目录在进程内单例复用
+//! （[`OcrQueue::for_index_dir`]），供全量重建、启动对账、增量更新、OCR
+//! worker 池共享同一份内存状态——各自独立开一份会导致后写的覆盖先写的进度。
+//! 已处理的识别结果连同内容一起缓存，避免全量重建时把所有图片重新 OCR 一遍。
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
