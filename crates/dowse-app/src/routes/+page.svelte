@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listen } from '@tauri-apps/api/event';
-	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { animate } from 'motion';
 
@@ -412,7 +411,7 @@
 
 		if (e.key === 'Escape') {
 			e.preventDefault();
-			getCurrentWindow().hide();
+			api.hideWindow().catch((err) => console.error('hideWindow failed', err));
 			return;
 		}
 		if (e.key === 'ArrowDown') {
