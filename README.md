@@ -63,7 +63,8 @@ Overlay app (released; current v0.2.1, v0.3.0 coming soon): `Alt+\`` to summon, 
                  │              dowse-core                  │
                  │  tantivy index · jieba segmentation ·     │
                  │  encoding detection · text extraction     │
-                 │  (txt/md/pdf/code) · OCR pipeline*        │
+                 │  (txt/md/pdf/code/docx/xlsx/pptx) ·       │
+                 │  OCR pipeline*                            │
                  └──────┬──────────┬──────────┬────────────┘
                         │          │          │
                  ┌──────┴───┐ ┌────┴─────┐ ┌──┴───────────┐
