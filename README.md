@@ -83,7 +83,7 @@ Index updates run on a two-tier scheme: while running, file system events drive 
 | 1 | CLI indexing and search: Chinese segmentation, GBK detection, highlighting | Done |
 | 2 | Overlay: global hotkey, Acrylic material, keyboard navigation | In progress |
 | 3 | Incremental indexing: file watching, startup reconciliation | Done |
-| 4 | OCR pipeline: screenshot text into the index | Technical validation done |
+| 4 | OCR pipeline: screenshot text into the index | Done |
 | 5 | MCP server | Done |
 | 6 | NTFS MFT / USN Journal fast path | Planned |
 
