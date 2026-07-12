@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The `dowse-core` and `dowse-cli` crates are merged into a single `dowse`
+  package that is both the search library and the command-line tool. The CLI is
+  installable with `cargo install dowse`; consumers that want only the search
+  engine can depend on the crate with `default-features = false` to leave out
+  the CLI and its dependencies.
+
 ## [0.7.0] - 2026-07-08
 
 ### Added
