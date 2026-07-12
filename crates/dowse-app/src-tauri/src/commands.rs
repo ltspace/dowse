@@ -37,7 +37,7 @@ pub struct PreviewDto {
 pub struct IndexStatusDto {
     pub has_index: bool,
     pub num_docs: u64,
-    /// 已注册的全部索引根，已经过 `dowse_core::display_path` 清洗（剥掉
+    /// 已注册的全部索引根，已经过 `dowse::display_path` 清洗（剥掉
     /// Windows 扩展长度路径的 `\\?\`/`\\?\UNC\` 前缀）——这是"给人看的路径
     /// 一律过 display_path"这条规矩在多根场景下唯一的出口，前端拿到手就是
     /// 可以直接渲染的文本，不用（也不应该）自己再处理一遍。空态浮窗据此列出
@@ -80,7 +80,7 @@ pub fn get_hotkey(config: State<ConfigState>) -> String {
 }
 
 /// 前端打开浮窗/挂载时调用一次，用来决定空输入/无索引/有索引三种引导状态。
-/// 根列表直接读索引的 meta（`dowse_core::registered_roots`），不是走
+/// 根列表直接读索引的 meta（`dowse::registered_roots`），不是走
 /// `ConfigState::target_dir`——多根索引之后 meta 里的 roots 才是唯一可信的
 /// 来源（`ConfigState::target_dir` 只在"从没建过索引"的引导流程里还有用）。
 #[tauri::command]
@@ -92,10 +92,10 @@ pub fn index_status(search: State<SearchState>) -> IndexStatusDto {
     };
     let roots = crate::config::index_dir()
         .ok()
-        .and_then(|dir| dowse_core::registered_roots(&dir).ok())
+        .and_then(|dir| dowse::registered_roots(&dir).ok())
         .unwrap_or_default()
         .into_iter()
-        .map(|p| dowse_core::display_path(&p.to_string_lossy()))
+        .map(|p| dowse::display_path(&p.to_string_lossy()))
         .collect();
     IndexStatusDto {
         has_index,
@@ -113,9 +113,9 @@ pub fn indexing_status(status: State<IndexingStatus>) -> IndexingSnapshot {
     status.snapshot()
 }
 
-/// 浮窗"类型/排序"两个幽灵态下拉的取值透传到这里，翻译成 dowse-core 的
+/// 浮窗"类型/排序"两个幽灵态下拉的取值透传到这里，翻译成 dowse 的
 /// 分组常量/`SortMode`——语义（哪个字符串对应哪组扩展名、哪种排序）由
-/// dowse-core 一处定义，Tauri 这层只是原样转发字符串，不在这里重复一份映射表。
+/// dowse 一处定义，Tauri 这层只是原样转发字符串，不在这里重复一份映射表。
 /// `ext_group`/`sort` 都是可选参数：不传、传 "all"/未知字符串都表示不筛选/
 /// 用默认相关性排序，前端传坏了也不会让搜索报错。
 #[tauri::command]
@@ -131,8 +131,8 @@ pub fn search(
         return Ok(Vec::new());
     };
 
-    let group = dowse_core::ext_group_by_name(ext_group.as_deref());
-    let sort_mode = dowse_core::SortMode::parse(sort.as_deref());
+    let group = dowse::ext_group_by_name(ext_group.as_deref());
+    let sort_mode = dowse::SortMode::parse(sort.as_deref());
 
     let hits = searcher
         .search_advanced(&query, limit, group, sort_mode)
@@ -144,7 +144,7 @@ pub fn search(
             let name_segments = highlight_name(&name, &query);
             let snippet_segments = segments_from_ranges(&hit.snippet, &hit.highlighted);
             SearchHitDto {
-                display_path: dowse_core::display_path(&hit.path),
+                display_path: dowse::display_path(&hit.path),
                 path: hit.path,
                 name,
                 name_segments,
@@ -227,7 +227,7 @@ pub fn reveal_in_folder(_path: String) -> Result<(), String> {
 /// 里——浮窗按钮、托盘两个菜单项三个入口共用同一份实现，行为保证一致。
 ///
 /// 建索引期间通过 `dowse://rebuild-progress` 事件把进度实时推给前端（浮窗的
-/// "实时直播"效果），频率由 dowse-core 的 `PROGRESS_INTERVAL` 控制。
+/// "实时直播"效果），频率由 dowse 的 `PROGRESS_INTERVAL` 控制。
 /// `RebuildGuard` 防止这个命令和托盘的重建入口并发触发——已经有一次在跑
 /// 就直接报错，不会互相踩踏。
 #[tauri::command]

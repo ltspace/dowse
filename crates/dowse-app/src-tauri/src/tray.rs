@@ -249,7 +249,7 @@ fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
 fn build_folders_submenu(app: &AppHandle, busy: bool) -> tauri::Result<Submenu<tauri::Wry>> {
     let roots = crate::config::index_dir()
         .ok()
-        .and_then(|dir| dowse_core::registered_roots(&dir).ok())
+        .and_then(|dir| dowse::registered_roots(&dir).ok())
         .unwrap_or_default();
 
     let s = crate::i18n::strings();
@@ -258,7 +258,7 @@ fn build_folders_submenu(app: &AppHandle, busy: bool) -> tauri::Result<Submenu<t
         let docs = root_doc_count(app, root);
         let label = format!(
             "{} · {} {}",
-            dowse_core::display_path(&root.to_string_lossy()),
+            dowse::display_path(&root.to_string_lossy()),
             crate::rebuild::format_count(docs),
             s.root_docs_unit
         );
@@ -416,7 +416,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 /// 误伤到下标对应的、实际上是另一个根。
 fn resolve_root_by_index(idx: usize) -> Option<PathBuf> {
     let index_dir = crate::config::index_dir().ok()?;
-    let roots = dowse_core::registered_roots(&index_dir).ok()?;
+    let roots = dowse::registered_roots(&index_dir).ok()?;
     roots.into_iter().nth(idx)
 }
 
@@ -450,7 +450,7 @@ fn add_folder(app: &AppHandle) {
 fn has_existing_index() -> bool {
     crate::config::index_dir()
         .ok()
-        .and_then(|dir| dowse_core::registered_roots(&dir).ok())
+        .and_then(|dir| dowse::registered_roots(&dir).ok())
         .is_some()
 }
 

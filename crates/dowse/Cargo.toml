@@ -1,5 +1,5 @@
 [package]
-name = "dowse-core"
+name = "dowse"
 version = "0.7.0"
 edition.workspace = true
 license.workspace = true
@@ -17,6 +17,19 @@ categories = ["text-processing", "filesystem"]
 default-target = "x86_64-pc-windows-msvc"
 targets = ["x86_64-pc-windows-msvc"]
 
+# 库 + 命令行二合一：库（lib.rs）默认对外提供搜索引擎 API；命令行/MCP 入口
+# （src/bin/dowse）连同它专属的依赖一起放在 `cli` feature 后面，默认开启。
+# `cargo install dowse` 拿到带命令行的完整工具；只想用搜索引擎库的人写
+# `dowse = { version = "…", default-features = false }` 得到不拖 clap/rmcp 的干净库。
+[features]
+default = ["cli"]
+cli = ["dep:clap", "dep:ctrlc", "dep:directories", "dep:rmcp", "dep:schemars", "dep:tokio"]
+
+[[bin]]
+name = "dowse"
+path = "src/bin/dowse/main.rs"
+required-features = ["cli"]
+
 [dependencies]
 anyhow.workspace = true
 chardetng = "1.0.0"
@@ -31,8 +44,24 @@ tantivy-jieba = "0.20.0"
 walkdir = "2.5.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
+# 命令行 / MCP server 专属依赖：只有二进制入口用得到，门控在 `cli` feature 后面，
+# 让纯库用户（default-features = false）不必拉这几个包。
+clap = { version = "4.6.1", features = ["derive"], optional = true }
+ctrlc = { version = "3.5.2", optional = true }
+directories = { version = "6.0.0", optional = true }
+rmcp = { version = "2.2.0", features = ["server", "macros", "transport-io", "schemars"], optional = true }
+schemars = { version = "1.2.1", optional = true }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-std"], optional = true }
+
 [dev-dependencies]
+rmcp = { version = "2.2.0", features = ["client", "transport-child-process"] }
 tempfile = "3.27.0"
+
+# MCP 集成测试要起编译好的 dowse 二进制走 stdio 握手，依赖 `cli` feature 下才存在的
+# 命令行入口；显式门控，避免 `--no-default-features` 下这个测试因找不到二进制而编译失败。
+[[test]]
+name = "mcp_integration"
+required-features = ["cli"]
 
 # OCR 管线只在 Windows 上跑（Windows.Media.Ocr 是系统自带 API），target 限定的依赖块
 # 让非 Windows 平台上 cargo check 完全不用拉这几个包——ocr.rs 里对应代码也用

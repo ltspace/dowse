@@ -17,7 +17,7 @@ pub struct TextSegment {
 /// 把已排序且互不重叠的字节区间切成 TextSegment 序列。
 ///
 /// 防御性设计：区间越界或没落在 UTF-8 字符边界上就跳过该区间（不 panic），
-/// 因为 name 高亮的区间是本模块自己算的（不像 dowse-core 的 search()
+/// 因为 name 高亮的区间是本模块自己算的（不像 dowse 的 search()
 /// 有严格契约保证），大小写转换在极少数 Unicode 场景下可能导致字节长度
 /// 变化，宁可漏高亮也不能让浮窗直接崩溃。
 pub fn segments_from_ranges(text: &str, ranges: &[Range<usize>]) -> Vec<TextSegment> {
@@ -62,7 +62,7 @@ pub fn segments_from_ranges(text: &str, ranges: &[Range<usize>]) -> Vec<TextSegm
 
 /// 文件名高亮：对查询词做大小写不敏感的子串匹配。
 ///
-/// 这是展示层的轻量匹配，不是 dowse-core 的搜索相关性逻辑——文件名字段
+/// 这是展示层的轻量匹配，不是 dowse 的搜索相关性逻辑——文件名字段
 /// 走的是 jieba 分词索引，但索引不回传"这个词命中了文件名的哪里"，
 /// 而浮窗结果行必须让文件名里的命中词跟内容摘要一样高亮（验收清单第 2 条），
 /// 所以在 UI 层用查询词直接对文件名做子串定位，够用且实现成本低。
@@ -105,7 +105,7 @@ pub fn highlight_name(name: &str, query_str: &str) -> Vec<TextSegment> {
         }];
     }
 
-    segments_from_ranges(name, &dowse_core::normalize_ranges(ranges))
+    segments_from_ranges(name, &dowse::normalize_ranges(ranges))
 }
 
 #[cfg(test)]

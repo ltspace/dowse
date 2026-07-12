@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use dowse_core::{
+use dowse::{
     IndexUpdater, ReconcileStats, Searcher, add_root, rebuild_index, reconcile, reconcile_orphans,
 };
 
@@ -136,9 +136,9 @@ fn reconcile_orphans_removes_docs_outside_all_roots() -> Result<()> {
     std::fs::write(&orphan_path, "孤儿内容 juniper")?;
 
     let mut updater = IndexUpdater::open(index_dir.path())?;
-    updater.apply(&[dowse_core::PendingChange {
+    updater.apply(&[dowse::PendingChange {
         path: orphan_path.clone(),
-        op: dowse_core::PendingOp::Upsert,
+        op: dowse::PendingOp::Upsert,
     }])?;
     assert_eq!(
         count_hits(index_dir.path(), "juniper"),
@@ -186,9 +186,9 @@ fn crash_mid_add_root_then_restart_reconciles_to_clean_state() -> Result<()> {
 
     // —— 模拟崩溃：只做了目录树 upsert，没有走到 append_root ——
     let mut updater = IndexUpdater::open(index_dir.path())?;
-    updater.apply(&[dowse_core::PendingChange {
+    updater.apply(&[dowse::PendingChange {
         path: b.path().to_path_buf(),
-        op: dowse_core::PendingOp::UpsertTree,
+        op: dowse::PendingOp::UpsertTree,
     }])?;
     assert_eq!(
         count_hits(index_dir.path(), "blueberry"),
@@ -211,7 +211,7 @@ fn crash_mid_add_root_then_restart_reconciles_to_clean_state() -> Result<()> {
     assert_eq!(count_hits(index_dir.path(), "boysenberry"), 1);
     assert_eq!(count_hits(index_dir.path(), "apricot"), 1, "A 全程不受影响");
 
-    let roots = dowse_core::registered_roots(index_dir.path())?;
+    let roots = dowse::registered_roots(index_dir.path())?;
     assert_eq!(roots.len(), 2, "最终应该恰好两个根，没有重复注册");
 
     drop(updater);

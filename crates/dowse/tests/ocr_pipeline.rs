@@ -2,7 +2,7 @@
 //! "全量建索引 → OCR 队列 → 搜索" 链路，断言哨兵词可搜到。
 //!
 //! CI 护栏：GitHub Actions 的 windows-latest 镜像不一定装了中文语言包（甚至可能
-//! 一个 OCR 语言包都没有），所以测试开头先探测 `dowse_core::is_available()`，
+//! 一个 OCR 语言包都没有），所以测试开头先探测 `dowse::is_available()`，
 //! 不可用就跳过并打印原因，不让 CI 变红——这是设计文档要求的降级路径本身
 //! （"系统无任何 OCR 语言包...管线整体停用...不报错不崩溃"）在测试环境里的镜像。
 //!
@@ -31,7 +31,7 @@ const SEARCH_VISIBLE_TIMEOUT: Duration = Duration::from_secs(15);
 fn wait_until_searchable(index_dir: &Path, query: &str, predicate: impl Fn(usize) -> bool) -> bool {
     let start = Instant::now();
     loop {
-        if let Ok(searcher) = dowse_core::Searcher::open(index_dir)
+        if let Ok(searcher) = dowse::Searcher::open(index_dir)
             && let Ok(hits) = searcher.search(query, 10)
             && predicate(hits.len())
         {
@@ -93,7 +93,7 @@ fn generate_test_image(path: &Path, sentinel: &str) -> Result<()> {
 fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
     common::force_slow_lane_for_tests();
 
-    if !dowse_core::is_available() {
+    if !dowse::is_available() {
         eprintln!(
             "跳过 images_with_sentinel_text_become_searchable_after_ocr：\
              本机没有检测到可用的 OCR 语言包（常见于 CI 的 windows-latest 镜像未装语言包）"
@@ -115,7 +115,7 @@ fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
         "普通文本文件，跟 OCR 无关",
     )?;
 
-    let stats = dowse_core::rebuild_index(index_dir.path(), target_dir.path())?;
+    let stats = dowse::rebuild_index(index_dir.path(), target_dir.path())?;
     // 全量重建阶段图片只落占位文档（内容为空），文本文件正常收录；两者都算 indexed。
     assert_eq!(
         stats.indexed, 2,
@@ -124,7 +124,7 @@ fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
 
     // 图片这时候应该已经可以按文件名搜到（占位符阶段），但正文还搜不到哨兵词。
     {
-        let searcher = dowse_core::Searcher::open(index_dir.path())?;
+        let searcher = dowse::Searcher::open(index_dir.path())?;
         let by_name = searcher.search("screenshot", 10)?;
         assert!(
             !by_name.is_empty(),
@@ -132,14 +132,14 @@ fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
         );
     }
 
-    let drain_stats = dowse_core::drain_ocr_queue(index_dir.path(), 2)?;
+    let drain_stats = dowse::drain_ocr_queue(index_dir.path(), 2)?;
     assert!(
         drain_stats.available,
         "上面已经探测过 is_available()，这里不该是 false"
     );
     assert_eq!(drain_stats.processed, 1, "应该正好处理了那一张截图");
 
-    let searcher = dowse_core::Searcher::open(index_dir.path())?;
+    let searcher = dowse::Searcher::open(index_dir.path())?;
     let hits = searcher.search(SENTINEL, 10)?;
     assert!(!hits.is_empty(), "OCR 完成后应该能搜到哨兵词，实际没有命中");
     assert!(
@@ -170,7 +170,7 @@ fn images_with_sentinel_text_become_searchable_after_ocr() -> Result<()> {
 fn ocr_queue_resumes_pending_work_without_reprocessing() -> Result<()> {
     common::force_slow_lane_for_tests();
 
-    if !dowse_core::is_available() {
+    if !dowse::is_available() {
         eprintln!(
             "跳过 ocr_queue_resumes_pending_work_without_reprocessing：\
              本机没有检测到可用的 OCR 语言包"
@@ -190,14 +190,14 @@ fn ocr_queue_resumes_pending_work_without_reprocessing() -> Result<()> {
     }
 
     // rebuild_index 只负责入队，不处理——模拟"程序在队列还没消化完就退出"。
-    dowse_core::rebuild_index(index_dir.path(), target_dir.path())?;
+    dowse::rebuild_index(index_dir.path(), target_dir.path())?;
 
     // "重启"：drain_ocr_queue 内部会重新 IndexUpdater::open 一次写入端。
-    let stats = dowse_core::drain_ocr_queue(index_dir.path(), 2)?;
+    let stats = dowse::drain_ocr_queue(index_dir.path(), 2)?;
     assert_eq!(stats.processed, 2, "两张图片都应该被处理，一张都不该漏");
 
     // 再跑一次：队列应该已经空了，不会把同样两张图重新识别一遍。
-    let second_pass = dowse_core::drain_ocr_queue(index_dir.path(), 2)?;
+    let second_pass = dowse::drain_ocr_queue(index_dir.path(), 2)?;
     assert_eq!(second_pass.processed, 0, "队列应已清空，不该重复处理");
 
     common::close_tempdir_retrying(index_dir);
@@ -216,7 +216,7 @@ fn ocr_queue_resumes_pending_work_without_reprocessing() -> Result<()> {
 fn ocr_restart_recognized_sentinels_are_searchable() -> Result<()> {
     common::force_slow_lane_for_tests();
 
-    if !dowse_core::is_available() {
+    if !dowse::is_available() {
         eprintln!(
             "跳过 ocr_restart_recognized_sentinels_are_searchable：\
              本机没有检测到可用的 OCR 语言包"
@@ -236,8 +236,8 @@ fn ocr_restart_recognized_sentinels_are_searchable() -> Result<()> {
     }
 
     // 入队后一次性把队列跑完，再校验识别结果落到了对应文档上。
-    dowse_core::rebuild_index(index_dir.path(), target_dir.path())?;
-    dowse_core::drain_ocr_queue(index_dir.path(), 2)?;
+    dowse::rebuild_index(index_dir.path(), target_dir.path())?;
+    dowse::drain_ocr_queue(index_dir.path(), 2)?;
 
     for (i, sentinel) in shot_sentinels.iter().enumerate() {
         assert!(

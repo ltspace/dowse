@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use dowse_core::{DEFAULT_WORKERS, IndexUpdater, OcrPipeline, watch_roots_auto};
+use dowse::{DEFAULT_WORKERS, IndexUpdater, OcrPipeline, watch_roots_auto};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::indexing_status::IndexingStatus;

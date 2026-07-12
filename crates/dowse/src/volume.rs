@@ -58,7 +58,7 @@ static CAPABILITY_CACHE: LazyLock<Mutex<HashMap<VolumeKey, RootCapability>>> =
 
 /// 只给集成测试用的逃生舱：设了这个环境变量（任意非空值）就无条件判定
 /// Fallback，连 NTFS/管理员探测都不做。跟 `DOWSE_INDEX_DIR`
-/// （dowse-cli/src/main.rs）同一类东西——只给测试用，不是产品对外配置项。
+/// （src/bin/dowse/main.rs）同一类东西——只给测试用，不是产品对外配置项。
 ///
 /// 动机：CI 跑机（GitHub Actions windows-latest）是管理员身份，`rebuild_index`/
 /// `watch_roots_auto` 在这种环境下会真的走 MFT 快速枚举，而它枚举的是**整卷**
@@ -80,13 +80,13 @@ const FORCE_SLOW_LANE_ENV: &str = "DOWSE_FORCE_SLOW_LANE";
 /// （设计文档"与现有架构的关系"一节："诚实降级：落到哪条路径、为什么，
 /// 写日志"）。按卷缓存结果，见 `CAPABILITY_CACHE` 的文档。
 pub(crate) fn probe_root_capability(root: &Path) -> RootCapability {
-    // `dowse-core` 自己 `#[cfg(test)] mod tests`（indexer.rs/meta.rs/roots.rs/
+    // `dowse` 自己 `#[cfg(test)] mod tests`（indexer.rs/meta.rs/roots.rs/
     // searcher.rs/status.rs/updater.rs 等）里散落的几十处 `rebuild_index` 调用
     // 同样只关心索引结果对不对，不关心走哪条车道——同上面 `FORCE_SLOW_LANE_ENV`
     // 一个动机，但这些是库自身的单元测试，不值得每个调用点都手动加一次逃生舱。
-    // `cfg!(test)` 在这里是精确的开关：它只在 `dowse-core` 编译自己的单元测试
-    // 二进制（`cargo test -p dowse-core --lib`）时为真；`tests/*.rs` 下的集成
-    // 测试（含 `ntfs_fast_path.rs`）是把 `dowse-core` 当普通依赖库链接，编译时
+    // `cfg!(test)` 在这里是精确的开关：它只在 `dowse` 编译自己的单元测试
+    // 二进制（`cargo test -p dowse --lib`）时为真；`tests/*.rs` 下的集成
+    // 测试（含 `ntfs_fast_path.rs`）是把 `dowse` 当普通依赖库链接，编译时
     // 不带 `--cfg test`，不受这条短路影响，快车道覆盖不受损。
     if cfg!(test) || std::env::var_os(FORCE_SLOW_LANE_ENV).is_some() {
         return RootCapability::Fallback {
@@ -135,7 +135,7 @@ fn log_capability(root: &Path, capability: &RootCapability) {
 }
 
 /// 供集成测试用的权限护栏：这个路径能不能走 NTFS 快速路径（MFT 枚举 +
-/// USN Journal）。跟 `dowse_core::is_available()`（OCR 语言包探测）是同一个
+/// USN Journal）。跟 `dowse::is_available()`（OCR 语言包探测）是同一个
 /// 用途——测试开头先探测一次，探测不到就打印原因跳过，不需要管理员权限的
 /// 测试永远能跑，需要的测试在非管理员机器/CI 上不会把构建搞红。
 pub fn ntfs_fast_path_available(root: &Path) -> bool {

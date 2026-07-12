@@ -9,7 +9,7 @@
 //! 5. 托盘与空态的根列表实时反映增删——两端都是每次呼出/每次状态变化时重新
 //!    调用 `registered_roots()`（不缓存），下面第 1/2/3 条测试里"操作完成后
 //!    立刻读 `registered_roots()` 断言"已经结构性验证了这个前提；托盘菜单/
-//!    Svelte 组件本身的渲染不在 dowse-core 的测试范围内。
+//!    Svelte 组件本身的渲染不在 dowse 的测试范围内。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use dowse_core::{
+use dowse::{
     IndexUpdater, NotifyEventSource, OcrQueue, Searcher, add_root, add_root_with_progress,
     rebuild_index, registered_roots, remove_root, run_watch,
 };

@@ -59,7 +59,7 @@ fn config_path() -> Result<PathBuf> {
 }
 
 /// 索引目录固定放在 `%LOCALAPPDATA%\dowse\index`，跟被索引的目录无关，
-/// 和 dowse-cli 的约定保持一致，这样 CLI 建的索引浮窗也能直接用。
+/// 和 dowse 命令行的约定保持一致，这样 CLI 建的索引浮窗也能直接用。
 pub fn index_dir() -> Result<PathBuf> {
     let dirs = directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
     Ok(dirs.data_local_dir().join("index"))

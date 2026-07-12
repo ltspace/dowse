@@ -1189,16 +1189,27 @@ name = "dowse"
 version = "0.7.0"
 dependencies = [
  "anyhow",
+ "chardetng",
  "clap",
  "ctrlc",
  "directories",
- "dowse-core",
+ "encoding_rs",
+ "notify",
+ "pdf-extract",
+ "pollster",
+ "quick-xml 0.41.0",
  "rmcp",
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "tantivy",
+ "tantivy-jieba",
  "tempfile",
  "tokio",
+ "walkdir",
+ "windows 0.62.2",
+ "windows-future 0.3.2",
+ "zip",
 ]
 
 [[package]]
@@ -1207,7 +1218,7 @@ version = "0.7.0"
 dependencies = [
  "anyhow",
  "directories",
- "dowse-core",
+ "dowse",
  "png 0.18.1",
  "serde",
  "serde_json",
@@ -1219,28 +1230,6 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
  "windows 0.62.2",
-]
-
-[[package]]
-name = "dowse-core"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "chardetng",
- "encoding_rs",
- "notify",
- "pdf-extract",
- "pollster",
- "quick-xml 0.41.0",
- "serde",
- "serde_json",
- "tantivy",
- "tantivy-jieba",
- "tempfile",
- "walkdir",
- "windows 0.62.2",
- "windows-future 0.3.2",
- "zip",
 ]
 
 [[package]]

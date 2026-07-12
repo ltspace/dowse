@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use dowse_core::{IndexUpdater, PendingChange, PendingOp, Searcher, rebuild_index};
+use dowse::{IndexUpdater, PendingChange, PendingOp, Searcher, rebuild_index};
 
 mod common;
 

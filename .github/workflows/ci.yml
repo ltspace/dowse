@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # dowse-core parses arbitrary files from disk via pdf-extract/zip/
+      # dowse parses arbitrary files from disk via pdf-extract/zip/
       # quick-xml/chardetng, a class of deps with a history of parsing CVEs.
       # Scoped to advisories only, so licenses/bans/sources need no tuning.
       - name: Dependency advisory audit
@@ -67,7 +67,9 @@ jobs:
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
 
-      # dowse-core has #[cfg(not(windows))] stubs for ocr/volume/mft/usn;
+      # dowse has #[cfg(not(windows))] stubs for ocr/volume/mft/usn;
       # this verifies they actually compile since the other job is Windows-only.
-      - name: Check dowse-core on non-Windows
-        run: cargo check -p dowse-core
+      # `--no-default-features` checks just the library (no clap/rmcp/tokio),
+      # matching what this job cares about: the cross-platform stubs.
+      - name: Check dowse library on non-Windows
+        run: cargo check -p dowse --no-default-features

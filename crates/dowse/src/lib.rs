@@ -26,7 +26,7 @@
 //!
 //! ```no_run
 //! use std::path::Path;
-//! use dowse_core::{Searcher, rebuild_index};
+//! use dowse::{Searcher, rebuild_index};
 //!
 //! let index_dir = Path::new("./my-index");
 //! let target_dir = Path::new("./my-documents");

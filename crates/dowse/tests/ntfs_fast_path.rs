@@ -4,7 +4,7 @@
 //! - 降级路径（非管理员/非 NTFS 时的行为）不需要任何特殊权限，必须无条件可跑——
 //!   这是"诚实降级"的验收本身，CI 上天天要跑绿。
 //! - 真正走快车道（MFT 枚举 + USN Journal）需要管理员权限打开原始卷句柄，
-//!   测试开头先用 `dowse_core::ntfs_fast_path_available()` 探测一次，拿不到就打印
+//!   测试开头先用 `dowse::ntfs_fast_path_available()` 探测一次，拿不到就打印
 //!   原因跳过，不让非管理员的开发机/CI 把构建搞红。
 //!
 //! CI 排障记录（GitHub Actions windows-latest 连续几次全红后追出来的根因）：
@@ -32,9 +32,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use dowse_core::{
-    IndexUpdater, Searcher, ntfs_fast_path_available, rebuild_index, watch_roots_auto,
-};
+use dowse::{IndexUpdater, Searcher, ntfs_fast_path_available, rebuild_index, watch_roots_auto};
 
 mod common;
 

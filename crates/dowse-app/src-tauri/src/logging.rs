@@ -3,7 +3,7 @@
 //! 再挂一个 panic hook 记下崩溃线程/位置/信息。
 //!
 //! release 构建用 `windows_subsystem = "windows"`（见 main.rs）没有控制台，
-//! 之前散布在 dowse-core/dowse-app 各处排障用的 `eprintln!`（写入端重试、
+//! 之前散布在 dowse/dowse-app 各处排障用的 `eprintln!`（写入端重试、
 //! 快慢车道降级、OCR 批次失败等）在生产环境里全部无声丢失——这里在进程
 //! 最开始把标准输出/错误句柄整体重定向到日志文件，不用逐个调用点改造成
 //! 显式记日志，覆盖率最高、改动量最小。必须在 `run()` 最开始调用。
@@ -78,7 +78,7 @@ pub fn init() {
 }
 
 /// 把当前进程的 STD_OUTPUT_HANDLE / STD_ERROR_HANDLE 都指向日志文件的
-/// 底层 Win32 句柄——重定向之后，进程内任何地方（包括 dowse-core 的
+/// 底层 Win32 句柄——重定向之后，进程内任何地方（包括 dowse 的
 /// `eprintln!`）原样落进日志文件，不需要它们感知到日志系统的存在。
 #[cfg(target_os = "windows")]
 fn redirect_std_handles(file: &std::fs::File) {

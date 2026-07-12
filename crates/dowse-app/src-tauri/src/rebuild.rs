@@ -89,21 +89,20 @@ pub fn perform_rebuild(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDto
     crate::tray::refresh_tooltip(app);
 
     let app_for_progress = app.clone();
-    let rebuild_result =
-        dowse_core::rebuild_index_with_progress(&index_dir, &target, move |progress| {
-            let display_path = dowse_core::display_path(&progress.path.to_string_lossy());
-            app_for_progress
-                .state::<IndexingStatus>()
-                .set_text_progress(progress.processed, display_path.clone());
-            let _ = app_for_progress.emit(
-                "dowse://rebuild-progress",
-                IndexProgressDto {
-                    processed: progress.processed,
-                    path: display_path,
-                },
-            );
-            crate::tray::refresh_tooltip(&app_for_progress);
-        });
+    let rebuild_result = dowse::rebuild_index_with_progress(&index_dir, &target, move |progress| {
+        let display_path = dowse::display_path(&progress.path.to_string_lossy());
+        app_for_progress
+            .state::<IndexingStatus>()
+            .set_text_progress(progress.processed, display_path.clone());
+        let _ = app_for_progress.emit(
+            "dowse://rebuild-progress",
+            IndexProgressDto {
+                processed: progress.processed,
+                path: display_path,
+            },
+        );
+        crate::tray::refresh_tooltip(&app_for_progress);
+    });
 
     let stats = match rebuild_result {
         Ok(stats) => stats,
@@ -117,9 +116,9 @@ pub fn perform_rebuild(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDto
 
     // 在 watch.start 挪走 index_dir 之前先问一次 OCR 队列——两者用的是同一个
     // index_dir，问完这次调用就不再需要它了。
-    let ocr_pending = dowse_core::OcrQueue::for_index_dir(&index_dir).pending_len();
+    let ocr_pending = dowse::OcrQueue::for_index_dir(&index_dir).pending_len();
 
-    let new_searcher = match dowse_core::Searcher::open(&index_dir) {
+    let new_searcher = match dowse::Searcher::open(&index_dir) {
         Ok(searcher) => searcher,
         Err(err) => {
             app.state::<IndexingStatus>().reset_idle();
@@ -158,7 +157,7 @@ pub fn perform_rebuild(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDto
 /// 大概率也读不到）；而添加/移除根从不删除现有索引，失败时 meta 里的 roots
 /// 还是最后一次成功状态，重新挂监听是安全且必要的。
 fn restart_watch_after_root_op(app: &AppHandle, index_dir: &Path) {
-    if let Ok(roots) = dowse_core::registered_roots(index_dir) {
+    if let Ok(roots) = dowse::registered_roots(index_dir) {
         app.state::<WatchController>()
             .start(app.clone(), index_dir.to_path_buf(), roots);
     }
@@ -174,7 +173,7 @@ fn fail_root_op<T>(app: &AppHandle, index_dir: &Path, err: String) -> Result<T, 
 
 /// 添加一个根：跟 `perform_rebuild` 共用"停旧监听 → 操作 → 换新 Searcher →
 /// 重新挂监听"的节奏和进度事件（`dowse://rebuild-progress`）/状态机制
-/// （`IndexingStatus`），但操作本身走 `dowse_core::add_root_with_progress`——
+/// （`IndexingStatus`），但操作本身走 `dowse::add_root_with_progress`——
 /// 不删现有索引，只对新根做一次目录树 upsert（设计文档"核心操作语义"）。
 ///
 /// 现开一个 `IndexUpdater::open`：`WatchController::stop()` 已经 join 完常驻
@@ -190,15 +189,15 @@ pub fn perform_add_root(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDt
     crate::tray::set_busy(app, true);
     crate::tray::refresh_tooltip(app);
 
-    let mut updater = match dowse_core::IndexUpdater::open(&index_dir) {
+    let mut updater = match dowse::IndexUpdater::open(&index_dir) {
         Ok(updater) => updater,
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };
 
     let app_for_progress = app.clone();
     let add_result =
-        dowse_core::add_root_with_progress(&index_dir, &target, &mut updater, move |progress| {
-            let display_path = dowse_core::display_path(&progress.path.to_string_lossy());
+        dowse::add_root_with_progress(&index_dir, &target, &mut updater, move |progress| {
+            let display_path = dowse::display_path(&progress.path.to_string_lossy());
             app_for_progress
                 .state::<IndexingStatus>()
                 .set_text_progress(progress.processed, display_path.clone());
@@ -220,9 +219,9 @@ pub fn perform_add_root(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDt
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };
 
-    let ocr_pending = dowse_core::OcrQueue::for_index_dir(&index_dir).pending_len();
+    let ocr_pending = dowse::OcrQueue::for_index_dir(&index_dir).pending_len();
 
-    let new_searcher = match dowse_core::Searcher::open(&index_dir) {
+    let new_searcher = match dowse::Searcher::open(&index_dir) {
         Ok(searcher) => searcher,
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };
@@ -253,11 +252,11 @@ pub fn perform_remove_root(app: &AppHandle, root: PathBuf) -> Result<RemoveRootS
     crate::tray::set_busy(app, true);
     crate::tray::refresh_tooltip(app);
 
-    let mut updater = match dowse_core::IndexUpdater::open(&index_dir) {
+    let mut updater = match dowse::IndexUpdater::open(&index_dir) {
         Ok(updater) => updater,
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };
-    let remove_result = dowse_core::remove_root(&index_dir, &root, &mut updater);
+    let remove_result = dowse::remove_root(&index_dir, &root, &mut updater);
     drop(updater);
 
     let stats = match remove_result {
@@ -265,7 +264,7 @@ pub fn perform_remove_root(app: &AppHandle, root: PathBuf) -> Result<RemoveRootS
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };
 
-    let new_searcher = match dowse_core::Searcher::open(&index_dir) {
+    let new_searcher = match dowse::Searcher::open(&index_dir) {
         Ok(searcher) => searcher,
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };
@@ -283,7 +282,7 @@ pub fn perform_remove_root(app: &AppHandle, root: PathBuf) -> Result<RemoveRootS
 
 /// 重建单根 = 移除根 + 添加根的组合（设计文档"核心操作语义"），托盘每根
 /// 子菜单的"重建"动作用。跟 `perform_add_root` 几乎一样的节奏，唯一区别是
-/// 操作本身换成 `dowse_core::rebuild_root_with_progress`。
+/// 操作本身换成 `dowse::rebuild_root_with_progress`。
 pub fn perform_rebuild_root(app: &AppHandle, root: PathBuf) -> Result<IndexStatsDto, String> {
     let index_dir = crate::config::index_dir().map_err(|e| e.to_string())?;
     let start = Instant::now();
@@ -293,15 +292,15 @@ pub fn perform_rebuild_root(app: &AppHandle, root: PathBuf) -> Result<IndexStats
     crate::tray::set_busy(app, true);
     crate::tray::refresh_tooltip(app);
 
-    let mut updater = match dowse_core::IndexUpdater::open(&index_dir) {
+    let mut updater = match dowse::IndexUpdater::open(&index_dir) {
         Ok(updater) => updater,
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };
 
     let app_for_progress = app.clone();
     let rebuild_result =
-        dowse_core::rebuild_root_with_progress(&index_dir, &root, &mut updater, move |progress| {
-            let display_path = dowse_core::display_path(&progress.path.to_string_lossy());
+        dowse::rebuild_root_with_progress(&index_dir, &root, &mut updater, move |progress| {
+            let display_path = dowse::display_path(&progress.path.to_string_lossy());
             app_for_progress
                 .state::<IndexingStatus>()
                 .set_text_progress(progress.processed, display_path.clone());
@@ -321,9 +320,9 @@ pub fn perform_rebuild_root(app: &AppHandle, root: PathBuf) -> Result<IndexStats
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };
 
-    let ocr_pending = dowse_core::OcrQueue::for_index_dir(&index_dir).pending_len();
+    let ocr_pending = dowse::OcrQueue::for_index_dir(&index_dir).pending_len();
 
-    let new_searcher = match dowse_core::Searcher::open(&index_dir) {
+    let new_searcher = match dowse::Searcher::open(&index_dir) {
         Ok(searcher) => searcher,
         Err(err) => return fail_root_op(app, &index_dir, err.to_string()),
     };

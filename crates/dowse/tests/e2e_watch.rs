@@ -2,7 +2,7 @@
 //! tempdir 建索引 → 用真实的 NotifyEventSource 挂上常驻监听 → 实际写/删/重命名文件
 //! → 轮询搜索直到状态变化，记录"写入到可搜索"等实测耗时并与 3s 预算对比。
 //!
-//! 跑法：`cargo test -p dowse-core --test e2e_watch -- --nocapture`，耗时数字会打到
+//! 跑法：`cargo test -p dowse --test e2e_watch -- --nocapture`，耗时数字会打到
 //! 标准输出。（文件名用 e2e_watch 而非含 update 的名字，避开 Windows 把
 //! update/install 类可执行文件当安装程序要求 UAC 提权的坑。）
 
@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use dowse_core::{IndexUpdater, NotifyEventSource, Searcher, rebuild_index, run_watch};
+use dowse::{IndexUpdater, NotifyEventSource, Searcher, rebuild_index, run_watch};
 
 mod common;
 

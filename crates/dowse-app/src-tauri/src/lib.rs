@@ -44,7 +44,7 @@ fn parse_shortcut(hotkey: &str) -> Shortcut {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 越早越好：这一步之后所有的 eprintln!/println!（包括 dowse-core 内部
+    // 越早越好：这一步之后所有的 eprintln!/println!（包括 dowse 内部
     // 各处排障日志）才会落进 `%LOCALAPPDATA%\dowse\logs\dowse.log`，
     // 而不是消失在 GUI 子系统没有控制台的黑洞里（见 logging.rs 的文档）。
     logging::init();
@@ -142,7 +142,7 @@ pub fn run() {
             // 索引不存在或 schema 需重建时读不到根，直接跳过——等用户重建后由
             // rebuild 流程把监听挂上。
             if let Ok(index_dir) = config::index_dir()
-                && let Ok(roots) = dowse_core::registered_roots(&index_dir)
+                && let Ok(roots) = dowse::registered_roots(&index_dir)
             {
                 app.state::<WatchController>()
                     .start(app.handle().clone(), index_dir, roots);

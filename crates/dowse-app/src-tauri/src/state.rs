@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use dowse_core::Searcher;
+use dowse::Searcher;
 
 /// 索引 reader 常驻内存——这是 80ms 搜索预算的底气，每次搜索都开新 reader
 /// 划不来。索引还没建过，或者目录被删/损坏，`searcher` 就是 None，

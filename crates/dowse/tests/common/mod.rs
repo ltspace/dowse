@@ -7,7 +7,7 @@
 //! 报 `PermissionDenied`。测试收尾要：
 //! 1. 显式 drop 掉持有索引/OCR 句柄的对象（`Searcher`/`IndexUpdater`/
 //!    `OcrPipeline` 等），让句柄有机会先释放；
-//! 2. 再用生产代码同款的重试退避逻辑（[`dowse_core::remove_dir_all_retrying`]）
+//! 2. 再用生产代码同款的重试退避逻辑（[`dowse::remove_dir_all_retrying`]）
 //!    删掉临时目录，而不是指望 `TempDir::close()` 的单次尝试。
 //!
 //! 另外还带了 [`force_slow_lane_for_tests`]：让普通集成测试确定性地跳过
@@ -22,7 +22,7 @@
 /// 不需要它再删一次），直接调重试版本的 `remove_dir_all`。
 pub fn close_tempdir_retrying(dir: tempfile::TempDir) {
     let path = dir.keep();
-    if let Err(err) = dowse_core::remove_dir_all_retrying(&path) {
+    if let Err(err) = dowse::remove_dir_all_retrying(&path) {
         eprintln!(
             "测试收尾清理临时目录失败，重试后仍未成功（不影响断言结果）{}: {err}",
             path.display()
@@ -32,7 +32,7 @@ pub fn close_tempdir_retrying(dir: tempfile::TempDir) {
 
 /// 逃生舱开关：调一次就够，让本进程接下来所有 `rebuild_index`/`watch_roots_auto`
 /// 调用确定性地走 walkdir + notify 慢车道，不管跑机是不是管理员——见
-/// `dowse_core`（`volume.rs`）里 `DOWSE_FORCE_SLOW_LANE` 的文档。
+/// `dowse`（`volume.rs`）里 `DOWSE_FORCE_SLOW_LANE` 的文档。
 ///
 /// 只给"只需要索引能用"的普通集成测试用（ocr_pipeline/e2e_watch/incremental/
 /// reconcile/multi_root/office_extract）。`tests/ntfs_fast_path.rs` 专门验证

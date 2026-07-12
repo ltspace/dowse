@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use dowse_core::{
+use dowse::{
     DEFAULT_WORKERS, IndexUpdater, OcrPipeline, Searcher, SortMode, WatchProgress, display_path,
     drain_ocr_queue, index_status, rebuild_index_with_progress, registered_roots, watch_roots_auto,
 };
@@ -157,7 +157,7 @@ fn main() -> Result<()> {
 /// `dowse mcp`：只读 MCP server 是这个二进制里唯一需要异步运行时的子命令，
 /// 所以只在这一条分支上起 tokio runtime，其它子命令继续走同步路径——
 /// 没必要给整个 main 套 #[tokio::main]，那样会让所有子命令都背上 tokio 的初始化成本。
-/// 用多线程 runtime：工具处理函数里调的是 dowse-core 的同步阻塞 I/O，
+/// 用多线程 runtime：工具处理函数里调的是 dowse 的同步阻塞 I/O，
 /// 单线程 runtime 下阻塞调用会卡住整个 server（stdio 收发都跑不动）。
 fn run_mcp() -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
@@ -303,7 +303,7 @@ fn watch(dir: Option<PathBuf>) -> Result<()> {
 
 /// 把命中区间用 `open`/`close` 包起来切片重组（终端染色和 MCP 的 «» 标记
 /// 共用）。区间是字节偏移，依赖 `SearchHit.highlighted` 的契约：已按起点排序、
-/// 互不重叠、落在 UTF-8 边界上（由 dowse-core::normalize_ranges 保证），
+/// 互不重叠、落在 UTF-8 边界上（由 dowse::normalize_ranges 保证），
 /// 所以这里游标只前进不回退。
 pub(crate) fn wrap_highlight_ranges(
     fragment: &str,

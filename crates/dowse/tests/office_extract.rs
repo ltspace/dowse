@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::Result;
-use dowse_core::{Searcher, rebuild_index};
+use dowse::{Searcher, rebuild_index};
 use zip::write::SimpleFileOptions;
 
 /// 逃生舱开关，跟 `tests/common/mod.rs::force_slow_lane_for_tests` 同一份文档、

@@ -8,7 +8,7 @@
 use std::ops::Range;
 use std::path::PathBuf;
 
-use dowse_core::{IndexStatus, PreviewHit, SearchHit, Searcher, index_status as core_index_status};
+use dowse::{IndexStatus, PreviewHit, SearchHit, Searcher, index_status as core_index_status};
 use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{CallToolResult, ServerCapabilities, ServerInfo};
@@ -430,7 +430,7 @@ mod tests {
             "系统采用分布式限流器保护后端服务。",
         )
         .unwrap();
-        dowse_core::rebuild_index(index_dir.path(), target_dir.path()).unwrap();
+        dowse::rebuild_index(index_dir.path(), target_dir.path()).unwrap();
 
         let server = DowseMcpServer::new(index_dir.path().to_path_buf());
 

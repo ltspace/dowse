@@ -25,7 +25,7 @@ fn build_test_index() -> (tempfile::TempDir, tempfile::TempDir) {
     )
     .expect("写测试文档失败");
 
-    dowse_core::rebuild_index(index_dir.path(), target_dir.path()).expect("建索引失败");
+    dowse::rebuild_index(index_dir.path(), target_dir.path()).expect("建索引失败");
 
     (index_dir, target_dir)
 }

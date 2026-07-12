@@ -1,7 +1,7 @@
 //! 图片文件判定（[`is_image`]）、OCR 原始输出的清洗（[`clean_cjk_spaces`]/
 //! [`dual_form_content`]，去掉 Windows OCR 引擎在中文单字之间插入的空格），
 //! 以及 Windows OCR 引擎的薄封装（`engine_impl` 子模块；非 Windows 平台是
-//! 返回"不可用"的桩实现，让 dowse-core 在其他平台上也能正常编译）。
+//! 返回"不可用"的桩实现，让 dowse 在其他平台上也能正常编译）。
 
 use std::path::Path;
 
@@ -108,7 +108,7 @@ mod engine_impl {
     }
 
     /// `StorageFile::GetFileFromPathAsync` 不认 `\\?\` 扩展长度前缀路径——
-    /// `Path::canonicalize()` 在 Windows 上产出的正是这种前缀路径（dowse-cli
+    /// `Path::canonicalize()` 在 Windows 上产出的正是这种前缀路径（dowse 命令行
     /// 的 `Command::Index` 就这么调），传给它会报"指定的路径过长"，其实不是真的
     /// 路径太长，是 WinRT 的路径解析根本不接受这种 Win32 扩展前缀语法。真机验证
     /// 时用 `dowse index` 建索引直接踩中了这个坑（三张图全部识别失败），这里剥掉
@@ -173,7 +173,7 @@ mod engine_impl {
     use std::path::Path;
 
     /// 非 Windows 平台的桩实现：OCR 管线整个不可用。dowse 是 Windows 专用工具，
-    /// 这里存在只是让 dowse-core 在非 Windows 平台上也能 `cargo check` 过，
+    /// 这里存在只是让 dowse 在非 Windows 平台上也能 `cargo check` 过，
     /// 不需要在每个调用点散布额外的 cfg 分支。
     pub fn is_available() -> bool {
         false
