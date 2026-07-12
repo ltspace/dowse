@@ -1,9 +1,10 @@
 [package]
 name = "dowse-app"
 version = "0.6.1"
-description = "Tauri App"
-authors = ["you"]
+description = "dowse desktop overlay: glass search palette for Windows"
+authors.workspace = true
 edition = "2024"
+rust-version.workspace = true
 # GUI 应用不发布到 crates.io（走 GitHub Releases 分发安装包），显式禁止误发。
 publish = false
 
