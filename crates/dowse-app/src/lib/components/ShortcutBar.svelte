@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { t } from '../i18n';
+
 	let { hasSelection }: { hasSelection: boolean } = $props();
 </script>
 
@@ -15,18 +17,18 @@
 
 	<span class="spacer"></span>
 
-	<span class="hint dim"><kbd>Esc</kbd> 隐藏</span>
+	<span class="hint dim"><kbd>Esc</kbd> {t.scHide}</span>
 	<span class="hint" class:dim={!hasSelection}>
-		<kbd>Ctrl</kbd><kbd>C</kbd> 复制路径
+		<kbd>Ctrl</kbd><kbd>C</kbd> {t.scCopyPath}
 	</span>
 	<span class="hint" class:dim={!hasSelection}>
-		<kbd>Ctrl</kbd><kbd>↵</kbd> 打开所在文件夹
+		<kbd>Ctrl</kbd><kbd>↵</kbd> {t.scReveal}
 	</span>
 
 	<span class="divider-h" aria-hidden="true"></span>
 
 	<span class="hint primary" class:dim={!hasSelection}>
-		<kbd>↵</kbd> 打开
+		<kbd>↵</kbd> {t.scOpen}
 	</span>
 </div>
 

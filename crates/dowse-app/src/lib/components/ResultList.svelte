@@ -3,6 +3,7 @@
 	import { animate, stagger } from 'motion';
 	import type { SearchHit } from '../types';
 	import ResultRow from './ResultRow.svelte';
+	import { t } from '../i18n';
 
 	let {
 		hits,
@@ -49,7 +50,7 @@
 	});
 </script>
 
-<div class="list" bind:this={listEl} role="listbox" aria-label="搜索结果">
+<div class="list" bind:this={listEl} role="listbox" aria-label={t.resultListLabel}>
 	{#each hits as hit, i (hit.path)}
 		<div data-idx={i}>
 			<ResultRow
