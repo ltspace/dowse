@@ -60,25 +60,6 @@ pub fn segments_from_ranges(text: &str, ranges: &[Range<usize>]) -> Vec<TextSegm
     segments
 }
 
-/// 把命中区间按起点排序并合并重叠/相邻区间，跟 dowse-core::searcher 里
-/// 同名函数逻辑一致（那边是 pub(crate)，这里是独立算的 name 高亮，不共用状态，
-/// 复制一份比额外开放 core 的内部契约更干净）。
-fn normalize_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
-    ranges.sort_by_key(|r| r.start);
-    let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
-    for r in ranges {
-        match merged.last_mut() {
-            Some(last) if r.start <= last.end => {
-                if r.end > last.end {
-                    last.end = r.end;
-                }
-            }
-            _ => merged.push(r),
-        }
-    }
-    merged
-}
-
 /// 文件名高亮：对查询词做大小写不敏感的子串匹配。
 ///
 /// 这是展示层的轻量匹配，不是 dowse-core 的搜索相关性逻辑——文件名字段
@@ -124,7 +105,7 @@ pub fn highlight_name(name: &str, query_str: &str) -> Vec<TextSegment> {
         }];
     }
 
-    segments_from_ranges(name, &normalize_ranges(ranges))
+    segments_from_ranges(name, &dowse_core::normalize_ranges(ranges))
 }
 
 #[cfg(test)]
