@@ -11,6 +11,7 @@ mod ocr;
 mod ocr_queue;
 mod ocr_worker;
 mod reconcile;
+mod roots;
 mod searcher;
 mod status;
 mod updater;
@@ -32,7 +33,11 @@ pub use ocr_queue::OcrQueue;
 pub use ocr_worker::{
     DEFAULT_WORKERS, MAX_WORKERS, MIN_WORKERS, OcrDrainStats, OcrPipeline, drain_ocr_queue,
 };
-pub use reconcile::{ReconcileStats, reconcile};
+pub use reconcile::{ReconcileStats, reconcile, reconcile_orphans};
+pub use roots::{
+    AddRootStats, RemoveRootStats, add_root, add_root_with_progress, rebuild_root,
+    rebuild_root_with_progress, remove_root,
+};
 pub use searcher::{PreviewHit, SearchHit, Searcher, SortMode};
 pub use status::{IndexStatus, index_status};
 pub use updater::{BatchOutcome, IndexUpdater};

@@ -285,6 +285,17 @@ pub fn watch_roots_auto(
     stop: Arc<AtomicBool>,
     on_progress: impl Fn(WatchProgress) + Send + Sync + 'static,
 ) -> Result<()> {
+    // 孤儿文档清理（多根索引，里程碑 7）：先于按根对账跑一次，兜底"添加根"/
+    // "移除根"中途崩溃残留的、不属于当前任何注册根的文档（见
+    // `reconcile::reconcile_orphans` 的文档）。用完整的 roots 列表（不区分
+    // 快慢车道）跑一次即可，孤儿判定跟"这个根走不走 MFT 快速路径"无关。
+    {
+        let mut guard = updater.lock().expect("updater mutex poisoned");
+        if let Err(err) = crate::reconcile::reconcile_orphans(roots, &mut guard) {
+            eprintln!("孤儿文档清理失败: {err}");
+        }
+    }
+
     let mut fast_roots = Vec::new();
     let mut slow_roots = Vec::new();
     for root in roots {

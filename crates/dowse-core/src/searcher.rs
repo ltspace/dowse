@@ -1,9 +1,9 @@
-use std::ops::Range;
+use std::ops::{Bound, Range};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, TermQuery};
+use tantivy::collector::{Count, TopDocs};
+use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
 use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::snippet::SnippetGenerator;
 use tantivy::{DocAddress, Index, IndexReader, Order, TantivyDocument, Term};
@@ -237,6 +237,35 @@ impl Searcher {
     /// 索引里的文档总数，给 CLI 的状态输出用
     pub fn num_docs(&self) -> u64 {
         self.reader.searcher().num_docs()
+    }
+
+    /// `root` 前缀下的文档数——多根索引（里程碑 7）托盘"索引文件夹"子菜单
+    /// 每根一项要显示"路径 + N 篇"。查询构造跟 `updater.rs::delete_tree`
+    /// 是同一套"精确项 ∪ 前缀区间"思路（同前缀不误伤兄弟目录），这里只读
+    /// 计数、不删文档。
+    pub fn count_under(&self, root: &Path) -> Result<u64> {
+        let exact = root.to_string_lossy().into_owned();
+        let mut prefix = exact.clone();
+        if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
+            prefix.push(std::path::MAIN_SEPARATOR);
+        }
+        let upper = format!("{prefix}\u{10FFFF}");
+
+        let exact_query = TermQuery::new(
+            Term::from_field_text(self.fields.path, &exact),
+            IndexRecordOption::Basic,
+        );
+        let subtree_query = RangeQuery::new(
+            Bound::Included(Term::from_field_text(self.fields.path, &prefix)),
+            Bound::Excluded(Term::from_field_text(self.fields.path, &upper)),
+        );
+        let query = BooleanQuery::new(vec![
+            (Occur::Should, Box::new(exact_query) as Box<dyn Query>),
+            (Occur::Should, Box::new(subtree_query) as Box<dyn Query>),
+        ]);
+
+        let searcher = self.reader.searcher();
+        Ok(searcher.search(&query, &Count)? as u64)
     }
 
     /// 重新加载 reader，读到最新一次 commit 的段。
@@ -658,6 +687,29 @@ mod tests {
             assert!(preview.snippet.is_char_boundary(r.start));
             assert!(preview.snippet.is_char_boundary(r.end));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn count_under_only_counts_docs_within_root_prefix() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("a.md"), "内容")?;
+        std::fs::write(target_dir.path().join("b.md"), "内容")?;
+        let sibling_named_with_shared_prefix = target_dir.path().with_file_name(format!(
+            "{}-sibling",
+            target_dir.path().file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::create_dir_all(&sibling_named_with_shared_prefix)?;
+        std::fs::write(sibling_named_with_shared_prefix.join("c.md"), "内容")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        assert_eq!(searcher.count_under(target_dir.path())?, 2);
+
+        std::fs::remove_dir_all(&sibling_named_with_shared_prefix).ok();
         Ok(())
     }
 
