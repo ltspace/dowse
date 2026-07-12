@@ -197,9 +197,9 @@ local search, but far too heavy for the world as it is now.
 
 So I made dowse.
 
-The film Her reads like a prophecy: before long, AI will run our personal
-computers. dowse takes its cue from that and exposes an MCP interface for AI to call, except
-what it searches is your own files, on your own machine.
+The film Her reads like a prophecy: before long, AI will run our personal computers. dowse
+takes its cue from that and exposes an MCP interface for AI to call, except what it searches
+is your own files, on your own machine.
 
 If you are a little obsessive, if you like keeping things in order, if you want real control
 over your own file system, this is for you. Performance and beauty are things I cared about
