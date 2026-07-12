@@ -8,8 +8,10 @@ authors.workspace = true
 rust-version.workspace = true
 description = "本地文件全文搜索引擎核心库：tantivy 倒排索引 + jieba 中文分词，含编码探测、NTFS/USN 快速索引与 Windows OCR"
 readme = "README.md"
-keywords = ["search", "fulltext", "chinese", "tantivy", "jieba"]
-categories = ["text-processing", "filesystem"]
+homepage = "https://github.com/ltspace/dowse"
+documentation = "https://docs.rs/dowse"
+keywords = ["search", "fulltext", "cli", "chinese", "mcp"]
+categories = ["command-line-utilities", "text-processing", "filesystem"]
 
 # docs.rs 默认在 Linux 上构建文档，会漏掉本 crate 大量 #[cfg(windows)] 的 API
 # （NTFS/USN 快速索引、Windows OCR）。指定 Windows 目标，让文档页完整呈现。
