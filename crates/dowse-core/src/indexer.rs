@@ -432,7 +432,7 @@ fn rebuild_index_attempt(
             skipped += 1;
         }
         let processed = indexed + skipped;
-        if processed.is_multiple_of(PROGRESS_INTERVAL) {
+        if processed % PROGRESS_INTERVAL == 0 {
             on_progress(IndexProgress {
                 processed,
                 path: path.clone(),

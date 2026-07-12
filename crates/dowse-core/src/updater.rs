@@ -22,11 +22,12 @@ use crate::{Fields, IndexProgress, build_schema, register_tokenizers};
 /// `indexer::is_transient_writer_killed`——跟全量重建是同一个根因（见
 /// `indexer.rs` 40d8437 的文档），但恢复手段不同：全量重建是"整次重来"（删
 /// 目录重建一个全新的 IndexWriter），这里的 IndexWriter 是长期持有的对象，
-/// 一旦被 tantivy 判定"已死"就永远死了，唯一的恢复手段是丢弃它、在同一个
-/// `Index` 上重开一个新的 IndexWriter（旧 writer drop 时释放的写锁文件，
-/// 新 writer 能立刻拿到）。重试次数比全量重建少（6 次而非 10 次）——增量批次
-/// /单张 OCR 结果本来就小，不需要像全量重建那样逐步收窄并发线程数，
-/// 固定单线程写入本来就是默认；重试之间的退避节奏跟全量重建一致。
+/// 一旦被 tantivy 判定"已死"就永远死了，唯一的恢复手段是丢弃它未提交的部分、
+/// 换一个新的写入端接着用（具体做法见 `reopen_writer` 的文档——不是"旧的先
+/// drop 释放锁、新的再抢锁"这条路，那条路有构造性死锁）。重试次数比全量重建
+/// 少（6 次而非 10 次）——增量批次/单张 OCR 结果本来就小，不需要像全量重建
+/// 那样逐步收窄并发线程数，固定单线程写入本来就是默认；重试之间的退避节奏
+/// 跟全量重建一致。
 const WRITER_RETRIES: u32 = 6;
 const WRITER_RETRY_BASE_DELAY: Duration = Duration::from_millis(300);
 const WRITER_RETRY_MAX_DELAY: Duration = Duration::from_secs(3);
@@ -116,7 +117,7 @@ impl IndexUpdater {
                         for file in walk_index_files(&change.path) {
                             this.upsert_one(&file, &mut outcome, &mut touched_image)?;
                             processed += 1;
-                            if processed.is_multiple_of(PROGRESS_INTERVAL) {
+                            if processed % PROGRESS_INTERVAL == 0 {
                                 on_progress(IndexProgress {
                                     processed,
                                     path: file.clone(),
@@ -226,16 +227,21 @@ impl IndexUpdater {
                          等待 {delay:?} 后重开写入端重试）: {err}"
                     );
                     std::thread::sleep(delay);
-                    // 重开本身也可能在扫描器仍处于活跃窗口时撞上同一类瞬时错误
-                    // （现场排障中实测复现过）——这里不立即放弃：把它当成这次
-                    // 尝试的失败，直接进入循环的下一轮。下一轮 `op(self)` 会用
-                    // 那个仍然"已死"的旧 writer 再跑一次，必然立刻撞回同一个
-                    // 特征错误，从而在下一轮里再退避、再重开一次——本质上是
-                    // 复用同一个循环，把"重开失败"也纳入了整体的重试预算
-                    // （`WRITER_RETRIES` 次），而不是单独开一条不重试的路径。
-                    if let Err(reopen_err) = self.reopen_writer() {
-                        eprintln!("重开索引写入端失败，留到下一轮重试预算里再试: {reopen_err}");
-                    }
+                    // 重开失败就直接把这次 `commit_with_retry` 判失败，不再把它
+                    // 塞回循环下一轮凑数：`reopen_writer` 内部的 `IndexWriter::
+                    // rollback()` 会先把写锁对象从旧 writer 身上取走，一旦
+                    // `rollback()` 因为别的原因失败（理论上限于 tantivy 内部再
+                    // 构造新 writer 时的异常，正常场景不会在这一步撞杀软特征），
+                    // 旧 writer 就变成了"锁已经没了、但还挂在 self.writer 上"
+                    // 的半吊子状态——再调用一次 `rollback()` 会撞上 tantivy 自己
+                    // 那句 `.expect("The IndexWriter does not have any lock")`
+                    // 直接 panic，而不是回一个能重试的 `Err`。这里提前 `?` 出去
+                    // 换掉那条"继续循环、可能第二次调用 rollback 而 panic"的路。
+                    // 提前放弃这一次调用是安全的：`apply`/`apply_with_progress`
+                    // 失败时，调用方 `run_watch`（`watch.rs::flush_batch`）本来
+                    // 就会把这一批变更退回防抖队列、留到下一个监听窗口重新提交，
+                    // 是比这里内部循环更宽裕的外层重试。
+                    self.reopen_writer()?;
                     delay = (delay * 2).min(WRITER_RETRY_MAX_DELAY);
                     continue;
                 }
@@ -245,14 +251,26 @@ impl IndexUpdater {
         unreachable!("循环要么在 Ok 分支返回，要么在最后一次尝试的 Err 分支返回")
     }
 
-    /// 丢弃当前（已被 tantivy 判定"已死"的）`IndexWriter`，在同一个 `Index` 上
-    /// 重开一个新的。旧 writer 在这次赋值时被 drop，它持有的写锁文件随之释放，
-    /// 新 writer 才能拿到——顺序不能反，`Index::writer` 内部会等锁。
+    /// 丢弃当前（已被 tantivy 判定"已死"的）`IndexWriter` 里未提交的部分，
+    /// 换一个新的写入端接着用。
+    ///
+    /// 不能像最初设想的那样"新开一个 `IndexWriter`、赋值时让旧的自然 drop"：
+    /// `self.writer = self.index.writer(..)?` 这一行，右边的 `self.index.writer(..)`
+    /// 会先执行完（尝试拿写锁），赋值动作（连带旧 writer 的 drop、写锁文件释放）
+    /// 要等右边成功返回之后才发生——旧 writer 这时候还活着、锁文件还在，新写入端
+    /// 永远抢不到那把锁，`Index::writer` 用的是非阻塞锁（`INDEX_WRITER_LOCK.is_blocking
+    /// == false`，见 tantivy `directory_lock.rs`），失败也不重试，当场就是
+    /// `LockBusy`。这不是杀软/CI 环境的偶发问题，本机非管理员环境对着一个健康
+    /// 存活的 writer 调用一次就能稳定复现，是重开路径本身的构造性死锁。
+    ///
+    /// 改用 tantivy 内置的 `IndexWriter::rollback()`：它把写锁文件对象从旧
+    /// writer 身上"拿走"（而不是释放重抢），直接原地传给新构造的 writer 复用，
+    /// 全程不涉及锁文件的释放/重新获取，天然绕开上面那个死锁。副作用是丢弃这个
+    /// writer 上一次 commit 之后所有未提交的操作——`commit_with_retry` 的设计本来
+    /// 就要求 `op` 整批可重放（先删后加/精确删除，见调用处文档），丢弃半成品批次
+    /// 后下一轮重新跑一遍结果不变，这个副作用是安全的。
     fn reopen_writer(&mut self) -> Result<()> {
-        self.writer = self
-            .index
-            .writer(50 * 1024 * 1024)
-            .context("重开索引写入端失败")?;
+        self.writer.rollback().context("重开索引写入端失败")?;
         Ok(())
     }
 
@@ -324,5 +342,43 @@ impl IndexUpdater {
             }
         }
         Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{PendingChange, PendingOp};
+    use crate::indexer::rebuild_index;
+
+    /// `reopen_writer` 曾经用"新开一个 `IndexWriter`、让旧的在赋值时自然 drop"
+    /// 的写法，实测无论 writer 是否真的"已死"，只要它还没被 drop 就还攥着写锁
+    /// 文件——`Index::writer` 用的是非阻塞锁，抢不到当场返回 `LockBusy`，不重试。
+    /// 这个用例不需要管理员权限、不依赖杀软/CI 环境的偶发时机，一个健康存活的
+    /// writer 就能稳定复现那个构造性死锁，用来钉死回归。
+    #[test]
+    fn reopen_writer_succeeds_and_stays_usable() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target = tempfile::tempdir()?;
+        std::fs::write(target.path().join("seed.md"), "种子内容 seedmarker")?;
+        rebuild_index(index_dir.path(), target.path())?;
+
+        let mut updater = IndexUpdater::open(index_dir.path())?;
+        updater.reopen_writer()?;
+
+        // 重开后的写入端不能只是"没报错"，还得真的能干活：跑一次完整的
+        // 增量写入 + commit，确认不是停在半死状态。
+        let added = target.path().join("added.md");
+        std::fs::write(&added, "新增内容 freshmarker")?;
+        let batch = vec![PendingChange {
+            path: added.clone(),
+            op: PendingOp::Upsert,
+        }];
+        let outcome = updater.apply(&batch)?;
+        assert_eq!(
+            outcome.upserted, 1,
+            "重开后的写入端应能正常完成一次增量提交"
+        );
+        Ok(())
     }
 }
