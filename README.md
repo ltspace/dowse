@@ -106,6 +106,13 @@ write path, not from faster recognition.
 
 The installer is unsigned, so Windows SmartScreen will flag it on first run. To proceed, click **More info** and then **Run anyway**. A code-signing certificate is a recurring cost that is hard to justify for an independent project; it may be reconsidered for a future release.
 
+**Install the CLI** — the library and command-line tool ship as one `dowse` package:
+
+```powershell
+cargo install dowse                 # once published to crates.io
+cargo install --path crates/dowse   # from a local checkout
+```
+
 **Build from source:**
 
 ```powershell
@@ -142,19 +149,22 @@ Three tools: `search` (query, limit, optional `ext` filter), `preview` (full sni
 
 ```
                  ┌─────────────────────────────────────────┐
-                 │              dowse-core                  │
-                 │  tantivy index · jieba segmentation ·     │
-                 │  encoding detection · text extraction     │
-                 │  (txt/md/pdf/code/docx/xlsx/pptx) ·       │
-                 │  OCR pipeline                             │
-                 └──────┬──────────┬──────────┬────────────┘
-                        │          │          │
-                 ┌──────┴───┐ ┌────┴─────┐ ┌──┴───────────┐
-                 │ dowse-app │ │ dowse-cli │ │ MCP server   │
-                 └──────────┘ └──────────┘ └──────────────┘
+                 │                   dowse                   │
+                 │  library core: tantivy index · jieba      │
+                 │  segmentation · encoding detection ·      │
+                 │  text extraction (txt/md/pdf/code/        │
+                 │  docx/xlsx/pptx) · OCR pipeline           │
+                 │  ─────────────────────────────────────    │
+                 │  CLI + MCP server (default `cli` feature) │
+                 └────────────────────┬────────────────────┘
+                                      │ library API
+                                      │ (default-features = false)
+                              ┌───────┴────────┐
+                              │    dowse-app    │
+                              └────────────────┘
 ```
 
-One index core, three consumers. dowse-app is a Tauri 2 + Svelte 5 resident overlay; the CLI is for scripting and debugging; the MCP server exposes the local index to AI agents.
+Two crates. `dowse` is both the search library and the command-line tool: the library core exposes the search API, and the CLI plus the read-only MCP server ride behind the default `cli` feature in a single binary — the CLI for scripting and debugging, the MCP server for AI agents. `dowse-app`, a Tauri 2 + Svelte 5 resident overlay, is a separate crate that depends on `dowse` as a library only (`default-features = false`, so it pulls in neither the CLI nor its dependencies).
 
 Index updates run on a two-tier scheme: while running, file system events drive incremental updates (500ms debounce window, batched commits); at startup, an mtime/size comparison reconciles changes made while the app was not running. On NTFS volumes with admin rights, the same two tiers are served by MFT enumeration and the USN Journal instead of directory walks and file-system-event watching; both paths produce identical results and the upper layers cannot tell which one is active.
 
