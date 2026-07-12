@@ -21,9 +21,9 @@
 		indexingProcessed = 0,
 		indexingCurrentFile = '',
 		indexingReport = null,
-		lastTargetDir = null,
+		roots = [],
 		onpick,
-		onchangefolder
+		onaddfolder
 	}: {
 		kind: Kind;
 		query: string;
@@ -32,9 +32,10 @@
 		indexingProcessed?: number;
 		indexingCurrentFile?: string;
 		indexingReport?: IndexReport | null;
-		lastTargetDir?: string | null;
+		/** 已注册的全部索引根（已过 display_path 清洗），空态逐行列出。 */
+		roots?: string[];
 		onpick: () => void;
-		onchangefolder?: () => void;
+		onaddfolder?: () => void;
 	} = $props();
 
 	// "37 秒" 这种整数量级用四舍五入；不到 10 秒时留一位小数——冒烟测试用的
@@ -49,10 +50,12 @@
 	{#if kind === 'idle'}
 		<p class="title">键入即搜。</p>
 		<p class="sub">文件名、文档正文都能搜，多个词默认取交集，"引号内"作短语查询。</p>
-		{#if lastTargetDir}
-			<p class="sub root-path mono">{middleEllipsis(lastTargetDir)}</p>
-			{#if onchangefolder}
-				<button type="button" class="link" onclick={onchangefolder}>更改文件夹</button>
+		{#if roots.length > 0}
+			{#each roots as root (root)}
+				<p class="sub root-path mono">{middleEllipsis(root)}</p>
+			{/each}
+			{#if onaddfolder}
+				<button type="button" class="link" onclick={onaddfolder}>添加文件夹</button>
 			{/if}
 		{/if}
 	{:else if kind === 'no-index'}

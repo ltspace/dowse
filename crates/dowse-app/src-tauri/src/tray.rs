@@ -1,7 +1,9 @@
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::image::Image;
 use tauri::menu::{
-    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem,
-    Submenu,
+    CheckMenuItemBuilder, IsMenuItem, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu,
 };
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager};
@@ -10,7 +12,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::config::ConfigState;
 use crate::indexing_status::{IndexingPhase, IndexingStatus};
-use crate::rebuild::{RebuildGuard, format_count};
+use crate::rebuild::RebuildGuard;
 use crate::state::SearchState;
 use crate::window_fx::{self, EffectLevelState, TransparencyTier};
 
@@ -93,106 +95,58 @@ fn decode_rgba_png(bytes: &[u8]) -> (Vec<u8>, u32, u32) {
 }
 
 const MENU_SHOW: &str = "show";
-const MENU_REBUILD: &str = "rebuild";
-const MENU_CHANGE_FOLDER: &str = "change_folder";
-const MENU_INDEX_INFO: &str = "index_info";
+const MENU_FOLDERS_ADD: &str = "folders_add";
 const MENU_AUTOSTART: &str = "autostart";
 const MENU_TRANSPARENCY: &str = "transparency";
 const MENU_TRANSPARENCY_LOW: &str = "transparency_low";
 const MENU_TRANSPARENCY_MID: &str = "transparency_mid";
 const MENU_TRANSPARENCY_HIGH: &str = "transparency_high";
 const MENU_QUIT: &str = "quit";
+/// 每根一个动态子菜单，"重建"/"移除"两个动作项的 id 按 `{前缀}{根在
+/// registered_roots() 里的下标}` 拼——菜单每次状态变化都整个重建（见
+/// `refresh_menu`），下标只在"这次构建出来的菜单还没被下一次重建替换掉"
+/// 这段时间内有效，点击时会重新读一次 `registered_roots()` 按下标取值，
+/// 取不到（极端情况下菜单显示的瞬间根列表恰好变了）就提示重新打开菜单，
+/// 不会误删/误重建到别的根。
+const FOLDER_REBUILD_PREFIX: &str = "folder_rebuild::";
+const FOLDER_REMOVE_PREFIX: &str = "folder_remove::";
 
 const IDLE_TOOLTIP: &str = "dowse — Alt+` 呼出";
 
-/// 托盘图标句柄 + 几个需要运行时更新文案/启停的菜单项句柄。建完菜单/托盘之后
-/// 存进 `app.manage()`，供重建流程、OCR 进度回调随时取出来刷新（tooltip、
-/// "索引：<目录> · N 篇" 这行只读信息、"重建索引"/"更改索引文件夹…" 两个
-/// 动作项的置灰）。
+/// 托盘图标句柄。多根索引（里程碑 7）之后菜单本身不再长期持有单个菜单项的
+/// 句柄去做局部 `.set_text()`/`.set_checked()`——根的数量、每根的文档数、
+/// 忙碌态都会变，改成"每次状态变化就整份重建 Menu，`set_menu` 整体换上去"
+/// （`refresh_menu`），简单直接，不用为"这一项该不该跟着这次变化更新"操心。
 pub struct TrayHandles {
     icon: TrayIcon<tauri::Wry>,
-    index_info_item: MenuItem<tauri::Wry>,
-    rebuild_item: MenuItem<tauri::Wry>,
-    change_folder_item: MenuItem<tauri::Wry>,
 }
 
-/// "透明度"子菜单里三个互斥的档位勾选项。Tauri/muda 没有原生的单选菜单项
-/// 类型，这里用三个 `CheckMenuItem` 手动模拟单选组——选中一个就要把另外
-/// 两个的勾去掉，这三个句柄需要在选中变化时能重新拿到手，所以存进
-/// `app.manage()` 供 `handle_menu_event` 复用，而不是建完就丢。
-struct TransparencyMenuItems {
-    low: CheckMenuItem<tauri::Wry>,
-    mid: CheckMenuItem<tauri::Wry>,
-    high: CheckMenuItem<tauri::Wry>,
-}
+/// 是否有一次索引操作（全量重建/添加根/移除根/重建单根）正在进行——托盘
+/// "索引文件夹"子菜单里跟根相关的动作项在忙碌期间整体置灰，防止重入。
+pub struct TrayBusy(AtomicBool);
 
-impl TransparencyMenuItems {
-    /// 把三个勾选项的状态同步到给定档位——目标档位打勾，另外两个去勾。
-    fn sync_checked(&self, tier: TransparencyTier) {
-        let _ = self.low.set_checked(tier == TransparencyTier::Low);
-        let _ = self.mid.set_checked(tier == TransparencyTier::Mid);
-        let _ = self.high.set_checked(tier == TransparencyTier::High);
+impl TrayBusy {
+    pub fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
+    fn get(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    fn set(&self, busy: bool) {
+        self.0.store(busy, Ordering::Release);
     }
 }
 
-/// 托盘图标 + 右键菜单：呼出 / 索引信息（只读） / 重建索引 / 更改索引文件夹…
+/// 托盘图标 + 右键菜单：呼出 / "索引文件夹"子菜单（每根一项 + 添加文件夹…）
 /// / 开机自启开关 / 透明效果开关 / 透明度三档子菜单 / 退出。进程常驻，浮窗
 /// 只是 show/hide——托盘是用户确认"它还活着"、看一眼索引状态、做少数配置的
-/// 入口（症状 5：选定文件夹建索引后要能看得见当前根、能改）。
+/// 入口。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let cfg = app.state::<ConfigState>().get();
-    let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    app.manage(TrayBusy::new());
 
-    let show_item = MenuItemBuilder::with_id(MENU_SHOW, "呼出").build(app)?;
-    let index_info_item = MenuItemBuilder::with_id(MENU_INDEX_INFO, index_info_text(app))
-        .enabled(false)
-        .build(app)?;
-    let rebuild_item = MenuItemBuilder::with_id(MENU_REBUILD, "重建索引").build(app)?;
-    let change_folder_item =
-        MenuItemBuilder::with_id(MENU_CHANGE_FOLDER, "更改索引文件夹…").build(app)?;
-    let autostart_item = CheckMenuItemBuilder::with_id(MENU_AUTOSTART, "开机自启")
-        .checked(autostart_enabled)
-        .build(app)?;
-    let transparency_item = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY, "关闭透明效果")
-        .checked(!cfg.transparency_enabled)
-        .build(app)?;
-
-    let tier = cfg.transparency_tier;
-    let tier_low = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_LOW, "低")
-        .checked(tier == TransparencyTier::Low)
-        .build(app)?;
-    let tier_mid = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_MID, "中")
-        .checked(tier == TransparencyTier::Mid)
-        .build(app)?;
-    let tier_high = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_HIGH, "高")
-        .checked(tier == TransparencyTier::High)
-        .build(app)?;
-    let tier_submenu =
-        Submenu::with_items(app, "透明度", true, &[&tier_low, &tier_mid, &tier_high])?;
-    app.manage(TransparencyMenuItems {
-        low: tier_low,
-        mid: tier_mid,
-        high: tier_high,
-    });
-
-    let quit_item = MenuItemBuilder::with_id(MENU_QUIT, "退出").build(app)?;
-
-    let menu = Menu::with_items(
-        app,
-        &[
-            &show_item,
-            &index_info_item,
-            &rebuild_item,
-            &change_folder_item,
-            &PredefinedMenuItem::separator(app)?,
-            &autostart_item,
-            &transparency_item,
-            &tier_submenu,
-            &PredefinedMenuItem::separator(app)?,
-            &quit_item,
-        ],
-    )?;
-
+    let menu = build_menu(app, false)?;
     let icon = tray_icon_image();
 
     let tray_icon = TrayIconBuilder::new()
@@ -214,43 +168,124 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
-    app.manage(TrayHandles {
-        icon: tray_icon,
-        index_info_item,
-        rebuild_item,
-        change_folder_item,
-    });
+    app.manage(TrayHandles { icon: tray_icon });
 
     Ok(())
 }
 
-/// "索引：<目录> · N 篇"这一行只读菜单项的文案；还没建过索引时给一句引导语。
-fn index_info_text(app: &AppHandle) -> String {
-    let target_dir = app.state::<ConfigState>().get().target_dir;
-    let Some(dir) = target_dir else {
-        return "尚未建立索引".to_string();
-    };
-    let num_docs = app
-        .state::<SearchState>()
-        .0
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|s| s.num_docs()))
-        .unwrap_or(0);
-    format!(
-        "索引：{} · {} 篇",
-        dowse_core::display_path(&dir.to_string_lossy()),
-        format_count(num_docs)
-    )
-}
-
-/// 重建/切换完索引根之后调一次，把托盘那行只读信息刷新成最新的目录 + 篇数
-/// （症状 5"可见"：托盘要能看到当前索引根，不用只靠猜）。
-pub fn refresh_index_info(app: &AppHandle) {
+/// 从当前状态（配置/自启/根列表/忙碌态）整份重建菜单树，换到托盘图标上。
+/// 添加/移除/重建根完成后、忙碌态切换、透明度/自启配置变化时都调这个——
+/// 单一入口，不用惦记"这次变化该更新菜单里的哪几项"。
+pub fn refresh_menu(app: &AppHandle) {
     let Some(handles) = app.try_state::<TrayHandles>() else {
         return;
     };
-    let _ = handles.index_info_item.set_text(index_info_text(app));
+    let busy = app
+        .try_state::<TrayBusy>()
+        .map(|b| b.get())
+        .unwrap_or(false);
+    match build_menu(app, busy) {
+        Ok(menu) => {
+            let _ = handles.icon.set_menu(Some(menu));
+        }
+        Err(err) => eprintln!("重建托盘菜单失败: {err}"),
+    }
+}
+
+fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
+    let cfg = app.state::<ConfigState>().get();
+    let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+
+    let show_item = MenuItemBuilder::with_id(MENU_SHOW, "呼出").build(app)?;
+    let folders_submenu = build_folders_submenu(app, busy)?;
+
+    let autostart_item = CheckMenuItemBuilder::with_id(MENU_AUTOSTART, "开机自启")
+        .checked(autostart_enabled)
+        .build(app)?;
+    let transparency_item = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY, "关闭透明效果")
+        .checked(!cfg.transparency_enabled)
+        .build(app)?;
+
+    let tier = cfg.transparency_tier;
+    let tier_low = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_LOW, "低")
+        .checked(tier == TransparencyTier::Low)
+        .build(app)?;
+    let tier_mid = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_MID, "中")
+        .checked(tier == TransparencyTier::Mid)
+        .build(app)?;
+    let tier_high = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_HIGH, "高")
+        .checked(tier == TransparencyTier::High)
+        .build(app)?;
+    let tier_submenu =
+        Submenu::with_items(app, "透明度", true, &[&tier_low, &tier_mid, &tier_high])?;
+
+    let quit_item = MenuItemBuilder::with_id(MENU_QUIT, "退出").build(app)?;
+
+    Menu::with_items(
+        app,
+        &[
+            &show_item,
+            &folders_submenu,
+            &PredefinedMenuItem::separator(app)?,
+            &autostart_item,
+            &transparency_item,
+            &tier_submenu,
+            &PredefinedMenuItem::separator(app)?,
+            &quit_item,
+        ],
+    )
+}
+
+/// "索引文件夹"子菜单：每个已注册根一项（本身是个嵌套子菜单，标题是
+/// "路径 · N 篇"，子项"重建"/"移除"），末尾"添加文件夹…"。索引还没建过、
+/// 或者 schema 需要重建（`registered_roots` 读不出来）时没有根可列，
+/// 子菜单只剩"添加文件夹…"一项——点它会走全量重建的引导流程（等价于
+/// 浮窗空态"选择目录并建索引"），这也是升级后"旧索引读不到根"时唯一
+/// 需要用户手动干预的路径。
+fn build_folders_submenu(app: &AppHandle, busy: bool) -> tauri::Result<Submenu<tauri::Wry>> {
+    let roots = crate::config::index_dir()
+        .ok()
+        .and_then(|dir| dowse_core::registered_roots(&dir).ok())
+        .unwrap_or_default();
+
+    let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::new();
+    for (idx, root) in roots.iter().enumerate() {
+        let docs = root_doc_count(app, root);
+        let label = format!(
+            "{} · {} 篇",
+            dowse_core::display_path(&root.to_string_lossy()),
+            crate::rebuild::format_count(docs)
+        );
+        let rebuild_item =
+            MenuItemBuilder::with_id(format!("{FOLDER_REBUILD_PREFIX}{idx}"), "重建")
+                .enabled(!busy)
+                .build(app)?;
+        let remove_item = MenuItemBuilder::with_id(format!("{FOLDER_REMOVE_PREFIX}{idx}"), "移除")
+            .enabled(!busy)
+            .build(app)?;
+        let root_submenu = Submenu::with_items(app, label, true, &[&rebuild_item, &remove_item])?;
+        items.push(Box::new(root_submenu));
+    }
+
+    if !roots.is_empty() {
+        items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    }
+    let add_item = MenuItemBuilder::with_id(MENU_FOLDERS_ADD, "添加文件夹…")
+        .enabled(!busy)
+        .build(app)?;
+    items.push(Box::new(add_item));
+
+    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|b| b.as_ref()).collect();
+    Submenu::with_items(app, "索引文件夹", true, &refs)
+}
+
+fn root_doc_count(app: &AppHandle, root: &std::path::Path) -> u64 {
+    app.state::<SearchState>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().and_then(|s| s.count_under(root).ok()))
+        .unwrap_or(0)
 }
 
 /// 把托盘 tooltip 同步成 `IndexingStatus` 当前快照对应的文案——空闲时是
@@ -265,36 +300,36 @@ pub fn refresh_tooltip(app: &AppHandle) {
         IndexingPhase::Idle => IDLE_TOOLTIP.to_string(),
         IndexingPhase::Text => format!(
             "dowse — 索引中 {} 篇",
-            format_count(snapshot.text_processed as u64)
+            crate::rebuild::format_count(snapshot.text_processed as u64)
         ),
         IndexingPhase::Ocr => format!(
             "dowse — 图片识别 {} / {}",
-            format_count(snapshot.ocr_processed as u64),
-            format_count(snapshot.ocr_total as u64)
+            crate::rebuild::format_count(snapshot.ocr_processed as u64),
+            crate::rebuild::format_count(snapshot.ocr_total as u64)
         ),
     };
     let _ = handles.icon.set_tooltip(Some(tooltip));
 }
 
-/// 重建期间把"重建索引"/"更改索引文件夹…"两个动作项置灰，防止重入——全量
-/// 重建会删掉旧索引目录重建，两次并发执行会互相踩踏。
-pub fn set_rebuilding(app: &AppHandle, busy: bool) {
-    let Some(handles) = app.try_state::<TrayHandles>() else {
-        return;
-    };
-    let _ = handles.rebuild_item.set_enabled(!busy);
-    let _ = handles.change_folder_item.set_enabled(!busy);
+/// 索引操作（全量重建/添加根/移除根/重建单根）期间把忙碌态置上/置下，
+/// 顺带整份重建一次菜单——`build_folders_submenu` 据此把根相关的动作项
+/// 整体置灰/恢复，防止重入。
+pub fn set_busy(app: &AppHandle, busy: bool) {
+    if let Some(state) = app.try_state::<TrayBusy>() {
+        state.set(busy);
+    }
+    refresh_menu(app);
 }
 
 fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
-    match event.id().as_ref() {
+    let id = event.id().as_ref();
+    match id {
         MENU_SHOW => {
             if let Some(window) = app.get_webview_window("main") {
                 window_fx::show_window(&window);
             }
         }
-        MENU_REBUILD => rebuild_from_last_dir(app),
-        MENU_CHANGE_FOLDER => change_index_folder(app),
+        MENU_FOLDERS_ADD => add_folder(app),
         MENU_AUTOSTART => {
             let mgr = app.autolaunch();
             let enabled = mgr.is_enabled().unwrap_or(false);
@@ -309,6 +344,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
                 }
                 Err(err) => eprintln!("切换开机自启失败: {err}"),
             }
+            refresh_menu(app);
         }
         MENU_TRANSPARENCY => {
             let config = app.state::<ConfigState>();
@@ -320,19 +356,16 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
                 app.state::<EffectLevelState>().set(level);
                 let _ = window.emit("dowse://effect-level", level);
             }
+            refresh_menu(app);
         }
         MENU_TRANSPARENCY_LOW | MENU_TRANSPARENCY_MID | MENU_TRANSPARENCY_HIGH => {
-            let tier = match event.id().as_ref() {
+            let tier = match id {
                 MENU_TRANSPARENCY_LOW => TransparencyTier::Low,
                 MENU_TRANSPARENCY_MID => TransparencyTier::Mid,
                 _ => TransparencyTier::High,
             };
             let config = app.state::<ConfigState>();
             let _ = config.set_transparency_tier(tier);
-
-            if let Some(items) = app.try_state::<TransparencyMenuItems>() {
-                items.sync_checked(tier);
-            }
 
             // 挡位无论透明效果当前开没开都先存下来；只有透明效果开着的时候
             // 才需要立刻重新申请 Acrylic 把新 alpha 应用到 DWM 那一层——
@@ -349,22 +382,76 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             // `--glass-tint`，这里更新变量不会有副作用，且能保证下次切回
             // 玻璃档时前端已经是最新值，不用等一次额外的往返。
             let _ = app.emit("dowse://glass-alpha", tier.glass_alpha());
+            refresh_menu(app);
         }
         MENU_QUIT => app.exit(0),
+        _ if id.starts_with(FOLDER_REBUILD_PREFIX) => {
+            if let Ok(idx) = id[FOLDER_REBUILD_PREFIX.len()..].parse::<usize>() {
+                rebuild_folder(app, idx);
+            }
+        }
+        _ if id.starts_with(FOLDER_REMOVE_PREFIX) => {
+            if let Ok(idx) = id[FOLDER_REMOVE_PREFIX.len()..].parse::<usize>() {
+                remove_folder(app, idx);
+            }
+        }
         _ => {}
     }
 }
 
-/// 后台线程里跑一次 `rebuild::perform_rebuild`，成功/失败各广播一个事件——
-/// 托盘触发的重建没有 Tauri invoke 的返回值可用（不像浮窗按钮那样直接拿到
-/// `rebuild_index` 命令的 Result），前端靠监听 `dowse://rebuild-done`/
-/// `dowse://rebuild-error` 得知结果（沿用 v0.6.0 就有的这套事件）。
-/// `RebuildGuard` 的独占权由调用方（`rebuild_from_last_dir`/
-/// `change_index_folder`）在拿到目标目录之后、真正开始重建之前获取。
-fn spawn_rebuild(app: &AppHandle, target: std::path::PathBuf) {
+/// 按菜单构建时的下标重新读一次当前根列表取值——菜单从"这次重建"到"用户
+/// 点击"之间理论上可能又发生了一次根变化（比如恰好另一次操作也完成了），
+/// 下标失配（越界）时返回 `None`，调用方据此提示用户重新打开菜单，不会
+/// 误伤到下标对应的、实际上是另一个根。
+fn resolve_root_by_index(idx: usize) -> Option<PathBuf> {
+    let index_dir = crate::config::index_dir().ok()?;
+    let roots = dowse_core::registered_roots(&index_dir).ok()?;
+    roots.into_iter().nth(idx)
+}
+
+/// 托盘"添加文件夹…"：弹系统目录选择器，选定后视索引现状决定走哪条路——
+/// 索引还没建过（`registered_roots` 读不出来，包含"从没建过"和"schema
+/// 需要重建"两种情形）就走全量重建的引导流程（等价于浮窗空态"选择目录并
+/// 建索引"）；已经有索引就走 `add_root`（多根索引核心操作，不动现有内容）。
+/// 两条路径统一在这里判断，托盘和浮窗（`commands::add_root`）复用同一个
+/// 判断，不会出现"这个入口忘了判断该走哪条路"的偏差。
+fn add_folder(app: &AppHandle) {
+    if !app.state::<RebuildGuard>().try_begin() {
+        return;
+    }
+    let app = app.clone();
+    app.dialog()
+        .file()
+        .set_title("选择要索引的文件夹")
+        .pick_folder(move |folder| {
+            let Some(folder) = folder else {
+                app.state::<RebuildGuard>().end();
+                return;
+            };
+            let Ok(target) = folder.into_path() else {
+                app.state::<RebuildGuard>().end();
+                return;
+            };
+            spawn_add_or_bootstrap(&app, target);
+        });
+}
+
+fn has_existing_index() -> bool {
+    crate::config::index_dir()
+        .ok()
+        .and_then(|dir| dowse_core::registered_roots(&dir).ok())
+        .is_some()
+}
+
+fn spawn_add_or_bootstrap(app: &AppHandle, target: PathBuf) {
+    let bootstrap = !has_existing_index();
     let app = app.clone();
     std::thread::spawn(move || {
-        let result = crate::rebuild::perform_rebuild(&app, target);
+        let result = if bootstrap {
+            crate::rebuild::perform_rebuild(&app, target)
+        } else {
+            crate::rebuild::perform_add_root(&app, target)
+        };
         app.state::<RebuildGuard>().end();
         match result {
             Ok(stats) => {
@@ -377,46 +464,52 @@ fn spawn_rebuild(app: &AppHandle, target: std::path::PathBuf) {
     });
 }
 
-/// 托盘"重建索引"复用上次成功建索引的目录；还没配置过就呼出窗口，
-/// 让用户走前端"选个目录开始建索引"的引导，而不是在托盘里悄悄失败。
-fn rebuild_from_last_dir(app: &AppHandle) {
-    let Some(target_dir) = app.state::<ConfigState>().get().target_dir else {
-        if let Some(window) = app.get_webview_window("main") {
-            window_fx::show_window(&window);
-        }
-        return;
-    };
-    if !app.state::<RebuildGuard>().try_begin() {
-        return;
-    }
-    spawn_rebuild(app, target_dir);
-}
-
-/// 托盘"更改索引文件夹…"：弹系统目录选择器，选定后对新目录整次重建（等价于
-/// 换根，旧根内容整体被替换——症状 5"可改"）。用户取消选择就什么都不做。
-/// `RebuildGuard` 在弹出选择器之前就拿到，防止用户在对话框还开着的时候
-/// 又从别的入口（浮窗按钮/"重建索引"）触发第二次重建；取消/拿不到路径时
-/// 要记得放回去，不然这个入口会永久卡死在"重建中"。
-fn change_index_folder(app: &AppHandle) {
+/// 托盘每根子菜单的"重建"动作：按下标解出根路径，走
+/// `rebuild::perform_rebuild_root`（= 移除根 + 添加根），成功/失败复用
+/// `dowse://rebuild-done`/`dowse://rebuild-error` 事件，浮窗开着的话会照常
+/// 收到刷新（跟托盘触发全量重建的既有事件通道一致）。
+fn rebuild_folder(app: &AppHandle, idx: usize) {
     if !app.state::<RebuildGuard>().try_begin() {
         return;
     }
     let app = app.clone();
-    app.dialog()
-        .file()
-        .set_title("选择要索引的目录")
-        .pick_folder(move |folder| {
-            let Some(folder) = folder else {
-                app.state::<RebuildGuard>().end();
-                return;
-            };
-            let Ok(target) = folder.into_path() else {
-                app.state::<RebuildGuard>().end();
-                return;
-            };
-            // spawn_rebuild 内部会在重建结束后调用 RebuildGuard::end()，
-            // 这里不用重复放一次——独占权从"拿到"到"重建线程结束"是同一段
-            // 生命周期，中间途经选择器回调，不能提前释放。
-            spawn_rebuild(&app, target);
-        });
+    std::thread::spawn(move || {
+        let outcome = resolve_root_by_index(idx)
+            .ok_or_else(|| "找不到这个索引根，菜单可能已过期，请重新打开托盘菜单".to_string())
+            .and_then(|root| crate::rebuild::perform_rebuild_root(&app, root));
+        app.state::<RebuildGuard>().end();
+        match outcome {
+            Ok(stats) => {
+                let _ = app.emit("dowse://rebuild-done", stats.indexed);
+            }
+            Err(err) => {
+                let _ = app.emit("dowse://rebuild-error", err);
+            }
+        }
+    });
+}
+
+/// 托盘每根子菜单的"移除"动作：按下标解出根路径，走
+/// `rebuild::perform_remove_root`。移除没有"收录数"可言，成功时走独立的
+/// `dowse://root-removed` 事件（携带删除的文档数），失败复用
+/// `dowse://rebuild-error`（错误文案本身已经足够说明是哪类操作失败）。
+fn remove_folder(app: &AppHandle, idx: usize) {
+    if !app.state::<RebuildGuard>().try_begin() {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let outcome = resolve_root_by_index(idx)
+            .ok_or_else(|| "找不到这个索引根，菜单可能已过期，请重新打开托盘菜单".to_string())
+            .and_then(|root| crate::rebuild::perform_remove_root(&app, root));
+        app.state::<RebuildGuard>().end();
+        match outcome {
+            Ok(stats) => {
+                let _ = app.emit("dowse://root-removed", stats.removed);
+            }
+            Err(err) => {
+                let _ = app.emit("dowse://rebuild-error", err);
+            }
+        }
+    });
 }

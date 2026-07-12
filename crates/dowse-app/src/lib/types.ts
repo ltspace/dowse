@@ -39,7 +39,8 @@ export interface IndexProgress {
 export interface IndexStatus {
 	has_index: boolean;
 	num_docs: number;
-	last_target_dir: string | null;
+	/** 已注册的全部索引根，已经过 display_path 清洗（不带 `\\?\` 前缀），可直接渲染。 */
+	roots: string[];
 }
 
 /// 建索引进度阶段——跟 Rust 侧 `indexing_status.rs::IndexingPhase` 一一对应。
