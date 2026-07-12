@@ -24,7 +24,13 @@ const BUDGET: Duration = Duration::from_secs(3);
 /// 轮询上限：给"功能最终是否生效"用，要远松于 BUDGET——CI 共享跑机偶尔
 /// 会慢到 15s 都不够，之前用 15s 就是随机超时的根源，放宽到 30s。这个
 /// 上限不代表性能预算，只是"再等下去就该判失败了"的兜底。
-const POLL_TIMEOUT: Duration = Duration::from_secs(30);
+///
+/// 30s 后来在 CI 上又炸过一次（run 29173139308，重命名新名字那一步）：这个
+/// 测试自己的 `rebuild_index` 在 CI 的系统盘（管理员权限 + NTFS，触发 MFT
+/// 快速枚举整卷 C:，~130 万条记录）上就要吃掉 30s 量级（见
+/// tests/ntfs_fast_path.rs 模块文档的排障记录），把跑机进一步拖慢，导致
+/// 紧接着的 notify 事件传播/防抖/commit 偶尔也需要更久。再放宽到 60s。
+const POLL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// CI 环境下（GitHub Actions 默认设了 `CI=true`）跳过严格的延迟预算断言，
 /// 只用于人读的耗时数字打印时标注清楚这条判断为什么被跳过。
