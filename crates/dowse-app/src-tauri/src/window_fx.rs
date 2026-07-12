@@ -124,11 +124,12 @@ impl EffectLevelState {
     }
 }
 
-/// 是不是在远程会话（RDP/AVD/VDI）里跑。Windows 的 DWM 在远程会话下会把
-/// Acrylic/Mica 系统材质悄悄换成一块不透明的纯色回退——`DwmSetWindowAttribute`
-/// 调用本身仍然返回成功，应用层没有公开 API 能查到"其实没在磨砂"，
-/// 所以没法靠 `set_effects` 的返回值判断。用 `SESSIONNAME` 环境变量识别：
-/// 本机控制台会话固定是 "Console"，RDP 会话是 "RDP-Tcp#<id>"。
+/// 是不是在远程会话（RDP/AVD/VDI）里跑，只用来记日志、不再驱动降级决策
+/// （v0.6.1 起，见 `apply_with_fallback` 里那段撤销说明）。老版本 Windows 的
+/// DWM 在远程会话下确实会把 Acrylic/Mica 系统材质悄悄换成不透明纯色，但这
+/// 不是当前所有 RDP 场景都成立的规律，而且 `SESSIONNAME` 探测本身依赖启动
+/// 上下文——开机自启的进程如果先于 RDP 连接启动，这里测不出"现在其实是远程
+/// 会话"，这条判据的可靠性只够留痕，不够拿来做非黑即白的降级决策。
 fn is_remote_session() -> bool {
     std::env::var("SESSIONNAME")
         .map(|name| !name.eq_ignore_ascii_case("console"))
@@ -368,16 +369,22 @@ pub fn apply_with_fallback(
     }
 
     if is_remote_session() {
-        // 材质请求照发（不影响功能，万一某些远程会话其实支持），但已知
-        // DWM 在这种场景下大概率会把 Acrylic/Mica 悄悄渲染成不透明纯色——
-        // 与其让前端顶着"acrylic"的名头显示一块来源不明的纯色，不如如实
-        // 上报 Solid，让前端走我们自己设计过的深灰兜底，观感可控。
-        apply_acrylic_effect(window, neutral_acrylic_tint(window, tier));
+        // v0.6.0 曾经在这里预判"远程会话一律强制报告 Solid"，v0.6.1 撤销了这个
+        // 预判：用户实测反馈新版 Win11 的 RDP 图形管线能正常透传 DWM
+        // Acrylic/Mica 特效，老版本 Windows 才有"远程会话被悄悄渲染成不透明
+        // 纯色"的限制——一刀切强制降级反而会在能正常渲染的新机器上误伤真实
+        // 效果。而且 `SESSIONNAME` 探测本身依赖启动上下文：开机自启的进程
+        // 如果是先启动、用户后连的 RDP，这里根本测不出"现在是远程会话"，
+        // 说明这条判据已经不可靠到不该再拿来做决策，只适合留痕。
+        //
+        // 改成只记日志、不改行为：材质请求照常发，`EffectLevel` 照常按下面
+        // 的正常降级链上报，真渲染不出来玻璃效果时，用户手里还有托盘"关闭
+        // 透明效果"开关和纯色档可以自救，不需要我们越俎代庖替他们决定。
         eprintln!(
-            "材质降级：检测到远程会话（SESSIONNAME={}），Acrylic/Mica 在此场景下会被 DWM 渲染成不透明纯色，直接落纯色",
+            "检测到远程会话（SESSIONNAME={}），材质请求照常发出，不再强制降级为纯色——\
+             新版 RDP 通常能正常渲染 Acrylic/Mica，渲染不出来时可用托盘的透明度开关自救",
             std::env::var("SESSIONNAME").unwrap_or_default()
         );
-        return EffectLevel::Solid;
     }
 
     if apply_acrylic_effect(window, neutral_acrylic_tint(window, tier)) {

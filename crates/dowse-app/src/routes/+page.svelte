@@ -10,6 +10,7 @@
 		EffectLevel,
 		ExtGroup,
 		GlassAlpha,
+		IndexingPhase,
 		IndexProgress,
 		SearchHit,
 		SortOption,
@@ -23,6 +24,7 @@
 	import PinButton from '$lib/components/PinButton.svelte';
 	import AnimatedNumber from '$lib/components/AnimatedNumber.svelte';
 	import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
+	import IndexingStrip from '$lib/components/IndexingStrip.svelte';
 	import { formatHotkey } from '$lib/hotkey';
 
 	// 类型筛选 / 排序器两个幽灵态下拉的选项表——顺序即菜单里的显示顺序，
@@ -45,6 +47,7 @@
 	let selectedIndex = $state(0);
 	let hasIndex = $state<boolean | null>(null);
 	let numDocs = $state(0);
+	let lastTargetDir = $state<string | null>(null);
 	let previewSegments = $state<TextSegment[] | null>(null);
 	let previewLoading = $state(false);
 	let rebuildState = $state<'idle' | 'rebuilding' | 'error'>('idle');
@@ -57,9 +60,16 @@
 	// pickDirectoryAndRebuild）。
 	let indexingProcessed = $state(0);
 	let indexingCurrentFile = $state('');
-	let indexingReport = $state<{ indexed: number; seconds: number; ocrPending: number } | null>(
-		null
-	);
+	let indexingReport = $state<{ indexed: number; seconds: number } | null>(null);
+
+	// 建索引进度的"活的"状态：`indexingPhase` 是单一事实来源，决定要不要展示
+	// 文本阶段的全屏引导层（'text'）、OCR 阶段的常驻进度条（'ocr'，不遮挡
+	// 搜索结果）。事件流只在窗口开着时有意义，`refreshIndexingStatus` 在
+	// 窗口每次呼出/挂载时拉一次快照续播，避免窗口隐藏期间错过事件后留下
+	// 一片空白（症状 2/3 的验收场景：反复唤出/隐藏窗口，进度视图每次都活着）。
+	let indexingPhase = $state<IndexingPhase>('idle');
+	let indexingOcrProcessed = $state(0);
+	let indexingOcrTotal = $state(0);
 
 	// 本次搜索耗时（发起请求到结果上屏），页脚小字用；null 表示还没有可展示
 	// 的一次搜索（空查询/首次挂载）。刻意不做滚动动画——每次搜索都变，
@@ -83,8 +93,14 @@
 
 	let selectedHit = $derived(hits[selectedIndex] ?? null);
 
+	// 文本阶段（'text'）无论触发源（浮窗按钮/托盘"重建索引"/托盘"更改索引
+	// 文件夹…"）都要接管成全屏引导层——`indexingPhase` 是跨触发源统一的
+	// 事实来源；`rebuildState === 'rebuilding'` 仍然保留，覆盖"点击到第一次
+	// 状态同步之间"那一小段间隙，避免按钮点下去的瞬间还没转譯成
+	// indexingPhase 更新时闪一下结果视图。OCR 阶段（'ocr'）不在这里处理——
+	// 它不遮挡搜索结果，见下面的 <IndexingStrip>。
 	let guidanceKind = $derived.by((): 'idle' | 'no-index' | 'no-results' | 'rebuilding' | 'error' => {
-		if (rebuildState === 'rebuilding') return 'rebuilding';
+		if (rebuildState === 'rebuilding' || indexingPhase === 'text') return 'rebuilding';
 		if (rebuildState === 'error') return 'error';
 		if (query.trim().length === 0) return 'idle';
 		if (hasIndex === false) return 'no-index';
@@ -98,9 +114,46 @@
 			const status = await api.indexStatus();
 			hasIndex = status.has_index;
 			numDocs = status.num_docs;
+			lastTargetDir = status.last_target_dir;
 		} catch {
 			hasIndex = false;
 			numDocs = 0;
+			lastTargetDir = null;
+		}
+	}
+
+	/// OCR 队列进度的归一化更新：`pending` 是队列里还剩多少张待处理，跟
+	/// Rust 侧 `indexing_status.rs::set_ocr_pending` 同一套语义（常驻监听
+	/// 期间又发现新图片时顺势抬高 total，保证 processed 不会算出负数）。
+	function applyOcrPending(pending: number) {
+		if (pending <= 0) {
+			indexingPhase = 'idle';
+			indexingOcrProcessed = 0;
+			indexingOcrTotal = 0;
+			return;
+		}
+		indexingPhase = 'ocr';
+		if (pending > indexingOcrTotal) indexingOcrTotal = pending;
+		indexingOcrProcessed = Math.max(0, indexingOcrTotal - pending);
+	}
+
+	/// 拉一次后端的"当前建索引进度"快照，跟事件流接续起来——窗口每次呼出
+	/// 都要调用一次：事件在窗口隐藏期间照样会发，但前端没监听、没地方存，
+	/// 重新唤出时必须能补一次，不能是一片空白或者停在呼出前那一刻的旧状态。
+	async function refreshIndexingStatus() {
+		try {
+			const snap = await api.indexingStatus();
+			indexingPhase = snap.phase;
+			if (snap.phase === 'text') {
+				indexingProcessed = snap.text_processed;
+				indexingCurrentFile = snap.text_current_file;
+			} else if (snap.phase === 'ocr') {
+				indexingOcrTotal = snap.ocr_total;
+				indexingOcrProcessed = snap.ocr_processed;
+			}
+		} catch {
+			// 拉取失败（比如 Tauri IPC 一次性抖动）保留上一次已知状态，
+			// 不主动清空——清空反而会让活着的进度视图短暂"消失"一下。
 		}
 	}
 
@@ -179,6 +232,7 @@
 		if (!dir || Array.isArray(dir)) return;
 
 		rebuildState = 'rebuilding';
+		indexingPhase = 'text';
 		indexingProcessed = 0;
 		indexingCurrentFile = '';
 		indexingReport = null;
@@ -186,9 +240,13 @@
 			const stats = await api.rebuildIndex(dir);
 			hasIndex = true;
 			refreshIndexStatus();
+			// 文本阶段结束，交接给 OCR 阶段（如果还有图片没识别完）——不等
+			// 第一个 `dowse://ocr-progress` 事件，直接用这次 invoke 返回的
+			// 初始值起播，衔接文本直播 → 完成报告 → 图片余量递减的完整时间线。
+			applyOcrPending(stats.ocr_pending);
 			// 冷报告替换掉实时计数，停留片刻后收回整个引导层——用户看得见
 			// "完成了"，不需要再点一下才能回到搜索态。
-			const report = { indexed: stats.indexed, seconds: stats.seconds, ocrPending: stats.ocr_pending };
+			const report = { indexed: stats.indexed, seconds: stats.seconds };
 			indexingReport = report;
 			setTimeout(() => {
 				if (indexingReport !== report) return;
@@ -198,6 +256,7 @@
 		} catch (err) {
 			rebuildState = 'error';
 			rebuildError = String(err);
+			indexingPhase = 'idle';
 		}
 	}
 
@@ -405,6 +464,9 @@
 
 	onMount(() => {
 		refreshIndexStatus();
+		// 窗口挂载时也拉一次进度快照——覆盖"托盘触发的建索引正在跑，浮窗这时
+		// 才第一次打开"的场景，不用等下一条事件才能看到活的进度。
+		refreshIndexingStatus();
 		focusAndSelectAll();
 
 		api.getEffectLevel().then((level: EffectLevel) => {
@@ -419,6 +481,10 @@
 
 		const unlistenShown = listen('dowse://shown', () => {
 			refreshIndexStatus();
+			// 窗口重新唤出时必须能看到活的进度，不能是呼出前那一刻的旧快照，
+			// 更不能是空白——建索引期间反复隐藏/唤出窗口是这套进度视图的
+			// 核心验收场景（症状 2/3）。
+			refreshIndexingStatus();
 			focusAndSelectAll();
 			playShowAnimation();
 			closeMenus();
@@ -431,16 +497,28 @@
 		});
 		const unlistenRebuildDone = listen<number>('dowse://rebuild-done', (evt) => {
 			refreshIndexStatus();
+			// 托盘触发的重建（"重建索引"/"更改索引文件夹…"）没有走本地的
+			// pickDirectoryAndRebuild，指望这里补一次快照拉取，好在窗口这时
+			// 恰好开着的话立刻接上 OCR 阶段的进度条，不用等下一条事件。
+			refreshIndexingStatus();
 			showToast(`索引重建完成，收录 ${evt.payload} 个文件。`);
 		});
 		const unlistenRebuildError = listen<string>('dowse://rebuild-error', (evt) => {
+			refreshIndexingStatus();
 			showToast(`索引重建失败：${evt.payload}`);
 		});
 		// 建索引"实时直播"：全程监听，不只在 rebuildState === 'rebuilding' 时才挂——
 		// 事件只在 rebuild_index 命令执行期间才会发出，不重建时这个监听器闲置无害。
 		const unlistenRebuildProgress = listen<IndexProgress>('dowse://rebuild-progress', (evt) => {
+			indexingPhase = 'text';
 			indexingProcessed = evt.payload.processed;
 			indexingCurrentFile = evt.payload.path;
+		});
+		// OCR 队列消化进度：payload 是这一刻队列里还剩多少张待处理——
+		// 症状 3 的修复核心，v0.6.1 之前这行字是重建完成那一刻的静态快照，
+		// 从不刷新；现在跟着 OCR worker 每个 flush 批次持续推送、持续下降。
+		const unlistenOcrProgress = listen<number>('dowse://ocr-progress', (evt) => {
+			applyOcrPending(evt.payload);
 		});
 
 		return () => {
@@ -451,6 +529,7 @@
 			unlistenRebuildDone.then((f) => f());
 			unlistenRebuildError.then((f) => f());
 			unlistenRebuildProgress.then((f) => f());
+			unlistenOcrProgress.then((f) => f());
 		};
 	});
 </script>
@@ -515,7 +594,9 @@
 				{indexingProcessed}
 				{indexingCurrentFile}
 				{indexingReport}
+				{lastTargetDir}
 				onpick={pickDirectoryAndRebuild}
+				onchangefolder={pickDirectoryAndRebuild}
 			/>
 		{:else}
 			<div class="results">
@@ -542,6 +623,14 @@
 			</div>
 		{/if}
 	</div>
+
+	<!-- OCR 回填阶段的常驻进度条：跟 showGuidance 的分支是平级关系，不遮挡
+	     搜索结果——文本已经 commit 的内容立刻可搜，图片在后台慢慢识别，
+	     这条状态是独立叠加在结果视图之上的，不是替换（症状 4 的验收场景：
+	     建索引期间反复搜索必须可用）。 -->
+	{#if indexingPhase === 'ocr'}
+		<IndexingStrip processed={indexingOcrProcessed} total={indexingOcrTotal} />
+	{/if}
 
 	<ShortcutBar hasSelection={selectedHit !== null} />
 

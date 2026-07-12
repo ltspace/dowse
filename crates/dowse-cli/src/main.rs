@@ -171,7 +171,10 @@ fn watch(dir: Option<PathBuf>) -> Result<()> {
 
     // OCR 是独立的后台低优先级管线，跟文本监听并行跑，互不阻塞；没有可用语言包
     // 时 start() 返回 None，打印一行提示，watch 主流程照常继续（不因此报错退出）。
-    let ocr_pipeline = OcrPipeline::start(updater.clone(), index.clone(), DEFAULT_WORKERS);
+    let ocr_pipeline =
+        OcrPipeline::start(updater.clone(), index.clone(), DEFAULT_WORKERS, |pending| {
+            println!("OCR 队列剩余 {pending} 张待识别");
+        });
 
     watch_roots_auto(&index, &roots, updater, stop, |progress| match progress {
         WatchProgress::Received(ev) => println!("  事件  {ev:?}"),
