@@ -85,3 +85,11 @@ export function setPinned(pinned: boolean): Promise<void> {
 export function showResultContextMenu(path: string): Promise<void> {
 	return invoke('show_result_context_menu', { path });
 }
+
+/// Esc 收起浮窗。不用 `@tauri-apps/api/window` 的 `getCurrentWindow().hide()`——
+/// 那走的是 Tauri core 插件的 `window|hide` 权限点，默认 capability 没放开，
+/// 真机上会被 ACL 拒绝。这里走自定义命令，复用全局呼出快捷键同一条隐藏路径，
+/// 自定义命令不受 ACL 权限点约束。
+export function hideWindow(): Promise<void> {
+	return invoke('hide_window');
+}
