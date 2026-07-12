@@ -90,20 +90,10 @@ pub struct IndexStatusOutput {
     pub last_updated_unix_ms: Option<i64>,
 }
 
-/// 把命中区间标成 «...»。区间契约（有序、不重叠、落在 UTF-8 边界上）
-/// 由 dowse-core::searcher::normalize_ranges 保证，这里游标只前进不回退。
+/// 把命中区间标成 «...»，供 agent 直接阅读。区间切片逻辑跟终端染色共用
+/// `crate::wrap_highlight_ranges`，只是包裹标记不同。
 fn mark_highlights(fragment: &str, ranges: &[Range<usize>]) -> String {
-    let mut out = String::with_capacity(fragment.len() + ranges.len() * 6);
-    let mut cursor = 0;
-    for r in ranges {
-        out.push_str(&fragment[cursor..r.start]);
-        out.push_str(HL_OPEN);
-        out.push_str(&fragment[r.start..r.end]);
-        out.push_str(HL_CLOSE);
-        cursor = r.end;
-    }
-    out.push_str(&fragment[cursor..]);
-    out
+    crate::wrap_highlight_ranges(fragment, ranges, HL_OPEN, HL_CLOSE)
 }
 
 fn to_search_hit_out(hit: SearchHit) -> SearchHitOut {
