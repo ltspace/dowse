@@ -22,9 +22,7 @@ English | [简体中文](README.zh-CN.md)
 
 The name comes from a dowsing rod.
 
-<!-- Screenshot slot: hero.png — main window mid-search, a query typed in the bar with
-     several ranked results visible below (highlighted match terms in the snippets),
-     light or dark theme, no PII in the visible file paths. Save to docs/screenshots/hero.png. -->
+![dowse overlay mid-search, query "sql" with ranked file results and a live preview pane](docs/screenshots/hero.png)
 
 ## Motivation
 
@@ -117,9 +115,7 @@ cargo tauri build      # produces the installer under target/release/bundle
 
 Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two ghost-style dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay near-invisible until a non-default value is picked. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart).
 
-<!-- Screenshot slot: ocr-preview.png — the preview pane showing an image result, the
-     original image rendered inline, with the OCR-extracted text and its matched/highlighted
-     segment visible alongside it. Save to docs/screenshots/ocr-preview.png. -->
+![Preview pane for an image result: the source image rendered inline next to its OCR-extracted text with the matched terms highlighted](docs/screenshots/ocr-preview.png)
 
 ## MCP server
 
@@ -131,9 +127,7 @@ claude mcp add dowse -- dowse mcp
 
 Three tools: `search` (query, limit, optional `ext` filter), `preview` (full snippet + metadata for one hit), `index_status` (document count, index health). The server never touches the index writer — it only reloads the reader before each call, so it can run alongside the overlay app or a live `dowse watch` session without write contention.
 
-<!-- Screenshot slot: actions.png — either the sort/filter dropdowns open (Ctrl+S / Ctrl+P)
-     or the right-click context menu on a result row, showing the available actions.
-     Save to docs/screenshots/actions.png. -->
+![Idle overlay while a background OCR pass indexes screenshots, with a progress bar at the bottom](docs/screenshots/actions.png)
 
 ## Architecture
 
