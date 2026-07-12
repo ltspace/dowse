@@ -46,6 +46,10 @@ dowse mcp
 - NTFS/USN 快速索引与图片 OCR（Windows）
 - 作为 MCP 服务对接 AI 客户端
 
+## MCP Registry
+
+Listed on the official MCP Registry as `mcp-name: io.github.ltspace/dowse`.
+
 ## License
 
 MIT OR Apache-2.0
