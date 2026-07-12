@@ -53,6 +53,17 @@ fn wait_until_searchable(index_dir: &Path, query: &str, predicate: impl Fn(usize
 // 不是管线的 bug，只是不适合拿来做精确匹配断言，换一个交界处没有歧义字符的词。
 const SENTINEL: &str = "dowsemagictoken7391";
 
+// 断点续传测试（下面 ocr_queue_survives_restart_and_resumes_pending_work）需要
+// 两个互不相同的哨兵词，分别标记两张图片各自的识别结果有没有落到对应文档。
+// 早期实现是给同一个哨兵词加数字后缀区分（"...x0" / "...x1"），CI 上的 Windows
+// OCR 会把结尾的 "0" 认成字母 "O"，识别结果变成 "...xO"，跟查询字面量 "...x0"
+// 永远对不上——识别出来的字节数（21 字节）跟预期完全一样，从字节数上完全看不
+// 出问题，只有比对识别原文才能看出差一个字符。这是本机 23 连跑用的 OCR 版本
+// 和 CI 镜像 OCR 版本对 0/O 的识别差异，不是索引或并发问题。换成两个纯字母、
+// 不含数字、也避开 0/O、1/l/I 这类易混字形的词，从根上避开这一类识别误差。
+const SENTINEL_SHOT0: &str = "dowsemagictokenquokka";
+const SENTINEL_SHOT1: &str = "dowsemagictokenwombat";
+
 fn generate_test_image(path: &Path, sentinel: &str) -> Result<()> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -169,9 +180,10 @@ fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
         .prefix("dowse-ocr-restart-")
         .tempdir()?;
 
-    for i in 0..2 {
+    let shot_sentinels = [SENTINEL_SHOT0, SENTINEL_SHOT1];
+    for (i, sentinel) in shot_sentinels.iter().enumerate() {
         let path = target_dir.path().join(format!("shot{i}.png"));
-        generate_test_image(&path, &format!("{SENTINEL}x{i}"))?;
+        generate_test_image(&path, sentinel)?;
     }
 
     // rebuild_index 只负责入队，不处理——模拟"程序在队列还没消化完就退出"。
@@ -188,11 +200,11 @@ fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
     {
         let diag_searcher = dowse_core::Searcher::open(index_dir.path())?;
         let hits0 = diag_searcher
-            .search(&format!("{SENTINEL}x0"), 10)
+            .search(SENTINEL_SHOT0, 10)
             .map(|h| h.len())
             .unwrap_or(usize::MAX);
         let hits1 = diag_searcher
-            .search(&format!("{SENTINEL}x1"), 10)
+            .search(SENTINEL_SHOT1, 10)
             .map(|h| h.len())
             .unwrap_or(usize::MAX);
         eprintln!(
@@ -203,10 +215,9 @@ fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
         );
     }
 
-    for i in 0..2 {
-        let query = format!("{SENTINEL}x{i}");
+    for (i, sentinel) in shot_sentinels.iter().enumerate() {
         assert!(
-            wait_until_searchable(index_dir.path(), &query, |n| n > 0),
+            wait_until_searchable(index_dir.path(), sentinel, |n| n > 0),
             "第 {i} 张图片的哨兵词应该能搜到"
         );
     }

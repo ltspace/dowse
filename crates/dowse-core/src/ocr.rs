@@ -132,7 +132,7 @@ mod engine_impl {
             .map_err(|e| anyhow::anyhow!("OCR 识别失败 {}: {e}", path.display()))?;
         let text = result.Text()?.to_string();
         eprintln!(
-            "[诊断][recognize] 文件={:?} 文本字节数={} 行数={} 线程={:?}",
+            "[诊断][recognize] 文件={:?} 文本字节数={} 行数={} 线程={:?} 原文={text:?}",
             path.file_name().unwrap_or_default(),
             text.len(),
             text.lines().count(),
