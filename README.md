@@ -10,7 +10,7 @@ Native full-text search for Windows. Indexes file names, document contents, and 
 
 The name comes from a dowsing rod.
 
-<!-- [Image slot 1: overlay in action GIF — summon, type, results appear, jump to folder] -->
+<!-- [Image slot 1: overlay in action GIF: summon, type, results appear, jump to folder] -->
 
 ## Motivation
 
@@ -20,7 +20,7 @@ No Windows tool satisfies all three of the following at once:
 - Recognize and index text inside images (macOS Spotlight has this; there is no equivalent on Windows)
 - One hotkey to summon, full keyboard operation, no perceptible latency
 
-The closest open-source implementation is sist2, but it targets Linux — on Windows it only runs via Docker — treats Chinese text as trigrams, and the project is no longer maintained. dowse is a Windows-native implementation built around these three points.
+The closest open-source implementation is sist2, but it targets Linux (on Windows it only runs via Docker), treats Chinese text as trigrams, and the project is no longer maintained. dowse is a Windows-native implementation built around these three points.
 
 ## Chinese text handling
 
