@@ -97,6 +97,8 @@ write conflict encountered was caught and auto-retried, with zero unrecovered fa
 
 **Download** — grab the installer from the [latest release](https://github.com/ltspace/dowse/releases/latest) (`dowse-app_*_x64-setup.exe`), run it, then `Alt+\`` to summon.
 
+The installer is unsigned, so Windows SmartScreen will flag it on first run. To proceed, click **More info** and then **Run anyway**. A code-signing certificate is a recurring cost that is hard to justify for an independent project; it may be reconsidered for a future release.
+
 **Build from source:**
 
 ```powershell
@@ -175,7 +177,7 @@ Rust · [tantivy](https://github.com/quickwit-oss/tantivy) · jieba · Tauri 2 �
 
 ## Privacy
 
-The index is stored locally (`%LOCALAPPDATA%\dowse`). No network access, no telemetry.
+The index is stored locally (`%LOCALAPPDATA%\dowse`). No network access, no telemetry. You can verify this yourself: watch the process in Resource Monitor or a firewall tool and confirm it opens no outbound connections. Releases will also ship a SHA-256 checksum for the installer so you can verify the download.
 
 ## License
 

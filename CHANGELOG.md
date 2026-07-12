@@ -1,104 +1,209 @@
 # Changelog
 
-本文件记录 dowse 的版本变更，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
+All notable changes to dowse are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres
+to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [未发布]
+## [Unreleased]
 
-### 新增
+## [0.6.1] - 2026-07-10
 
-- v0.5.0：浮窗新增类型筛选（全部/文档/代码/图片）与排序器（相关性/最新优先/最旧优先/
-  最大优先）两个幽灵态下拉，`Ctrl+P`/`Ctrl+S` 开关，选中即重搜
-- v0.5.0：结果行右键弹出 Windows 原生上下文菜单，含打开/打开所在文件夹/复制完整路径/
-  复制文件名；菜单弹出期间自动隐藏被临时抑制，不会出现"刚右键窗口自己先收起"
-- v0.5.0：输入条新增图钉固定按钮，固定后失焦不再自动隐藏浮窗（会话级，不落盘，
-  Esc/全局快捷键的主动收起不受影响）
-- M4：OCR 管线，截图/图片里的文字进索引可搜索。Windows 自带 OCR 引擎
-  （Windows.Media.Ocr），独立于文本管线的低优先级队列 + 2~4 线程 worker 池
-  （各自持有独立 OcrEngine，不跨线程共享）；队列持久化在
-  `<index_dir>-ocr-queue.json`，程序中途退出重启不重复识别；双形态入索引
-  （OCR 原始输出 + 去 CJK 间空格拼接），对冲拆字误差与分词间隙；范围
-  png/jpg/jpeg/webp/bmp，20MB 上限；无 OCR 语言包时管线整体停用、打一行日志，
-  不崩溃。浮窗预览区新增图片原图展示（Tauri asset 协议）+ 命中的 OCR 文本段
-- M5：MCP server，`dowse mcp` 子命令，stdio 传输，只读暴露 search/preview/index_status 三个工具给 AI agent
-- M6：NTFS 快速层，按卷判定（NTFS + 管理员权限）自动启用 MFT 快速枚举
-  （FSCTL_ENUM_USN_DATA，不走目录树）建初始索引、USN Journal 事件源替代
-  notify 做实时监听、USN 游标补账替代 mtime 全扫做启动对账；拿不到卷句柄
-  （非管理员/非 NTFS）静默退回现状的 walkdir + notify 路径，两条路径产出
-  完全一致，上层无感知；一台机器可以一块盘走快车道、另一块盘走慢车道；
-  重命名事件的配对状态机专门处理"改名后紧跟删除同一文件"的乱序场景，
-  不吞事件、不留孤儿文档；游标持久化保证"先提交索引、后写游标"的原子性，
-  崩溃后宁可重放（幂等）不可漏账。CLI 的 `dowse watch` 和托盘常驻程序共用
-  新入口 `watch_roots_auto`
-- v0.6.1：建索引进度全程可见，文本阶段大号滚动计数 + 当前文件（中段省略长路径，
-  ~90ms 交叉淡入，无进度条/百分比/spinner）；OCR 回填阶段常驻一条"图片识别 N / M"
-  进度条（唯一一处进度条，因为这里总量真实已知），不遮挡搜索结果；窗口隐藏后重新
-  呼出会拉一次当前进度快照续播，不会看到空白或过期状态；托盘图标 tooltip 同步显示
-  "索引中 N 篇"/"图片识别 N / M"，窗口不开也能瞟一眼
-- v0.6.1：托盘新增"索引：\<目录\> · N 篇"只读信息项和"更改索引文件夹…"菜单项（选完
-  新目录即整次重建，重建期间两个动作项置灰防重入）；浮窗空态补一行当前索引根路径，
-  已有索引时额外提供"更改文件夹"链接级入口
-- v0.6.1：崩溃取证，进程 stdout/stderr 重定向到
-  `%LOCALAPPDATA%\dowse\logs\dowse.log`（按体积轮转，2 个文件封顶），叠加 panic
-  hook 记录崩溃线程/位置/信息，release 版 GUI 子系统原本没有控制台、诊断信息全部
-  无声丢失的问题一并解决
+### Added
 
-### 变更
+- Indexing progress is now shown live. During the text phase a running counter
+  and the current file name are displayed (long paths elided in the middle, no
+  progress bar or percentage). During the OCR backfill pass a single progress bar
+  reports images recognized out of the known total, without covering search
+  results. Hiding and re-summoning the window resumes from a fresh snapshot
+  rather than a blank or stale state, and the tray tooltip mirrors the same
+  status.
+- The tray menu shows the active index folder and its document count, plus a
+  "Change index folder…" action that triggers a full rebuild; the overlay empty
+  state shows the current index root and offers a change-folder entry.
+- Process stdout and stderr are redirected to a size-rotating log file under
+  `%LOCALAPPDATA%\dowse\logs`, backed by a panic hook that records the crashing
+  thread, location, and message. Release GUI builds previously had no console and
+  lost all diagnostics silently.
 
-- **schema 升级到 v3**：mtime/size 补上 FAST 属性（排序器的前提），新增 kind 字段
-  （文本文档写 "text"，OCR 图片文档写 "image"）。**升级后需要重建索引**，旧索引会
-  按既有机制报错并引导重建，不做静默兼容
-- v0.6.1：OCR 结果写回索引改为批量提交（32 张或 5 秒窗口，先到者触发），不再每识别
-  一张图片单独 commit 一次；原本只保护全量重建的"杀软扫描瞬时冲突→重试+退避"机制
-  扩展到增量更新和 OCR 写回两条写入端路径，统一共享同一套探测逻辑
-- v0.6.1：远程会话（RDP）不再无条件强制降级为纯色材质。新版 Windows 的 RDP
-  图形管线通常能正常渲染 Acrylic/Mica，一刀切预判反而会误伤真实能渲染出来的场景；
-  渲染不出来时用户仍可用托盘的透明度开关自救
+### Changed
 
-### 审查修复
+- OCR results are written back to the index in batches (32 images or a 5-second
+  window, whichever comes first) instead of one commit per image. The
+  anti-virus-contention retry-and-backoff that previously guarded only full
+  rebuilds now also covers incremental updates and OCR write-back.
+- Remote Desktop sessions are no longer unconditionally downgraded to a
+  solid-color material. Recent Windows RDP pipelines usually render Acrylic and
+  Mica correctly; when they do not, the tray transparency toggle remains
+  available as a fallback.
 
-- 修复 OCR 队列持久化顺序反了会永久丢图片文字的耐久性 bug，并给 Windows 下删索引
-  目录加了句柄未释放时的重试退避（这也是几个集成测试间歇失败的根因）；顺手压实了
-  OCR 队列的历史堆积、去重了路径前缀处理逻辑、把大目录 walk 挪出了 notify 回调线程、
-  修了快车道启动失败后的静默扣住问题，并加固了资源管理器定位命令与 OCR 队列单例键。
-- v0.6.1：修复真机现场故障，15k 图片语料建索引期间"每识别一张图就单独 commit 一次"
-  的 IO 风暴是根因，同时解释了四个连带症状：进程偶发崩溃（高频建删文件撞上杀软实时
-  扫描，写入端撞死后旧代码仍会静默把失败的图片标记"已处理"，永久丢识别结果且没有
-  报错信号）、窗口唤起卡顿数秒（系统级 IO 争用拖慢整机调度，呼出路径本身审计确认
-  不含任何锁等待）、完成报告"另有 N 张图片在后台识别"的计数永远不动（原来是重建
-  完成那一刻的静态快照，从未订阅任何进度事件）、索引期间搜索不出结果（前端在文本
-  阶段的引导层判定与建索引状态耦合过紧）。改批量提交 + 统一写入端重试保护 + 事件驱动
-  的实时进度后，本机 5,100 张图片 + 逾万篇文本的压力复测零崩溃、全量识别完成、
-  搜索全程可用。
+### Fixed
 
-## [0.4.0]
+- Fixed an I/O storm during large image-corpus indexing, where committing after
+  every recognized image was the root cause of intermittent crashes,
+  multi-second window-summon lag, a frozen background-OCR counter, and searches
+  returning nothing while indexing was in progress. Under a stress retest of
+  roughly 5,100 images plus over ten thousand text documents, indexing completed
+  with zero crashes, every image recognized, and search available throughout.
 
-### 新增
+## [0.6.0] - 2026-07-09
 
-- M3：增量索引，文件系统事件驱动的增量更新、启动时 mtime/size 对账
-- v0.3.0 品味包：等宽字体、水蓝高亮、悬浮滚动条、呼出光标动画
-- 文本抽取覆盖 Office 文档：docx/xlsx/pptx 内容入索引、可搜索
+### Added
 
-### 变更
+- NTFS fast path. On NTFS volumes with administrator rights, the initial index is
+  built by enumerating the Master File Table, real-time monitoring is driven by
+  the USN Journal instead of file-system-event watching, and startup
+  reconciliation replays from a persisted journal cursor. Without a volume handle
+  (non-administrator or non-NTFS) the tool falls back silently to the directory
+  walk plus file-watch path; both paths produce identical results, and one
+  machine can serve one drive over the fast path and another over the slow path.
+- A `Ctrl+/` overlay lists the keyboard shortcuts.
+- The footer reports the elapsed time of the current search, and the result count
+  animates when it changes.
 
-- 界面按 Raycast 设计语言重构：输入框 + 结果列表 + 预览区 + 底部操作条的骨架
-  照 Raycast 的间距节奏、圆角刻度、字号字重体系重排；结果行新增右侧类型提示，
-  选中态改为纯色块（去掉描边）；底部操作条补上 dowse 品牌区，高度 32px→40px
-- Raycast 的 logo、图标、品牌色一概不用；dowse 自己的错位圆图标、淡水蓝
-  `#7FCBE8` accent、Inter + MiSans 字体栈保留，见 docs/DESIGN-UI-TOKENS.md
-- 三项实测反馈修正：窗口尺寸 720×480→750×500；暗色玻璃透明度从
-  `rgba(20,20,24,0.55)` 降到 `rgba(18,18,22,0.32)`（真透明，不再糊成死灰）；
-  行标题字重从 600 降到 500、占位符改为前景色 45% 不透明度，消除"黑黑的"观感
+### Changed
 
-## [0.2.1]
+- Indexing streams its progress instead of blocking with no feedback until it
+  finishes.
 
-### 变更
+### Fixed
 
-- 浮窗窗口透明度、圆角调整，视觉观感更接近系统原生 Acrylic 材质
-- 结果列表与预览区字体调整，中英混排下的行高与字号对齐系统习惯
+- Fixed a durability bug where a reversed OCR-queue persistence order could
+  permanently lose recognized image text.
+- Hardened index-directory deletion on Windows with a handle-release
+  retry-and-backoff; the missing backoff was also the root cause of several
+  intermittent integration-test failures.
+- Fixed a crash when a full rebuild collided with real-time anti-virus scanning,
+  using whole-run retry plus dynamic concurrency reduction.
+- Several robustness fixes: the OCR queue no longer accumulates stale historical
+  entries or builds duplicate queues for the same directory; a failed fast-path
+  startup now rejoins the slow path for the current run instead of silently
+  stalling; and large-directory walks were moved off the file-watch callback
+  thread.
 
-## [0.2.0]
+## [0.5.0] - 2026-07-04
 
-### 新增
+### Added
 
-- M1：CLI 索引与搜索：中文分词（jieba）、GBK 编码自动探测、搜索结果高亮
-- M2：浮窗雏形：全局快捷键呼出（Alt+`）、Acrylic 材质窗口、键盘导航（↑↓ / Enter / Ctrl+Enter / Ctrl+C / Esc）
+- OCR pipeline. Text inside screenshots and images is recognized and indexed,
+  using the Windows-native OCR engine (Windows.Media.Ocr), fully offline, on a
+  low-priority queue served by a worker pool. Scope is PNG/JPG/JPEG/WebP/BMP up
+  to 20MB. The queue is persisted, so restarting mid-pass does not re-recognize
+  already-processed images. Each image is indexed in two forms — the raw OCR
+  output and a CJK-space-collapsed variant — to hedge against segmentation gaps.
+  Without an OCR language pack installed, the pipeline disables itself and logs a
+  single line instead of crashing. The preview pane now renders the source image
+  alongside the matched OCR text.
+- Type and sort controls in the overlay: a type filter (All / Documents / Code /
+  Images, `Ctrl+P`) and a sort order (relevance / newest / oldest / largest,
+  `Ctrl+S`), presented as two ghost-style dropdowns that stay near-invisible
+  until a non-default value is chosen; changing either re-runs the search.
+- A native Windows context menu on result rows: open, open containing folder,
+  copy full path, and copy file name.
+- A pin toggle on the input bar that keeps the overlay open when it loses focus.
+  The state is session-only and not persisted; Esc and the global hotkey still
+  hide the window.
+
+### Changed
+
+- The index schema was upgraded to v3: mtime and size gained FAST attributes
+  (a prerequisite for sorting), and a new `kind` field distinguishes text
+  documents from OCR'd images. **The index must be rebuilt after upgrading.** An
+  old index is detected and you are guided to rebuild it rather than kept
+  silently compatible.
+
+## [0.4.2] - 2026-07-01
+
+### Added
+
+- MCP server. `dowse mcp` starts a read-only server over stdio that exposes three
+  tools — search, preview, and index_status — to AI agents.
+
+### Fixed
+
+- Fixed a duplicate window frame, a non-responsive transparency knob, and a
+  path-prefix leak in result paths.
+
+## [0.4.1] - 2026-06-29
+
+### Added
+
+- Office document extraction: DOCX, XLSX, and PPTX contents are indexed and
+  searchable.
+
+### Changed
+
+- The transparency control was consolidated into a single entry point with a
+  three-step knob.
+
+### Performance
+
+- Phrase-query latency dropped by an order of magnitude by bounding the
+  snippet-generation scan window.
+
+## [0.4.0] - 2026-06-28
+
+### Changed
+
+- The interface was rebuilt around the Raycast layout language — an input bar,
+  result list, preview pane, and bottom action bar — with reworked spacing,
+  corner radii, and type scale. Result rows gained a right-aligned type hint and
+  a solid-block selection state. Three fixes came from real-use feedback: the
+  window grew from 720×480 to 750×500; the dark-glass material was made genuinely
+  translucent instead of a muddy gray; and the row-title weight and placeholder
+  opacity were reduced. dowse keeps its own icon, aqua accent, and Inter + MiSans
+  font stack; none of Raycast's logo, icons, or brand color are used.
+
+## [0.3.0] - 2026-06-27
+
+### Added
+
+- Incremental indexing. File-system events drive incremental updates while the
+  app is running, and an mtime/size comparison reconciles changes made while it
+  was not. The same mechanism backs both the resident app and a `dowse watch`
+  command.
+- Visual polish: a monospace font, aqua highlighting, a floating scrollbar, a
+  summon cursor animation, and system-associated file-type icons in result rows
+  and the preview pane.
+- A finalized application icon and a tray silhouette that switches between light
+  and dark with the taskbar theme.
+- Public-release scaffolding: a bilingual README, dual MIT / Apache-2.0
+  licensing, contribution and security guides, and continuous integration.
+
+### Changed
+
+- Empty-state copy was rewritten as terse declarative text.
+
+## [0.2.1] - 2026-06-20
+
+### Changed
+
+- Overlay transparency and corner radius were tuned toward the system-native
+  Acrylic material, and the Inter + MiSans font stack was adopted.
+- Result-list and preview fonts were adjusted so line height and size align with
+  system conventions in mixed Chinese and English text.
+
+## [0.2.0] - 2026-06-19
+
+### Added
+
+- CLI indexing and search: Chinese word segmentation (jieba), automatic GBK
+  encoding detection, BM25 ranking, and search-result highlighting. Multi-term
+  queries default to AND semantics.
+- Overlay prototype: a global hotkey (Alt+`), an Acrylic-material window, and
+  full keyboard navigation (↑↓ / Enter / Ctrl+Enter / Ctrl+C / Esc).
+
+### Fixed
+
+- Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
+- The index root directory is no longer skipped by exclusion rules.
+
+[Unreleased]: https://github.com/ltspace/dowse/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/ltspace/dowse/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/ltspace/dowse/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/ltspace/dowse/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/ltspace/dowse/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/ltspace/dowse/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/ltspace/dowse/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/ltspace/dowse/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/ltspace/dowse/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/ltspace/dowse/releases/tag/v0.2.0
