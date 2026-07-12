@@ -186,7 +186,9 @@ pub enum WatchProgress {
     Received(WatchEvent),
     /// 一批防抖后的变更已提交入索引。
     Committed {
+        /// 这一批提交里防抖合并后的变更条数。
         batch_size: usize,
+        /// 这一批落进索引后的收录/删除/跳过明细。
         outcome: BatchOutcome,
     },
     /// 提交失败，这批已退回队列、下个窗口重试。

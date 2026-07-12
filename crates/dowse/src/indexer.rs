@@ -22,8 +22,11 @@ use crate::{Fields, build_schema, register_tokenizers};
 
 /// 一次重建索引的统计结果，CLI 拿去打报告。
 pub struct IndexStats {
+    /// 成功抽取内容并写入索引的文件数。
     pub indexed: usize,
+    /// 被跳过的文件数（无法抽取、读取失败、或不在收录范围内）。
     pub skipped: usize,
+    /// 本次重建的总耗时（秒）。
     pub seconds: f64,
 }
 
@@ -37,7 +40,9 @@ pub(crate) const PROGRESS_INTERVAL: usize = 50;
 /// 单次进度汇报：累计处理数（收录 + 跳过），和刚处理完的那个文件路径。
 #[derive(Debug, Clone)]
 pub struct IndexProgress {
+    /// 到目前为止累计处理的文件数（收录 + 跳过一起算）。
     pub processed: usize,
+    /// 刚处理完的那个文件路径。
     pub path: PathBuf,
 }
 

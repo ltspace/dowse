@@ -20,13 +20,16 @@ use crate::updater::IndexUpdater;
 /// 添加根的统计结果，跟 `IndexStats`（全量重建）同一口径：收录/跳过文件数。
 #[derive(Debug, Clone, Copy)]
 pub struct AddRootStats {
+    /// 这个根名下成功收录进索引的文件数。
     pub indexed: usize,
+    /// 这个根名下被跳过的文件数（无法抽取或不在收录范围内）。
     pub skipped: usize,
 }
 
 /// 移除根的统计结果：从索引里删掉的文档数。
 #[derive(Debug, Clone, Copy)]
 pub struct RemoveRootStats {
+    /// 从索引里删掉的文档数。
     pub removed: usize,
 }
 

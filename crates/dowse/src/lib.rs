@@ -38,6 +38,7 @@
 //!     println!("{}: {}", hit.path, hit.snippet);
 //! }
 //! ```
+#![warn(missing_docs)]
 
 mod cursor;
 mod events;

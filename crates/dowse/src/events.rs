@@ -32,7 +32,12 @@ pub enum WatchEvent {
     RemoveDir(PathBuf),
     /// 重命名，from/to 都由事件源给出。防抖队列按"删旧名 + 加新名"拆开处理；
     /// 只有一边落在监听根内时（移入/移出），就退化成单边的加/删。
-    Rename { from: PathBuf, to: PathBuf },
+    Rename {
+        /// 重命名前的原路径，对应"删旧名"。
+        from: PathBuf,
+        /// 重命名后的新路径，对应"加新名"。
+        to: PathBuf,
+    },
 }
 
 /// 一个 path 在防抖窗口内合并后的最终意图。
@@ -53,7 +58,9 @@ pub enum PendingOp {
 /// 防抖合并后交给更新器的一条变更。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingChange {
+    /// 发生变更的路径。对目录类操作（`UpsertTree`/`RemoveTree`）是子树的根。
     pub path: PathBuf,
+    /// 这个路径合并后的最终意图。
     pub op: PendingOp,
 }
 
@@ -68,6 +75,8 @@ pub struct Debouncer {
 }
 
 impl Debouncer {
+    /// 新建一个防抖队列。`roots` 是监听根列表，用来判定 rename 的某一端是否
+    /// 落在监听范围内；传空列表表示不做范围过滤（视为所有路径都在范围内）。
     pub fn new(roots: Vec<PathBuf>) -> Self {
         Self {
             roots,
@@ -110,10 +119,12 @@ impl Debouncer {
         self.pending.len() >= WATER_LEVEL
     }
 
+    /// 队列里当前是否没有待处理的变更。
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
 
+    /// 队列里当前待处理（合并后）的变更条数。
     pub fn len(&self) -> usize {
         self.pending.len()
     }

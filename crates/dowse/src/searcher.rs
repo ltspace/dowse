@@ -22,10 +22,14 @@ use crate::{Fields, build_schema, register_tokenizers};
 /// v0.5.0 补了 FAST 属性的字段上排（见 lib.rs 的 build_schema）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortMode {
+    /// 按 BM25 相关性分数排序（默认）。
     #[default]
     Relevance,
+    /// 按修改时间降序：最新的排在前面。
     MtimeDesc,
+    /// 按修改时间升序：最旧的排在前面。
     MtimeAsc,
+    /// 按文件体积降序：最大的排在前面。
     SizeDesc,
 }
 
@@ -62,7 +66,14 @@ const SNIPPET_MAX_CHARS: usize = 160;
 /// 把“分词扫描量”和“最终展示长度”解耦，从根上避免整篇重新分词。
 const SNIPPET_SCAN_MAX_BYTES: usize = 128 * 1024;
 
+/// 一条搜索命中。
+///
+/// [`Searcher::search`] 及其变体返回一批 `SearchHit`。`score` 只有在结果按相关性
+/// 排序（[`SortMode::Relevance`]，也是默认排序）时才有意义——按 mtime/size 排序
+/// 时它固定是 0.0，不要拿它做展示或二次排序。
 pub struct SearchHit {
+    /// 命中文件的绝对路径（Windows 上带 `\\?\` 扩展长度前缀，展示前用
+    /// [`crate::display_path`] 剥掉）。
     pub path: String,
     /// BM25 相关性分数。只在 `SortMode::Relevance`（默认排序）下有意义；
     /// 按 mtime/size 排序时这里固定是 0.0，不要拿它做展示或二次排序。
@@ -78,7 +89,9 @@ pub struct SearchHit {
 /// 按路径取的预览内容，字段契约和 SearchHit 的 snippet/highlighted 一致，
 /// 只是窗口更大（约 1500 字而不是摘要用的 160 字）。
 pub struct PreviewHit {
+    /// 命中词周围的预览文本（约 1500 字），命中词区间见 `highlighted`。
     pub snippet: String,
+    /// 命中词在 `snippet` 里的字节区间：已按起点排序且互不重叠，可直接顺序渲染。
     pub highlighted: Vec<Range<usize>>,
     /// 原文件体积（字节），来自建索引时存的 size 字段。
     pub size: u64,
@@ -88,6 +101,13 @@ pub struct PreviewHit {
     pub ext: String,
 }
 
+/// 一个索引的只读搜索句柄。
+///
+/// `Searcher` 只读打开索引，可以和一个并发的写入端（[`crate::IndexUpdater`]、
+/// 实时监听、全量重建）共存于同一份索引之上——tantivy 的段文件不可变，读写能
+/// 跨线程甚至跨进程并行。代价是 reader 持有的是打开那一刻的段快照，不会自动感知
+/// 之后别处提交的新写入；要读到最新一次 commit 的结果，调用方必须显式调用
+/// [`Searcher::reload`]。
 pub struct Searcher {
     reader: IndexReader,
     parser: QueryParser,
@@ -95,6 +115,25 @@ pub struct Searcher {
 }
 
 impl Searcher {
+    /// 打开一个已建好的索引的只读句柄。
+    ///
+    /// 索引目录不存在、或 schema 版本和当前库对不上（旧索引缺 mtime/size 字段）
+    /// 时返回 `Err`，错误信息会提示先重建索引。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> anyhow::Result<()> {
+    /// use std::path::Path;
+    /// use dowse::Searcher;
+    ///
+    /// let searcher = Searcher::open(Path::new("./my-index"))?;
+    /// for hit in searcher.search("关键词", 20)? {
+    ///     println!("{}\t{}", hit.path, hit.snippet);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn open(index_dir: &Path) -> Result<Self> {
         let index = Index::open_in_dir(index_dir)
             .context("打不开索引目录，先跑 `dowse index <目录>` 建一次索引")?;
@@ -119,6 +158,29 @@ impl Searcher {
         })
     }
 
+    /// 执行一次全文搜索，返回至多 `limit` 条命中。
+    ///
+    /// 默认同时查 `name`（文件名）和 `content`（正文）两个字段。查询串里的多个词
+    /// **默认按 AND 合取**：`"限流 中间件"` 只命中同时含这两个词的文档，不是含任
+    /// 意一个即可（带引号的短语查询照常按相邻位置匹配）。结果按 BM25 相关性分数
+    /// 排序。需要扩展名过滤或按 mtime/size 排序，改用
+    /// [`search_filtered`](Self::search_filtered) / [`search_advanced`](Self::search_advanced)。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> anyhow::Result<()> {
+    /// use std::path::Path;
+    /// use dowse::Searcher;
+    ///
+    /// let searcher = Searcher::open(Path::new("./my-index"))?;
+    /// let hits = searcher.search("分布式 限流", 10)?;
+    /// for hit in &hits {
+    ///     println!("{} ({:.3})", hit.path, hit.score);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchHit>> {
         self.search_advanced(query_str, limit, None, SortMode::Relevance)
     }
@@ -240,7 +302,11 @@ impl Searcher {
         Ok(hits)
     }
 
-    /// 索引里的文档总数，给 CLI 的状态输出用
+    /// 索引里的文档总数，给 CLI 的状态输出用。
+    ///
+    /// 读的是这个 searcher 当前 reader 快照里的数字——是打开（或上一次
+    /// [`reload`](Self::reload)）那一刻的定格计数，不是实时值。并发写入端提交的
+    /// 新文档要等下一次 `reload` 才会反映进来。
     pub fn num_docs(&self) -> u64 {
         self.reader.searcher().num_docs()
     }
