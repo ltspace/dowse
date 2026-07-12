@@ -241,6 +241,23 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 /// 紧接着启动 worker 池处理图片，直到队列见底再返回，让命令结束时索引就是完整
 /// 可搜的状态，而不是留一堆图片在后台"回头再说"——常驻的托盘程序不需要这个，
 /// 那边图片交给后台 worker 池慢慢消化就行（见设计文档"独立于文本管线"一节）。
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use std::path::Path;
+/// use dowse::{DEFAULT_WORKERS, drain_ocr_queue};
+///
+/// let stats = drain_ocr_queue(Path::new("./my-index"), DEFAULT_WORKERS)?;
+/// if stats.available {
+///     println!("处理了 {} 张图片", stats.processed);
+/// } else {
+///     println!("系统没有可用的 OCR 语言包，跳过");
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub fn drain_ocr_queue(index_dir: &std::path::Path, worker_count: usize) -> Result<OcrDrainStats> {
     if !ocr::is_available() {
         return Ok(OcrDrainStats {

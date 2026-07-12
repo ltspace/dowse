@@ -286,6 +286,31 @@ fn flush_batch(
 ///
 /// `on_progress` 要求 `Fn`（不是 `FnMut`）+ `Send + Sync`：混合车道场景下
 /// 快慢两条车道各自在自己的线程里调用它，需要能从多个线程并发调用。
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use std::path::{Path, PathBuf};
+/// use std::sync::atomic::AtomicBool;
+/// use std::sync::{Arc, Mutex};
+/// use dowse::{IndexUpdater, WatchProgress, watch_roots_auto};
+///
+/// let index_dir = Path::new("./my-index");
+/// let roots = vec![PathBuf::from("./my-documents")];
+///
+/// // 监听循环和启动对账共用同一个写入端。
+/// let updater = Arc::new(Mutex::new(IndexUpdater::open(index_dir)?));
+/// // 从别的线程（比如 Ctrl+C 处理）把它置成 true，就让监听收尾退出。
+/// let stop = Arc::new(AtomicBool::new(false));
+///
+/// // 阻塞运行直到 stop 置位；每收到事件 / 每提交一批都会回调一次。
+/// watch_roots_auto(index_dir, &roots, updater, stop, |progress: WatchProgress| {
+///     println!("{progress:?}");
+/// })?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn watch_roots_auto(
     index_dir: &Path,
     roots: &[PathBuf],

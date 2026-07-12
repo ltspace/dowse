@@ -37,6 +37,18 @@ impl SortMode {
     /// 从字符串解析——浮窗前端和未来的 CLI 参数都用这个入口。未知值/None
     /// 一律落回相关性排序，不报错：排序档位是体验层面的偏好，不值得因为
     /// 一个拼错的字符串让整次搜索失败。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dowse::SortMode;
+    ///
+    /// assert_eq!(SortMode::parse(Some("mtime_desc")), SortMode::MtimeDesc);
+    /// assert_eq!(SortMode::parse(Some("size_desc")), SortMode::SizeDesc);
+    /// // 未知字符串和 None 都落回默认的相关性排序。
+    /// assert_eq!(SortMode::parse(Some("bogus")), SortMode::Relevance);
+    /// assert_eq!(SortMode::parse(None), SortMode::Relevance);
+    /// ```
     pub fn parse(name: Option<&str>) -> Self {
         match name {
             Some("mtime_desc") => Self::MtimeDesc,
@@ -201,6 +213,26 @@ impl Searcher {
     /// 查询层合取（分组内部是 Should 并集，跟 query 之间是 Must），排序按
     /// `sort` 选相关性打分或者 mtime/size 的 fast field 排序——都在查询层
     /// 完成，不是先拿结果再筛/再排，否则筛剩/排后的数量会少于调用方要求的 limit。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> anyhow::Result<()> {
+    /// use std::path::Path;
+    /// use dowse::{Searcher, SortMode, ext_group_by_name};
+    ///
+    /// let searcher = Searcher::open(Path::new("./my-index"))?;
+    /// // 只在文档类扩展名里搜，按修改时间从新到旧排。
+    /// let hits = searcher.search_advanced(
+    ///     "季度 报告",
+    ///     20,
+    ///     ext_group_by_name(Some("doc")),
+    ///     SortMode::MtimeDesc,
+    /// )?;
+    /// println!("命中 {} 条", hits.len());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn search_advanced(
         &self,
         query_str: &str,
@@ -354,6 +386,26 @@ impl Searcher {
     /// 换一份比列表摘要（160 字）长得多的窗口。
     ///
     /// path 找不到、或者该文档已不在索引里（比如原文件被删除后索引还没重建），返回 None。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> anyhow::Result<()> {
+    /// use std::path::Path;
+    /// use dowse::Searcher;
+    ///
+    /// let searcher = Searcher::open(Path::new("./my-index"))?;
+    /// let hits = searcher.search("限流器", 10)?;
+    /// if let Some(hit) = hits.first() {
+    ///     // 路径存在则拿到更长的预览窗口；文档已不在索引里则是 None。
+    ///     match searcher.preview(&hit.path, "限流器")? {
+    ///         Some(preview) => println!("{}", preview.snippet),
+    ///         None => println!("该文档已不在索引里"),
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn preview(&self, path: &str, query_str: &str) -> Result<Option<PreviewHit>> {
         let searcher = self.reader.searcher();
         let path_term = Term::from_field_text(self.fields.path, path);

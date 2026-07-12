@@ -303,6 +303,22 @@ pub(crate) fn commit_index_tail(
 ///
 /// 不需要进度直播的调用方（测试、内部各处对账/重建路径）走这个薄封装，
 /// 回调是空操作——真正的实现和进度上报都在 `rebuild_index_with_progress`。
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use std::path::Path;
+/// use dowse::rebuild_index;
+///
+/// let stats = rebuild_index(Path::new("./my-index"), Path::new("./my-documents"))?;
+/// println!(
+///     "收录 {} 个文件，跳过 {}，耗时 {:.1}s",
+///     stats.indexed, stats.skipped, stats.seconds
+/// );
+/// # Ok(())
+/// # }
+/// ```
 pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> {
     rebuild_index_with_progress(index_dir, target_dir, |_| {})
 }

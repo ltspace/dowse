@@ -19,6 +19,18 @@ pub const IMAGE: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp"];
 
 /// 按名字取预设分组的扩展名集合。`"all"`、`None`、未知名字都表示不筛选——
 /// 浮窗前端传字符串过来，未知输入宽松地当"全部"处理，不报错。
+///
+/// # Examples
+///
+/// ```
+/// use dowse::ext_group_by_name;
+///
+/// // "doc" 分组包含常见文档扩展名。
+/// assert!(ext_group_by_name(Some("doc")).unwrap().contains(&"pdf"));
+/// // "all"、未知名字、None 都表示不筛选。
+/// assert_eq!(ext_group_by_name(Some("all")), None);
+/// assert_eq!(ext_group_by_name(None), None);
+/// ```
 pub fn by_name(name: Option<&str>) -> Option<&'static [&'static str]> {
     match name {
         Some("doc") => Some(DOC),

@@ -27,6 +27,22 @@ pub struct IndexStatus {
 ///
 /// 先走 `registered_roots` 做存在性 + schema 版本校验——索引不存在或版本不对时
 /// 复用它已有的报错文案（提示重建），不在这里另造一套错误信息。
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use std::path::Path;
+/// use dowse::index_status;
+///
+/// let status = index_status(Path::new("./my-index"))?;
+/// println!("{} 篇文档，{} 个根", status.num_docs, status.roots.len());
+/// for root in &status.roots {
+///     println!("  {}", root.display());
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub fn index_status(index_dir: &Path) -> Result<IndexStatus> {
     let roots = registered_roots(index_dir)?;
 
