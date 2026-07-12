@@ -80,7 +80,12 @@ fn wait_until(
 /// 这正是"上层感知不到差别"的可执行验收。
 #[test]
 fn watch_roots_auto_add_delete_rename_end_to_end() -> Result<()> {
-    let _serial = TEST_SERIAL_LOCK.lock().expect("ntfs 测试串行锁 poisoned");
+    // 三个测试串行跑在同一把锁上：其中一个真的 panic 时不该把锁 poison 掉、
+    // 连累另外两个本来跟这次失败无关的测试也跟着塌方——拿到毒锁时接着用里面
+    // 那份数据继续跑，让 CI 报告只暴露真正出问题的那一个。
+    let _serial = TEST_SERIAL_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let index_dir = tempfile::tempdir()?;
     let target = target_dir("dowse-m6-auto-");
 
@@ -132,7 +137,12 @@ fn watch_roots_auto_add_delete_rename_end_to_end() -> Result<()> {
 /// 非管理员环境（大多数开发机/CI 默认状态）打印原因跳过，不算失败。
 #[test]
 fn mft_enumeration_and_usn_watch_when_admin_available() -> Result<()> {
-    let _serial = TEST_SERIAL_LOCK.lock().expect("ntfs 测试串行锁 poisoned");
+    // 三个测试串行跑在同一把锁上：其中一个真的 panic 时不该把锁 poison 掉、
+    // 连累另外两个本来跟这次失败无关的测试也跟着塌方——拿到毒锁时接着用里面
+    // 那份数据继续跑，让 CI 报告只暴露真正出问题的那一个。
+    let _serial = TEST_SERIAL_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let target = target_dir("dowse-m6-fast-");
 
     if !ntfs_fast_path_available(target.path()) {
@@ -216,7 +226,12 @@ fn mft_enumeration_and_usn_watch_when_admin_available() -> Result<()> {
 /// 真实的调度节奏，不是人为构造的记录序列。
 #[test]
 fn rapid_rename_then_delete_leaves_no_orphan_document() -> Result<()> {
-    let _serial = TEST_SERIAL_LOCK.lock().expect("ntfs 测试串行锁 poisoned");
+    // 三个测试串行跑在同一把锁上：其中一个真的 panic 时不该把锁 poison 掉、
+    // 连累另外两个本来跟这次失败无关的测试也跟着塌方——拿到毒锁时接着用里面
+    // 那份数据继续跑，让 CI 报告只暴露真正出问题的那一个。
+    let _serial = TEST_SERIAL_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let target = target_dir("dowse-m6-rapid-");
 
     if !ntfs_fast_path_available(target.path()) {
