@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+rust-version.workspace = true
 description = "本地文件极速全文搜索的命令行工具与 MCP 服务：tantivy + jieba 中文分词，支持增量索引与实时监听"
 readme = "README.md"
 keywords = ["search", "fulltext", "cli", "chinese", "mcp"]
