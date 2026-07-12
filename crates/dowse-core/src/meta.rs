@@ -122,10 +122,22 @@ pub fn registered_roots(index_dir: &Path) -> Result<Vec<PathBuf>> {
 /// （见 [`crate::display_path`]）——不同调用路径传入的根可能一个带这个
 /// 前缀一个不带（`canonicalize()` 会加上，托盘"更改索引文件夹"目前不会），
 /// 直接按原始字符串比较会让真实存在的嵌套关系因为前缀不一致而被漏判。
+///
+/// `existing` 里的根写法本身也不统一：全量重建（`finish_rebuild`）存的是
+/// 未经 canonicalize 的原始路径，`add_root`/`append_root` 存的是
+/// canonicalize 过的路径。两种写法在大多数机器上字符串形态一致，但
+/// Windows 短文件名（8.3）在部分账户/机器上会让同一目录的原始路径和
+/// canonicalize 结果分属两种拼法（如 `RUNNERA~1` 对 `runneradmin`），
+/// 单纯前缀比较会因为这种拼法差异漏判真实存在的嵌套。这里对 `existing`
+/// 里每一项做一次尽力而为的 canonicalize（目录已不存在就保留原样，不
+/// 报错），把它拉到跟 `candidate`（调用方已经 canonicalize 过）同一种
+/// 拼法上再比较；报错文案仍然用 `root`/`candidate` 的原始值，不把内部
+/// 的 canonicalize 形态暴露给用户。
 pub(crate) fn assert_no_root_nesting(existing: &[PathBuf], candidate: &Path) -> Result<()> {
     let candidate_norm = PathBuf::from(crate::display_path(&candidate.to_string_lossy()));
     for root in existing {
-        let root_norm = PathBuf::from(crate::display_path(&root.to_string_lossy()));
+        let root_resolved = root.canonicalize().unwrap_or_else(|_| root.clone());
+        let root_norm = PathBuf::from(crate::display_path(&root_resolved.to_string_lossy()));
         if root_norm == candidate_norm {
             bail!("目录 {} 已经是索引根，不用重复添加", candidate.display());
         }
