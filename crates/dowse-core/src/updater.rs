@@ -9,13 +9,14 @@ use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 use crate::events::{PendingChange, PendingOp};
+use crate::indexer::PROGRESS_INTERVAL;
 use crate::indexer::{
     add_file_document, add_image_document_with_content, commit_index_tail,
     is_transient_writer_killed, walk_index_files,
 };
 use crate::ocr::is_image;
 use crate::ocr_queue::OcrQueue;
-use crate::{Fields, IndexProgress, PROGRESS_INTERVAL, build_schema, register_tokenizers};
+use crate::{Fields, IndexProgress, build_schema, register_tokenizers};
 
 /// 长驻写入端（`IndexUpdater`）撞上杀软扫描瞬时冲突时的重试参数。判据复用
 /// `indexer::is_transient_writer_killed`——跟全量重建是同一个根因（见

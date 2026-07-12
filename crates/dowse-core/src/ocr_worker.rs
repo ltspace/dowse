@@ -12,8 +12,8 @@ use crate::updater::IndexUpdater;
 
 /// worker 池线程数范围。设计文档的性能预算按 4 worker 估算（约 30 张/秒吞吐），
 /// 2 是下限——低于这个数就没有"池"的意义了。
-pub const MIN_WORKERS: usize = 2;
-pub const MAX_WORKERS: usize = 4;
+pub(crate) const MIN_WORKERS: usize = 2;
+pub(crate) const MAX_WORKERS: usize = 4;
 
 /// CLI/托盘启动 OCR 管线时的默认线程数。
 pub const DEFAULT_WORKERS: usize = MAX_WORKERS;
