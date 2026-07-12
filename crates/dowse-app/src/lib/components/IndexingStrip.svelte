@@ -8,6 +8,7 @@
 	// 的（文本阶段总量未知，装作知道进度是廉价感的重灾区，见 EmptyState）。
 	import { fade } from 'svelte/transition';
 	import AnimatedNumber from './AnimatedNumber.svelte';
+	import { t } from '../i18n';
 
 	let { processed, total }: { processed: number; total: number } = $props();
 
@@ -16,7 +17,7 @@
 
 <div class="strip" transition:fade={{ duration: 200 }}>
 	<p class="line mono">
-		图片识别 <AnimatedNumber value={processed} /> / {total.toLocaleString('en-US')}
+		{t.ocrProgressLabel} <AnimatedNumber value={processed} /> / {total.toLocaleString('en-US')}
 	</p>
 	<div class="track">
 		<div class="fill" style="width: {percent}%"></div>

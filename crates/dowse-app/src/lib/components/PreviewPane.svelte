@@ -5,6 +5,7 @@
 	import { middleEllipsis } from '../pathTruncate';
 	import FileIcon from './FileIcon.svelte';
 	import Segments from './Segments.svelte';
+	import { t } from '../i18n';
 
 	let {
 		hit,
@@ -30,7 +31,7 @@
 
 <div class="preview">
 	{#if !hit}
-		<p class="hint">选中结果后在此查看预览。</p>
+		<p class="hint">{t.previewSelectHint}</p>
 	{:else}
 		<div class="header">
 			<FileIcon path={hit.path} />
@@ -43,21 +44,21 @@
 					<img class="image-preview" src={imageSrc} alt={hit.name} />
 				{/if}
 				{#if loading}
-					<p class="hint">识别文字加载中…</p>
+					<p class="hint">{t.ocrLoading}</p>
 				{:else if segments && segments.length > 0}
-					<p class="ocr-caption">图中文字（OCR 识别）</p>
+					<p class="ocr-caption">{t.ocrCaption}</p>
 					<div class="ocr-text-wrap">
 						<p class="context ocr-text"><Segments {segments} /></p>
 					</div>
 				{:else}
-					<p class="hint">没有识别到文字，或者还在后台排队处理。</p>
+					<p class="hint">{t.ocrEmpty}</p>
 				{/if}
 			{:else if loading}
-				<p class="hint">加载中…</p>
+				<p class="hint">{t.previewLoading}</p>
 			{:else if segments && segments.length > 0}
 				<p class="context" class:mono={isCode}><Segments {segments} /></p>
 			{:else}
-				<p class="hint">没有可预览的文本内容。</p>
+				<p class="hint">{t.previewEmpty}</p>
 			{/if}
 		</div>
 	{/if}

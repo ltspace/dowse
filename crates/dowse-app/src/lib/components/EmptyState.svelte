@@ -2,6 +2,7 @@
 	import { fade } from 'svelte/transition';
 	import AnimatedNumber from './AnimatedNumber.svelte';
 	import { middleEllipsis } from '../pathTruncate';
+	import { t } from '../i18n';
 
 	type Kind = 'idle' | 'no-index' | 'no-results' | 'rebuilding' | 'error';
 
@@ -39,42 +40,42 @@
 	} = $props();
 
 	// "37 秒" 这种整数量级用四舍五入；不到 10 秒时留一位小数——冒烟测试用的
-	// 小目录经常一眨眼就建完，整数会显示成没有意义的 "0 秒"。
+	// 小目录经常一眨眼就建完，整数会显示成没有意义的 "0 秒"。文案与单位收进 i18n。
 	function formatSeconds(seconds: number): string {
-		if (seconds < 10) return `${seconds.toFixed(1)} 秒`;
-		return `${Math.round(seconds)} 秒`;
+		return t.formatSeconds(seconds);
 	}
 </script>
 
 <div class="empty">
 	{#if kind === 'idle'}
-		<p class="title">键入即搜。</p>
-		<p class="sub">文件名、文档正文都能搜，多个词默认取交集，"引号内"作短语查询。</p>
+		<p class="title">{t.esTypeToSearch}</p>
+		<p class="sub">{t.esSearchHelp}</p>
 		{#if roots.length > 0}
 			{#each roots as root (root)}
 				<p class="sub root-path mono">{middleEllipsis(root)}</p>
 			{/each}
 			{#if onaddfolder}
-				<button type="button" class="link" onclick={onaddfolder}>添加文件夹</button>
+				<button type="button" class="link" onclick={onaddfolder}>{t.esAddFolder}</button>
 			{/if}
 		{/if}
 	{:else if kind === 'no-index'}
-		<p class="title">尚未建立索引。</p>
-		<p class="sub">选择一个目录开始建索引，之后可在托盘菜单重建。</p>
-		<button type="button" class="pick" onclick={onpick}>选择目录并建索引</button>
+		<p class="title">{t.esNoIndexTitle}</p>
+		<p class="sub">{t.esNoIndexSub}</p>
+		<button type="button" class="pick" onclick={onpick}>{t.esPickAndIndex}</button>
 	{:else if kind === 'rebuilding'}
 		{#if indexingReport}
 			<p class="title mono report">
-				{indexingReport.indexed.toLocaleString('en-US')} 篇，{formatSeconds(
-					indexingReport.seconds
-				)}。
+				{t.indexReport(
+					indexingReport.indexed.toLocaleString('en-US'),
+					formatSeconds(indexingReport.seconds)
+				)}
 			</p>
 		{:else}
 			<!-- 阶段一：文本索引，总量未知。就是数字本身，不带"正在处理"之类的
 			     废话前缀；不放进度条/百分比——总量未知时装作知道进度是廉价感的
 			     重灾区，也不放转圈 spinner。 -->
 			<p class="big-count mono"><AnimatedNumber value={indexingProcessed} /></p>
-			<p class="count-unit">篇</p>
+			<p class="count-unit">{t.esCountUnit}</p>
 			<div class="current-file-slot">
 				{#key indexingCurrentFile}
 					{#if indexingCurrentFile}
@@ -90,12 +91,12 @@
 			</div>
 		{/if}
 	{:else if kind === 'error'}
-		<p class="title">索引操作失败。</p>
-		<p class="sub">{errorMessage ?? '未知错误。'}</p>
-		<button type="button" class="pick" onclick={onpick}>重新选择目录</button>
+		<p class="title">{t.esErrorTitle}</p>
+		<p class="sub">{errorMessage ?? t.esUnknownError}</p>
+		<button type="button" class="pick" onclick={onpick}>{t.esRepick}</button>
 	{:else}
-		<p class="title">没有匹配的结果。索引包含 {numDocs} 篇文档。</p>
-		<p class="sub">换一个查询词，或确认文件在已建索引的目录中。</p>
+		<p class="title">{t.esNoMatch(numDocs)}</p>
+		<p class="sub">{t.esNoMatchSub}</p>
 	{/if}
 </div>
 
