@@ -13,12 +13,6 @@ documentation = "https://docs.rs/dowse"
 keywords = ["search", "fulltext", "cli", "chinese", "mcp"]
 categories = ["command-line-utilities", "text-processing", "filesystem"]
 
-# docs.rs 默认在 Linux 上构建文档，会漏掉本 crate 大量 #[cfg(windows)] 的 API
-# （NTFS/USN 快速索引、Windows OCR）。指定 Windows 目标，让文档页完整呈现。
-[package.metadata.docs.rs]
-default-target = "x86_64-pc-windows-msvc"
-targets = ["x86_64-pc-windows-msvc"]
-
 # 库 + 命令行二合一：库（lib.rs）默认对外提供搜索引擎 API；命令行/MCP 入口
 # （src/bin/dowse）连同它专属的依赖一起放在 `cli` feature 后面，默认开启。
 # `cargo install dowse` 拿到带命令行的完整工具；只想用搜索引擎库的人写

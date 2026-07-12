@@ -10,6 +10,10 @@
 //! 目录遍历；拿不到这个前提条件就诚实降级到基于 walkdir + notify 的目录
 //! 遍历/文件监听，两条路径产出的索引结果完全一致，调用方感知不到差别。
 //!
+//! docs.rs 在 Linux 构建机上生成本页文档，`cfg(windows)` 之后的 API（OCR、
+//! NTFS MFT/USN 快速索引）不会出现在这里；要看到完整 API，在 Windows 上本地
+//! 跑 `cargo doc` 即可。
+//!
 //! # 核心入口
 //!
 //! - 建索引：[`rebuild_index`] 全量重建；多根索引的增删见 [`add_root`]/

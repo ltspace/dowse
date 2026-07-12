@@ -73,3 +73,9 @@ jobs:
       # matching what this job cares about: the cross-platform stubs.
       - name: Check dowse library on non-Windows
         run: cargo check -p dowse --no-default-features
+
+      # docs.rs builds on Linux; this is that build rehearsed in CI so a
+      # rustdoc failure here is caught before it silently breaks the
+      # docs.rs page for the crate.
+      - name: Check dowse docs on non-Windows
+        run: cargo doc -p dowse --no-deps
