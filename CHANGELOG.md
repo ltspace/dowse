@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-13
+
+### Added
+
+- `dowse status` reports the index location, document count, on-disk size,
+  root directory, and last-updated time. `dowse search` gained `--ext`
+  (comma-separated extension filter) and `--sort` (relevance / mtime / size);
+  non-relevance sort orders hide the otherwise meaningless BM25 score, and an
+  empty query now returns a clear error instead of an empty result set.
+
 ### Changed
 
 - The `dowse-core` and `dowse-cli` crates are merged into a single `dowse`
@@ -13,6 +23,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   installable with `cargo install dowse`; consumers that want only the search
   engine can depend on the crate with `default-features = false` to leave out
   the CLI and its dependencies.
+- Rustdoc coverage was completed across the crate: the crate root and public
+  items are documented, several with runnable examples, and `missing_docs` is
+  now enforced as a lint.
+- CI gained a dependency security audit and a non-Windows compile check.
+
+### Fixed
+
+- Malformed-file panic protection, previously scoped to PDF extraction only,
+  now wraps every format the extractor handles. A panic while extracting any
+  one file is caught and downgraded to "no text" for that file, rather than
+  risking a poisoned shared index-updater lock that could stall the watch and
+  OCR pipelines.
 
 ## [0.7.0] - 2026-07-08
 
@@ -236,7 +258,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
 - The index root directory is no longer skipped by exclusion rules.
 
-[Unreleased]: https://github.com/ltspace/dowse/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/ltspace/dowse/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/ltspace/dowse/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/ltspace/dowse/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/ltspace/dowse/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ltspace/dowse/compare/v0.5.0...v0.6.0
