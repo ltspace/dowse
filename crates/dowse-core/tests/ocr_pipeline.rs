@@ -185,6 +185,24 @@ fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
     let second_pass = dowse_core::drain_ocr_queue(index_dir.path(), 2)?;
     assert_eq!(second_pass.processed, 0, "队列应已清空，不该重复处理");
 
+    {
+        let diag_searcher = dowse_core::Searcher::open(index_dir.path())?;
+        let hits0 = diag_searcher
+            .search(&format!("{SENTINEL}x0"), 10)
+            .map(|h| h.len())
+            .unwrap_or(usize::MAX);
+        let hits1 = diag_searcher
+            .search(&format!("{SENTINEL}x1"), 10)
+            .map(|h| h.len())
+            .unwrap_or(usize::MAX);
+        eprintln!(
+            "[诊断][断言前] num_docs={} 哨兵词0命中数={} 哨兵词1命中数={}",
+            diag_searcher.num_docs(),
+            hits0,
+            hits1
+        );
+    }
+
     for i in 0..2 {
         let query = format!("{SENTINEL}x{i}");
         assert!(

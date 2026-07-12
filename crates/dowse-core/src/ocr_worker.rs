@@ -69,12 +69,14 @@ impl OcrPipeline {
         let on_progress: Arc<dyn Fn(usize) + Send + Sync> = Arc::new(on_progress);
 
         let handles = (0..worker_count)
-            .map(|_| {
+            .map(|worker_idx| {
                 let updater = updater.clone();
                 let queue = queue.clone();
                 let stop = stop.clone();
                 let on_progress = on_progress.clone();
-                std::thread::spawn(move || worker_loop(queue, updater, stop, on_progress))
+                std::thread::spawn(move || {
+                    worker_loop(worker_idx, queue, updater, stop, on_progress)
+                })
             })
             .collect();
 
@@ -97,17 +99,32 @@ impl OcrPipeline {
 /// 手头的半批先落盘——不能让已经识别完的结果因为"凑不够一批"就在内存里等到
 /// 下一张图片入队，那样队列长期偏空时最后几张图会迟迟搜不到。
 fn worker_loop(
+    worker_idx: usize,
     queue: Arc<OcrQueue>,
     updater: Arc<Mutex<IndexUpdater>>,
     stop: Arc<AtomicBool>,
     on_progress: Arc<dyn Fn(usize) + Send + Sync>,
 ) {
+    eprintln!(
+        "[诊断][worker启动] worker序号={worker_idx} 线程={:?}",
+        std::thread::current().id()
+    );
     let engine = match ocr::create_engine() {
-        Ok(engine) => engine,
+        Ok(engine) => {
+            eprintln!(
+                "[诊断][worker启动] worker序号={worker_idx} 线程={:?} 引擎创建=成功",
+                std::thread::current().id()
+            );
+            engine
+        }
         Err(err) => {
             // OcrPipeline::start 已经用 is_available() 探测过一次，这里理论上不该失败；
             // 真发生了（比如探测和创建之间语言包被卸载）就让这个 worker 直接退出，
             // 其余 worker 不受影响，不 panic 整个进程。
+            eprintln!(
+                "[诊断][worker启动] worker序号={worker_idx} 线程={:?} 引擎创建=失败: {err}",
+                std::thread::current().id()
+            );
             eprintln!("OCR worker 创建引擎失败，该 worker 退出: {err}");
             return;
         }
@@ -190,15 +207,40 @@ fn flush_batch(
         return;
     }
 
+    for (path, _mtime, _size, content) in &items {
+        eprintln!(
+            "[诊断][flush_batch] 文件={:?} content字节数={}",
+            path.file_name().unwrap_or_default(),
+            content.len()
+        );
+    }
+
     let commit_result = {
         let mut guard = updater.lock().expect("updater mutex poisoned");
         guard.stage_and_commit_ocr_batch(&items)
     };
 
+    eprintln!(
+        "[诊断][flush_batch] stage_and_commit_ocr_batch 结果={}",
+        match &commit_result {
+            Ok(()) => "成功".to_string(),
+            Err(err) => format!("失败: {err}"),
+        }
+    );
+
     match commit_result {
         Ok(()) => {
             for (path, mtime, size, content) in items {
-                queue.mark_processed(path, mtime, size, content);
+                eprintln!(
+                    "[诊断][mark_processed前] 文件={:?} content字节数={}",
+                    path.file_name().unwrap_or_default(),
+                    content.len()
+                );
+                queue.mark_processed(path.clone(), mtime, size, content);
+                eprintln!(
+                    "[诊断][mark_processed后] 文件={:?}",
+                    path.file_name().unwrap_or_default()
+                );
             }
         }
         Err(err) => {

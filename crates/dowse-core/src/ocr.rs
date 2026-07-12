@@ -130,7 +130,15 @@ mod engine_impl {
             .map_err(|e| anyhow::anyhow!("加载图片失败 {}: {e}", path.display()))?;
         let result = block_on(engine.0.RecognizeAsync(&bitmap))
             .map_err(|e| anyhow::anyhow!("OCR 识别失败 {}: {e}", path.display()))?;
-        Ok(result.Text()?.to_string())
+        let text = result.Text()?.to_string();
+        eprintln!(
+            "[诊断][recognize] 文件={:?} 文本字节数={} 行数={} 线程={:?}",
+            path.file_name().unwrap_or_default(),
+            text.len(),
+            text.lines().count(),
+            std::thread::current().id()
+        );
+        Ok(text)
     }
 
     #[cfg(test)]
