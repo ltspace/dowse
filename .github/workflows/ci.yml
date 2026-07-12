@@ -3,7 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
+    # 纯文档改动不值得烧 Windows 跑机分钟数（私有仓免费额度按 2 倍计）
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
   pull_request:
+
+# 同一分支上更新的 push 会取消还在跑的旧 run：连续推送时只有最新一次消耗分钟数
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 # npm/Tauri frontend build is intentionally not part of CI yet: npm install for
 # the dowse-app frontend is slow in CI and its output is a UI that needs eyes
