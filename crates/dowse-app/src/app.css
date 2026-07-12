@@ -15,7 +15,9 @@
 
    品牌色：很淡的水蓝（呼应"探水杖"的意象），只用在活跃元素上——
    选中态背景/描边、输入框光标与聚焦态、命中词高亮。大面积的玻璃和
-   底色始终保持中性，不做成蓝色主题。
+   底色始终保持中性，不做成蓝色主题。唯一的例外是纯色降级档（见下面
+   `:root[data-effect='solid']`）：玻璃不可用时的这块兜底不透明底色，
+   刻意带一点水蓝倾向而不是死黑/死白，好让"降级"也不至于太生硬。
 
    字体：Inter（拉丁，OFL-1.1）+ MiSans（中文，Xiaomi 开源免费商用，经
    dsrkafuu/misans 打包再分发，Apache-2.0）。字体文件与各自 LICENSE 见
@@ -83,27 +85,31 @@
 	--radius-chip: 5px;
 }
 
-/* 纯色降级档（玻璃申请失败，或系统/用户关掉了透明效果）：设计文档要的是
-   "纯色深灰"——不分明暗主题都用同一块深灰，不能让亮色主题下退成发虚的
-   浅灰白（之前 --solid-bg 在亮色主题下是 #f3f3f6，退化后跟"深灰"完全对不上）。
-   这里连前景色一起换成暗色那一套，保证文字在深灰底上依然可读。
-   纯色档不受透明度三档影响——直接把 --glass-tint 钉死成不透明色，
-   --glass-alpha-* 这两个数字在这里根本用不上。 */
+/* 纯色降级档（玻璃申请失败，或系统/用户关掉了透明效果）：这一档必须完全
+   不透明——它是玻璃不可用时的兜底，不加 alpha，不受 --glass-alpha-* 那两个
+   透明度数字影响，直接把 --glass-tint 钉死成不透明色。
+
+   v0.4.x 时这一档不分明暗主题、统一钉成死黑灰（#1c1c20），亮色主题下也会
+   被拽成一块黑灰色面板，观感突兀。这里改成跟品牌 accent（#7fcbe8，水蓝）
+   呼应的"透亮水蓝"质感，并且明暗主题各给一套：这一条（配合下面
+   `@media (prefers-color-scheme: dark)` 里的同名覆盖）分别对应亮色主题的
+   水蓝白，跟暗色主题的水蓝黑——不再是同一块灰不分场合硬套。
+   下面这一条是亮色主题的取值（默认，未命中 dark 媒体查询时生效）。 */
 :root[data-effect='solid'] {
-	--glass-tint: #1c1c20;
-	--solid-bg: #1c1c20;
-	--fg-primary: #f1f1f4;
-	--fg-secondary: #9d9da6;
-	--fg-tertiary: #77777f;
-	--divider: rgba(255, 255, 255, 0.09);
-	--panel-border: rgba(255, 255, 255, 0.09);
-	--row-hover: rgba(255, 255, 255, 0.045);
-	--scrollbar-thumb: rgba(255, 255, 255, 0.18);
-	--accent-soft: rgba(112, 199, 232, 0.16);
-	--accent-border: rgba(112, 199, 232, 0.45);
-	--accent-strong: #7fcbe8;
-	--accent-caret: #7fcbe8;
-	--shortcut-chip-bg: rgba(255, 255, 255, 0.07);
+	--glass-tint: #eef6fb;
+	--solid-bg: #eef6fb;
+	--fg-primary: #101014;
+	--fg-secondary: #6b6b75;
+	--fg-tertiary: #9494a0;
+	--divider: rgba(0, 0, 0, 0.08);
+	--panel-border: rgba(0, 0, 0, 0.07);
+	--row-hover: rgba(0, 0, 0, 0.035);
+	--scrollbar-thumb: rgba(0, 0, 0, 0.16);
+	--accent-soft: rgba(58, 154, 194, 0.14);
+	--accent-border: rgba(58, 154, 194, 0.4);
+	--accent-strong: #1e7da6;
+	--accent-caret: #2a8cba;
+	--shortcut-chip-bg: rgba(0, 0, 0, 0.055);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -128,6 +134,27 @@
 
 		--toast-bg: rgba(241, 241, 244, 0.94);
 		--toast-fg: #1c1c20;
+	}
+
+	/* 纯色降级档的暗色主题取值——覆盖上面 `:root[data-effect='solid']`
+	   （亮色主题版本）里的水蓝白，换成带明显蓝味的深蓝黑，而不是死黑灰。
+	   accent 沿用玻璃档暗色主题下的同一套水蓝（#7fcbe8 系），跟新底色是
+	   同一个色相家族，不用再单独调。 */
+	:root[data-effect='solid'] {
+		--glass-tint: #101d28;
+		--solid-bg: #101d28;
+		--fg-primary: #f1f1f4;
+		--fg-secondary: #9d9da6;
+		--fg-tertiary: #77777f;
+		--divider: rgba(255, 255, 255, 0.09);
+		--panel-border: rgba(255, 255, 255, 0.09);
+		--row-hover: rgba(255, 255, 255, 0.045);
+		--scrollbar-thumb: rgba(255, 255, 255, 0.18);
+		--accent-soft: rgba(127, 203, 232, 0.16);
+		--accent-border: rgba(127, 203, 232, 0.45);
+		--accent-strong: #7fcbe8;
+		--accent-caret: #7fcbe8;
+		--shortcut-chip-bg: rgba(255, 255, 255, 0.07);
 	}
 }
 
