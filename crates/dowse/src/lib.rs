@@ -24,20 +24,49 @@
 //!
 //! # 示例
 //!
+//! 建一次索引，然后在"文档类"扩展名里搜索、按修改时间从新到旧排，最后读出
+//! 每条命中的字段：
+//!
 //! ```no_run
+//! # fn main() -> anyhow::Result<()> {
 //! use std::path::Path;
-//! use dowse::{Searcher, rebuild_index};
+//! use dowse::{Searcher, SortMode, display_path, ext_group_by_name, rebuild_index};
 //!
 //! let index_dir = Path::new("./my-index");
 //! let target_dir = Path::new("./my-documents");
 //!
-//! rebuild_index(index_dir, target_dir).unwrap();
+//! // 全量建一次索引，拿到收录 / 跳过 / 耗时统计。
+//! let stats = rebuild_index(index_dir, target_dir)?;
+//! println!(
+//!     "收录 {} 个文件，跳过 {}，耗时 {:.1}s",
+//!     stats.indexed, stats.skipped, stats.seconds
+//! );
 //!
-//! let searcher = Searcher::open(index_dir).unwrap();
-//! for hit in searcher.search("关键词", 20).unwrap() {
-//!     println!("{}: {}", hit.path, hit.snippet);
+//! // 打开只读句柄开始搜索。
+//! let searcher = Searcher::open(index_dir)?;
+//!
+//! // 只在文档类扩展名（md/txt/pdf/docx…）里搜，按修改时间从新到旧排。
+//! let hits = searcher.search_advanced(
+//!     "季度 报告",
+//!     20,
+//!     ext_group_by_name(Some("doc")),
+//!     SortMode::MtimeDesc,
+//! )?;
+//!
+//! for hit in &hits {
+//!     // display_path 剥掉 Windows 的 `\\?\` 扩展长度前缀，只用于展示。
+//!     println!(
+//!         "[{}] {} —— {} 处高亮",
+//!         hit.ext,
+//!         display_path(&hit.path),
+//!         hit.highlighted.len()
+//!     );
+//!     println!("{}", hit.snippet);
 //! }
+//! # Ok(())
+//! # }
 //! ```
+#![warn(missing_docs)]
 
 mod cursor;
 mod events;
@@ -154,6 +183,19 @@ pub(crate) fn register_tokenizers(index: &tantivy::Index) {
 /// 这个函数只用来生成给用户看的文本；真正参与文件操作（`open_file`/
 /// `reveal_in_folder`）的路径必须继续用没剥过的原始值，否则长路径场景会
 /// 重新触发 `MAX_PATH` 限制。
+///
+/// # Examples
+///
+/// ```
+/// use dowse::display_path;
+///
+/// // 普通 `\\?\` 前缀被剥掉。
+/// assert_eq!(display_path(r"\\?\E:\notes\a.md"), r"E:\notes\a.md");
+/// // UNC 形式还原成 `\\server\share\...`。
+/// assert_eq!(display_path(r"\\?\UNC\server\share\a.txt"), r"\\server\share\a.txt");
+/// // 没有前缀的路径原样返回。
+/// assert_eq!(display_path(r"E:\notes\a.md"), r"E:\notes\a.md");
+/// ```
 pub fn display_path(path: &str) -> String {
     if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{rest}")

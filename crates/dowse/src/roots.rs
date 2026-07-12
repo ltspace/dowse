@@ -20,18 +20,36 @@ use crate::updater::IndexUpdater;
 /// 添加根的统计结果，跟 `IndexStats`（全量重建）同一口径：收录/跳过文件数。
 #[derive(Debug, Clone, Copy)]
 pub struct AddRootStats {
+    /// 这个根名下成功收录进索引的文件数。
     pub indexed: usize,
+    /// 这个根名下被跳过的文件数（无法抽取或不在收录范围内）。
     pub skipped: usize,
 }
 
 /// 移除根的统计结果：从索引里删掉的文档数。
 #[derive(Debug, Clone, Copy)]
 pub struct RemoveRootStats {
+    /// 从索引里删掉的文档数。
     pub removed: usize,
 }
 
 /// 添加一个根：不动现有索引，对新根做一次"目录树 upsert"（遍历 + 先删后加，
 /// 幂等），完成后把根追加进 meta。不需要进度直播的调用方走这个薄封装。
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use std::path::Path;
+/// use dowse::{IndexUpdater, add_root};
+///
+/// let index_dir = Path::new("./my-index");
+/// let mut updater = IndexUpdater::open(index_dir)?;
+/// let stats = add_root(index_dir, Path::new("./more-documents"), &mut updater)?;
+/// println!("新根收录 {} 个文件", stats.indexed);
+/// # Ok(())
+/// # }
+/// ```
 pub fn add_root(index_dir: &Path, root: &Path, updater: &mut IndexUpdater) -> Result<AddRootStats> {
     add_root_with_progress(index_dir, root, updater, |_| {})
 }
@@ -79,6 +97,24 @@ pub fn add_root_with_progress(
 /// 条目，roots 里移除这一项。`root` 必须是 `registered_roots` 返回值里的
 /// 原样一项（不做 canonicalize/存在性校验）——移除本来就要覆盖"根所在目录
 /// 已经从磁盘上消失"这种场景，不能要求它此刻还能被 stat 到。
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use std::path::Path;
+/// use dowse::{IndexUpdater, registered_roots, remove_root};
+///
+/// let index_dir = Path::new("./my-index");
+/// let mut updater = IndexUpdater::open(index_dir)?;
+/// // 传 registered_roots 返回的原样一项，不要自己 canonicalize。
+/// if let Some(root) = registered_roots(index_dir)?.first() {
+///     let stats = remove_root(index_dir, root, &mut updater)?;
+///     println!("删掉 {} 篇文档", stats.removed);
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub fn remove_root(
     index_dir: &Path,
     root: &Path,

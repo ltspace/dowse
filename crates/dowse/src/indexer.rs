@@ -22,8 +22,11 @@ use crate::{Fields, build_schema, register_tokenizers};
 
 /// 一次重建索引的统计结果，CLI 拿去打报告。
 pub struct IndexStats {
+    /// 成功抽取内容并写入索引的文件数。
     pub indexed: usize,
+    /// 被跳过的文件数（无法抽取、读取失败、或不在收录范围内）。
     pub skipped: usize,
+    /// 本次重建的总耗时（秒）。
     pub seconds: f64,
 }
 
@@ -37,7 +40,9 @@ pub(crate) const PROGRESS_INTERVAL: usize = 50;
 /// 单次进度汇报：累计处理数（收录 + 跳过），和刚处理完的那个文件路径。
 #[derive(Debug, Clone)]
 pub struct IndexProgress {
+    /// 到目前为止累计处理的文件数（收录 + 跳过一起算）。
     pub processed: usize,
+    /// 刚处理完的那个文件路径。
     pub path: PathBuf,
 }
 
@@ -298,6 +303,22 @@ pub(crate) fn commit_index_tail(
 ///
 /// 不需要进度直播的调用方（测试、内部各处对账/重建路径）走这个薄封装，
 /// 回调是空操作——真正的实现和进度上报都在 `rebuild_index_with_progress`。
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use std::path::Path;
+/// use dowse::rebuild_index;
+///
+/// let stats = rebuild_index(Path::new("./my-index"), Path::new("./my-documents"))?;
+/// println!(
+///     "收录 {} 个文件，跳过 {}，耗时 {:.1}s",
+///     stats.indexed, stats.skipped, stats.seconds
+/// );
+/// # Ok(())
+/// # }
+/// ```
 pub fn rebuild_index(index_dir: &Path, target_dir: &Path) -> Result<IndexStats> {
     rebuild_index_with_progress(index_dir, target_dir, |_| {})
 }
