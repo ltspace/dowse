@@ -6,6 +6,25 @@
 //! - 真正走快车道（MFT 枚举 + USN Journal）需要管理员权限打开原始卷句柄，
 //!   测试开头先用 `dowse_core::ntfs_fast_path_available()` 探测一次，拿不到就打印
 //!   原因跳过，不让非管理员的开发机/CI 把构建搞红。
+//!
+//! CI 排障记录（GitHub Actions windows-latest 连续几次全红后追出来的根因）：
+//! `rebuild_index`/`watch_roots_auto` 在管理员+NTFS 环境下走 MFT 快速枚举时，
+//! 枚举的是**整卷**（不是只扫监听根），CI 跑机的系统盘 C: 本身就有 ~130 万条
+//! MFT 记录，单次整卷枚举实测耗时 30 秒量级——远超设计文档"100 万条 < 5s"的
+//! 本地预算（那是本机文件数少得多时测的）。三个测试本来就默认并行跑在同一个
+//! 进程里，每个测试至少一次 rebuild_index（一次整卷枚举），
+//! `mft_enumeration_and_usn_watch_when_admin_available`/
+//! `rapid_rename_then_delete_leaves_no_orphan_document` 还会在 `watch_roots_auto`
+//! 里通过 `bootstrap_fast_roots` 再枚举一次——三个测试一起对同一块系统盘发起
+//! 2~4 次并发整卷扫描，互相抢 I/O，把原本单次就要 30s 的枚举拖得更久，
+//! 经常在事件真正开始被 USN 监听捕获之前就把下面的 `POLL_TIMEOUT` 耗光。
+//! 这不是功能回归——USN 事件源本身工作正常，只是"建立监听前的必经枚举"在这块
+//! 系统盘上的真实耗时远超测试原来给的等待预算。修法两条都用上：
+//! 1) 用 `TEST_SERIAL_LOCK` 把三个测试串行化，去掉同卷并发扫描互相抢 I/O 的
+//!    额外损耗；
+//! 2) `POLL_TIMEOUT` 放宽到能舒服装下"一次整卷枚举 + 事件真正传播"的量级——
+//!    这是"再等下去就该判失败了"的兜底线，不是性能预算断言，放宽不影响这条
+//!    测试本来要验的东西（USN 事件源最终有没有正确捕获变更）。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,7 +36,18 @@ use dowse_core::{
     IndexUpdater, Searcher, ntfs_fast_path_available, rebuild_index, watch_roots_auto,
 };
 
-const POLL_TIMEOUT: Duration = Duration::from_secs(30);
+mod common;
+
+/// 三个测试共用的串行锁：见上面模块文档里的排障记录——同一块系统盘上的并发
+/// MFT 整卷枚举会互相抢 I/O，串行化换来的是每个测试自己独立的、可预期的
+/// 枚举耗时，而不是叠加在一起的抢占延迟。
+static TEST_SERIAL_LOCK: Mutex<()> = Mutex::new(());
+
+/// 轮询上限：不是性能预算，是"再等下去就该判失败了"的兜底。放宽到 120s 是为了
+/// 舒服装下 CI 系统盘上一次整卷 MFT 枚举（实测 30s 量级，见模块文档）—— 部分
+/// 场景（游标补账前重新枚举）等于要连续吃两次这个耗时，留够余量避免真实事件
+/// 已经被正确捕获、只是枚举还没扫完就被判超时。
+const POLL_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn target_dir(prefix: &str) -> tempfile::TempDir {
     tempfile::Builder::new().prefix(prefix).tempdir().unwrap()
@@ -50,6 +80,7 @@ fn wait_until(
 /// 这正是"上层感知不到差别"的可执行验收。
 #[test]
 fn watch_roots_auto_add_delete_rename_end_to_end() -> Result<()> {
+    let _serial = TEST_SERIAL_LOCK.lock().expect("ntfs 测试串行锁 poisoned");
     let index_dir = tempfile::tempdir()?;
     let target = target_dir("dowse-m6-auto-");
 
@@ -90,6 +121,9 @@ fn watch_roots_auto_add_delete_rename_end_to_end() -> Result<()> {
 
     stop.store(true, Ordering::Relaxed);
     let _ = watch_handle.join();
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
 
@@ -98,6 +132,7 @@ fn watch_roots_auto_add_delete_rename_end_to_end() -> Result<()> {
 /// 非管理员环境（大多数开发机/CI 默认状态）打印原因跳过，不算失败。
 #[test]
 fn mft_enumeration_and_usn_watch_when_admin_available() -> Result<()> {
+    let _serial = TEST_SERIAL_LOCK.lock().expect("ntfs 测试串行锁 poisoned");
     let target = target_dir("dowse-m6-fast-");
 
     if !ntfs_fast_path_available(target.path()) {
@@ -169,6 +204,9 @@ fn mft_enumeration_and_usn_watch_when_admin_available() -> Result<()> {
 
     stop.store(true, Ordering::Relaxed);
     let _ = watch_handle.join();
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
 
@@ -178,6 +216,7 @@ fn mft_enumeration_and_usn_watch_when_admin_available() -> Result<()> {
 /// 真实的调度节奏，不是人为构造的记录序列。
 #[test]
 fn rapid_rename_then_delete_leaves_no_orphan_document() -> Result<()> {
+    let _serial = TEST_SERIAL_LOCK.lock().expect("ntfs 测试串行锁 poisoned");
     let target = target_dir("dowse-m6-rapid-");
 
     if !ntfs_fast_path_available(target.path()) {
@@ -222,6 +261,9 @@ fn rapid_rename_then_delete_leaves_no_orphan_document() -> Result<()> {
 
     stop.store(true, Ordering::Relaxed);
     let _ = watch_handle.join();
+    drop(updater);
+    common::close_tempdir_retrying(index_dir);
+    common::close_tempdir_retrying(target);
     Ok(())
 }
 

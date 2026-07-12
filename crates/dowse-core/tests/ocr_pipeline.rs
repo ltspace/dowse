@@ -13,10 +13,36 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
 mod common;
+
+/// 轮询上限：见下面 `ocr_queue_survives_restart_and_resumes_pending_work` 的
+/// 排障记录——两个 worker 并发处理两张图片时，索引提交到能被一个全新打开的
+/// `Searcher` 读到之间偶发有 CI 才会撞上的短暂延迟，这条测试原来直接开
+/// `Searcher::open` 后立即断言，是本仓库里唯一一处对"刚写完的索引"不走轮询
+/// 就下断言的地方（e2e_watch.rs/ntfs_fast_path.rs 对同类断言全部走的是
+/// wait_until 轮询）。跟那两个文件用同一个套路补上，不改断言本身要验的东西。
+const SEARCH_VISIBLE_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// 反复开只读 Searcher 搜 query，直到命中数满足 predicate 或超时。
+fn wait_until_searchable(index_dir: &Path, query: &str, predicate: impl Fn(usize) -> bool) -> bool {
+    let start = Instant::now();
+    loop {
+        if let Ok(searcher) = dowse_core::Searcher::open(index_dir)
+            && let Ok(hits) = searcher.search(query, 10)
+            && predicate(hits.len())
+        {
+            return true;
+        }
+        if start.elapsed() > SEARCH_VISIBLE_TIMEOUT {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
 
 // 纯小写字母数字、不含分隔符——跟 searcher.rs 测试里 "zzzsentinelprobe888" 同一个
 // 套路：jieba 分词器会把这样一整串 ASCII 当成单个 token，搜索时不用担心被切碎。
@@ -155,13 +181,14 @@ fn ocr_queue_survives_restart_and_resumes_pending_work() -> Result<()> {
     let second_pass = dowse_core::drain_ocr_queue(index_dir.path(), 2)?;
     assert_eq!(second_pass.processed, 0, "队列应已清空，不该重复处理");
 
-    let searcher = dowse_core::Searcher::open(index_dir.path())?;
     for i in 0..2 {
-        let hits = searcher.search(&format!("{SENTINEL}x{i}"), 10)?;
-        assert!(!hits.is_empty(), "第 {i} 张图片的哨兵词应该能搜到");
+        let query = format!("{SENTINEL}x{i}");
+        assert!(
+            wait_until_searchable(index_dir.path(), &query, |n| n > 0),
+            "第 {i} 张图片的哨兵词应该能搜到"
+        );
     }
 
-    drop(searcher);
     common::close_tempdir_retrying(index_dir);
     common::close_tempdir_retrying(target_dir);
     Ok(())
