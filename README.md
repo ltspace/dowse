@@ -1,16 +1,30 @@
 English | [简体中文](README.zh-CN.md)
 
-<!-- [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](#license) -->
-<!-- CI badge: enable once .github/workflows/ci.yml has run on the default branch -->
-<!-- [![CI](https://github.com/ltspace/dowse/actions/workflows/ci.yml/badge.svg)](https://github.com/ltspace/dowse/actions/workflows/ci.yml) -->
+<p align="center">
+  <img src="crates/dowse-app/src-tauri/icons/128x128@2x.png" width="96" height="96" alt="dowse logo">
+</p>
 
-# dowse
+<h1 align="center">dowse</h1>
 
-Native full-text search for Windows. Indexes file names, document contents, and text embedded in screenshots. Summoned by a hotkey, returns results in milliseconds.
+<p align="center">
+  Native full-text search for Windows. File names, document contents, and text inside screenshots — one hotkey away.
+</p>
+
+<p align="center">
+  <a href="#license"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License"></a>
+  <a href="https://github.com/ltspace/dowse/releases/latest"><img src="https://img.shields.io/github/v/release/ltspace/dowse" alt="Latest release"></a>
+  <a href="https://github.com/ltspace/dowse/actions/workflows/ci.yml"><img src="https://github.com/ltspace/dowse/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/ltspace/dowse/stargazers"><img src="https://img.shields.io/github/stars/ltspace/dowse?style=flat" alt="GitHub stars"></a>
+  <img src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white" alt="Platform: Windows">
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-2024_edition-orange?logo=rust&logoColor=white" alt="Rust edition 2024"></a>
+  <a href="https://github.com/ltspace/dowse/releases"><img src="https://img.shields.io/github/downloads/ltspace/dowse/total" alt="Downloads"></a>
+</p>
 
 The name comes from a dowsing rod.
 
-<!-- [Image slot 1: overlay in action GIF: summon, type, results appear, jump to folder] -->
+<!-- Screenshot slot: hero.png — main window mid-search, a query typed in the bar with
+     several ranked results visible below (highlighted match terms in the snippets),
+     light or dark theme, no PII in the visible file paths. Save to docs/screenshots/hero.png. -->
 
 ## Motivation
 
@@ -22,6 +36,30 @@ No Windows tool satisfies all three of the following at once:
 
 The closest open-source implementation is sist2, but it targets Linux (on Windows it only runs via Docker), treats Chinese text as trigrams, and the project is no longer maintained. dowse is a Windows-native implementation built around these three points.
 
+## Features
+
+| | |
+|---|---|
+| 🔍 **File name search** | Instant, as you type |
+| 📄 **Document content search** | Plain text, Markdown, code, and Office formats (PDF, Word, Excel, PowerPoint) |
+| 🖼️ **Screenshot / image OCR** | Text inside PNG/JPG/WebP/BMP images, fully offline (Windows.Media.Ocr) |
+| 🈶 **Chinese word segmentation** | jieba + BM25 ranking, not trigrams — plus automatic GBK encoding detection |
+| ⚡ **Incremental indexing** | File-watch during runtime, mtime/size reconciliation at startup |
+| 🤖 **MCP server** | Exposes local search to AI agents over stdio |
+| 🚀 **NTFS fast path** | MFT enumeration + USN Journal, admin-only, falls back transparently otherwise |
+
+## dowse vs. the alternatives
+
+| | dowse | Everything | Windows Search | sist2 |
+|---|:---:|:---:|:---:|:---:|
+| File name search | ✓ | ✓ | ✓ | ✓ |
+| Document content search | ✓ | ✗ | partial, slow | ✓ |
+| Screenshot / image OCR | ✓ | ✗ | ✗ | limited (optional Tesseract) |
+| Proper Chinese segmentation | ✓ (jieba) | — | limited | ✗ (trigrams) |
+| Fully local, no network | ✓ | ✓ | ✓ | ✓ |
+| Global hotkey overlay | ✓ | ✓ | ✓ (Win key) | ✗ (web UI) |
+| Windows-native | ✓ | ✓ | ✓ | ✗ (Linux-first, Docker on Windows) |
+
 ## Chinese text handling
 
 - Word segmentation via jieba, ranking via BM25 (tantivy engine). No trigrams.
@@ -31,35 +69,71 @@ The closest open-source implementation is sist2, but it targets Linux (on Window
 
 ## Performance
 
-Design targets; exceeding them is treated as a defect:
+Design targets; exceeding them is treated as a defect. "Measured" is round 3 of a
+from-scratch benchmark (`dowse 0.6.1`, i7-13700K / 24 logical cores / 64GB RAM, single
+machine, single session, 2026-07-12). Full methodology and raw numbers (`BENCH-REPORT-V3.md`)
+are kept with the benchmark working directory, outside this repo.
 
-| Metric | Target | Measured (round 2, 2026-07-12) | Note |
-|---|---|---|---|
-| Hotkey to window visible | < 50ms | not measured this round | round 2 was a CLI-only benchmark, no overlay app instrumentation |
-| Keystroke to results rendered | < 80ms | not measured this round | same |
-| OCR | ~112ms / 1080p screenshot | ~100–125ms / image | 100 synthetic 480×200 PNGs with rendered CJK/EN text, drained via `dowse index`'s OCR queue; not a literal 1080p-screenshot test |
-| Resident memory | < 150MB | not measured this round (see indexing peak below) | this target is overlay-app idle memory; the CLI benchmark only measured indexing-time peak working set |
-| Installer size | < 15MB | not measured this round | no packaging step in this benchmark |
-| File name index build (planned) | seconds | 27–34s for a 10,000-file / 437MB **content** index | not the planned filename-only MFT fast path — this is the current full-text `dowse index` command |
-| Full-corpus index throughput (new) | — | ~13–16MB/s, ~300–375 files/s | same 10k-file/437MB corpus as the previous benchmark round, which measured ~47MB/s |
-| Search latency, P50 (new) | — | ~250–450ms across common-word/sentinel/phrase queries | CLI process-per-query cost including startup; phrase-query latency improved substantially since the previous round, simple-query latency increased |
-| Index size ÷ corpus size (new) | — | ~0.64–0.66 | down from ~0.76 in the previous benchmark round |
+| Metric | Design target | Measured (round 3, v0.6.1, 2026-07-12) |
+|---|---|---|
+| Hotkey to window visible | < 50ms | not measured — CLI-only benchmark, no overlay-app instrumentation |
+| Keystroke to results rendered | < 80ms | not measured — same |
+| OCR, single image | ~112ms / 1080p screenshot | ~176ms isolated; ~12–19ms/image at full-queue throughput (worker pool + batch commit) — synthetic 480×200 test images, not real 1080p screenshots |
+| Resident memory | < 150MB idle | not measured (idle); peak working set during full-corpus indexing was ~507MB — a different metric, not a regression against the idle target |
+| Installer size | < 15MB | **9.75MB** (`dowse-app_0.6.1_x64-setup.exe`, published release) |
+| Full-text index build, 10,000 files / 437MB | seconds (planned filename-only fast path) | 19.8–21.4s — current full-content `dowse index`, not the planned filename-only MFT path |
+| Full-text index build + OCR, 15,100 files (incl. 5,100 images) | — | ~83s first pass (5,015/5,100 images OCR'd; a write-conflict retry budget left 85 pending, cleared by a second pass in <2s — resumable, not lost) |
+| Search latency, P50 (5 required categories) | — | 149–178ms across single word / Chinese phrase / English phrase / multi-word AND / zero-result, on a 15,100-document index |
+| Search latency, P95 | — | 155–186ms, same 5 categories |
+| `ext:` filter query latency | — | P50 153ms, same band as unfiltered queries |
+| Index size ÷ corpus size | — | 0.54 (text-only), down from 0.64–0.66 in the prior benchmark round and 0.76 two rounds ago |
 
-Full-corpus rows measured on a 10,000-file / 437MB synthetic mixed Chinese/English corpus (i7-13700K, 24 logical cores, 64GB RAM), single machine, single session.
+Full-corpus rows measured on a 10,000-file / 437.66MB text corpus plus 5,100 synthetic
+480×200 OCR images (89.8MB), byte-size-matched to the prior two benchmark rounds' text corpus
+for comparability. Two prior full rebuild rounds are documented; the round immediately before
+this one found full-corpus indexing ~3x slower and a ~95% crash rate under rapid repeated
+rebuilds — this round found neither: indexing is back near round-1 levels and every transient
+write conflict encountered was caught and auto-retried, with zero unrecovered failures.
 
-## Usage
+## Quick start
+
+**Download** — grab the installer from the [latest release](https://github.com/ltspace/dowse/releases/latest) (`dowse-app_*_x64-setup.exe`), run it, then `Alt+\`` to summon.
+
+**Build from source:**
 
 ```powershell
 git clone https://github.com/ltspace/dowse && cd dowse
 
+# CLI
 cargo run -p dowse -- index D:\docs      # build the index
 cargo run -p dowse -- search 限流         # search
 cargo run -p dowse -- search "精确短语"   # phrase query
+
+# Overlay app (Tauri 2 + Svelte 5)
+cd crates/dowse-app
+npm install
+cargo tauri build      # produces the installer under target/release/bundle
 ```
 
-Overlay app (released; current v0.2.1, v0.3.0 coming soon): `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two ghost-style dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay near-invisible until a non-default value is picked. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart).
+Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two ghost-style dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay near-invisible until a non-default value is picked. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart).
 
-<!-- [Image slot 2: light/dark theme + preview pane screenshot] -->
+<!-- Screenshot slot: ocr-preview.png — the preview pane showing an image result, the
+     original image rendered inline, with the OCR-extracted text and its matched/highlighted
+     segment visible alongside it. Save to docs/screenshots/ocr-preview.png. -->
+
+## MCP server
+
+`dowse mcp` starts a read-only [MCP](https://modelcontextprotocol.io) server over stdio, exposing the local index to AI agents:
+
+```
+claude mcp add dowse -- dowse mcp
+```
+
+Three tools: `search` (query, limit, optional `ext` filter), `preview` (full snippet + metadata for one hit), `index_status` (document count, index health). The server never touches the index writer — it only reloads the reader before each call, so it can run alongside the overlay app or a live `dowse watch` session without write contention.
+
+<!-- Screenshot slot: actions.png — either the sort/filter dropdowns open (Ctrl+S / Ctrl+P)
+     or the right-click context menu on a result row, showing the available actions.
+     Save to docs/screenshots/actions.png. -->
 
 ## Architecture
 
@@ -69,7 +143,7 @@ Overlay app (released; current v0.2.1, v0.3.0 coming soon): `Alt+\`` to summon, 
                  │  tantivy index · jieba segmentation ·     │
                  │  encoding detection · text extraction     │
                  │  (txt/md/pdf/code/docx/xlsx/pptx) ·       │
-                 │  OCR pipeline*                            │
+                 │  OCR pipeline                             │
                  └──────┬──────────┬──────────┬────────────┘
                         │          │          │
                  ┌──────┴───┐ ┌────┴─────┐ ┌──┴───────────┐
@@ -79,18 +153,19 @@ Overlay app (released; current v0.2.1, v0.3.0 coming soon): `Alt+\`` to summon, 
 
 One index core, three consumers. dowse-app is a Tauri 2 + Svelte 5 resident overlay; the CLI is for scripting and debugging; the MCP server exposes the local index to AI agents.
 
-Index updates run on a two-tier scheme: while running, file system events drive incremental updates (500ms debounce window, batched commits); at startup, an mtime/size comparison reconciles changes made while the app was not running.
+Index updates run on a two-tier scheme: while running, file system events drive incremental updates (500ms debounce window, batched commits); at startup, an mtime/size comparison reconciles changes made while the app was not running. On NTFS volumes with admin rights, the same two tiers are served by MFT enumeration and the USN Journal instead of directory walks and file-system-event watching; both paths produce identical results and the upper layers cannot tell which one is active.
 
 ## Roadmap
 
 | # | Scope | Status |
 |---|---|---|
-| 1 | CLI indexing and search: Chinese segmentation, GBK detection, highlighting | Done |
-| 2 | Overlay: global hotkey, Acrylic material, keyboard navigation | In progress |
-| 3 | Incremental indexing: file watching, startup reconciliation | Done |
-| 4 | OCR pipeline: screenshot text into the index | Done |
-| 5 | MCP server | Done |
-| 6 | NTFS MFT / USN Journal fast path | Done (the admin-only fast path itself is not yet verified on real hardware — see the design doc's implementation notes) |
+| 1 | CLI indexing and search: Chinese segmentation, GBK detection, highlighting | ✅ Done |
+| 2 | Overlay: global hotkey, Acrylic material, keyboard navigation | ✅ Done |
+| 3 | Incremental indexing: file watching, startup reconciliation | ✅ Done |
+| 4 | OCR pipeline: screenshot text into the index | ✅ Done |
+| 5 | MCP server | ✅ Done |
+| 6 | NTFS MFT / USN Journal fast path | ✅ Done (the admin-only fast path itself is not yet verified on real hardware — see the design doc's implementation notes) |
+| 7 | Semantic search (embeddings, hybrid ranking) | 🔍 Exploring |
 
 ## Stack
 
@@ -111,3 +186,27 @@ The index is stored locally (`%LOCALAPPDATA%\dowse`). No network access, no tele
 ## License
 
 Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+
+## A note
+
+As a kid I had a single Coolpad phone. In the long stretches without internet, I would open
+the file manager and study the files one by one, trying to figure out what they were and how
+they fit together, forever lost among files scattered everywhere with no idea what any of
+them held.
+
+In college I bought a QNAP NAS and discovered Qsirch, a genuinely good thing, except it lived
+only on the NAS and had no Windows version.
+
+screenpipe got there first, a kind of primitive version of the memory grain from Black Mirror
+S1E3, The Entire History of You. Very future, very post-modern, close to the ultimate form of
+local search, but far too heavy for the world as it is now.
+
+So I made dowse.
+
+The film Her reads like a prophecy: before long, AI will run our personal
+computers. dowse takes its cue from that and exposes an MCP interface for AI to call, except
+what it searches is your own files, on your own machine.
+
+If you are a little obsessive, if you like keeping things in order, if you want real control
+over your own file system, this is for you. Performance and beauty are things I cared about
+just as much.
