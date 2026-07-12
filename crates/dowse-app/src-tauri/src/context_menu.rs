@@ -54,16 +54,17 @@ pub fn show_result_context_menu(
 ) -> Result<(), String> {
     target.set(PathBuf::from(&path));
 
-    let open_item = MenuItemBuilder::with_id(ITEM_OPEN, "打开")
+    let s = crate::i18n::strings();
+    let open_item = MenuItemBuilder::with_id(ITEM_OPEN, s.ctx_open)
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let reveal_item = MenuItemBuilder::with_id(ITEM_REVEAL, "打开所在文件夹")
+    let reveal_item = MenuItemBuilder::with_id(ITEM_REVEAL, s.ctx_reveal)
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let copy_path_item = MenuItemBuilder::with_id(ITEM_COPY_PATH, "复制完整路径")
+    let copy_path_item = MenuItemBuilder::with_id(ITEM_COPY_PATH, s.ctx_copy_path)
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let copy_name_item = MenuItemBuilder::with_id(ITEM_COPY_NAME, "复制文件名")
+    let copy_name_item = MenuItemBuilder::with_id(ITEM_COPY_NAME, s.ctx_copy_name)
         .build(&app)
         .map_err(|e| e.to_string())?;
 
