@@ -41,6 +41,8 @@ fn count_hits(index_dir: &Path, query: &str) -> usize {
 /// 只看扩展名 + 文件体积就会把新图片塞进 pending，内容随便写。
 #[test]
 fn add_root_makes_both_roots_searchable_and_queues_new_images_for_ocr() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let a = tempdir("dowse-a-");
     std::fs::write(a.path().join("a.md"), "根 A 的内容 apricot")?;
@@ -82,6 +84,8 @@ fn add_root_makes_both_roots_searchable_and_queues_new_images_for_ocr() -> Resul
 /// 新写的文件应该像单根场景一样很快变可搜——多根不改变监听侧的行为。
 #[test]
 fn editing_a_file_under_newly_added_root_becomes_searchable_via_live_watch() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let a = tempdir("dowse-a-");
     std::fs::write(a.path().join("a.md"), "根 A 的内容 apricot")?;
@@ -140,6 +144,8 @@ fn editing_a_file_under_newly_added_root_becomes_searchable_via_live_watch() -> 
 /// 残留（`compact` 用移除后的最新根集合裁剪）。
 #[test]
 fn remove_root_deletes_its_docs_and_compacts_ocr_queue() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let a = tempdir("dowse-a-");
     std::fs::write(a.path().join("a.md"), "根 A 的内容 apricot")?;
@@ -192,6 +198,8 @@ fn remove_root_deletes_its_docs_and_compacts_ocr_queue() -> Result<()> {
 /// 污染 meta）。
 #[test]
 fn add_root_rejects_child_and_parent_of_existing_root() -> Result<()> {
+    common::force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let a = tempdir("dowse-a-");
     let sub = a.path().join("sub");

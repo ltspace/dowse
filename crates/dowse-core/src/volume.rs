@@ -51,11 +51,45 @@ pub(crate) fn volume_key(path: &Path) -> Option<VolumeKey> {
 static CAPABILITY_CACHE: LazyLock<Mutex<HashMap<VolumeKey, RootCapability>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// 只给集成测试用的逃生舱：设了这个环境变量（任意非空值）就无条件判定
+/// Fallback，连 NTFS/管理员探测都不做。跟 `DOWSE_INDEX_DIR`
+/// （dowse-cli/src/main.rs）同一类东西——只给测试用，不是产品对外配置项。
+///
+/// 动机：CI 跑机（GitHub Actions windows-latest）是管理员身份，`rebuild_index`/
+/// `watch_roots_auto` 在这种环境下会真的走 MFT 快速枚举，而它枚举的是**整卷**
+/// （系统盘 C: 实测 ~130 万条 MFT 记录，几十秒量级），远超"只需要索引能用"的
+/// 普通集成测试（ocr_pipeline/e2e_watch/incremental/reconcile 等）原本设计的
+/// 轮询等待预算——这类测试只关心索引结果对不对，不关心走的是哪条车道。之前
+/// 靠反复放宽轮询超时来兜（见 e2e_watch.rs 模块文档的排障记录）治标不治本，
+/// 每次 CI 随机冲垮一个不同的测试。这个逃生舱让那些测试改成确定性地走
+/// walkdir + notify 慢车道，快、稳定，且两条车道产出的文档/事件本来就承诺
+/// 完全一致（设计文档原话），走慢车道不改变被测行为。
+///
+/// `tests/ntfs_fast_path.rs` 是唯一的例外：它就是专门验证真快车道（MFT 枚举 +
+/// USN Journal）本身的测试，绝不能设这个变量，否则会在管理员环境下也静默
+/// 退化成只测降级路径，白白丢失覆盖。
+const FORCE_SLOW_LANE_ENV: &str = "DOWSE_FORCE_SLOW_LANE";
+
 /// 探测一个监听根应该走快车道还是慢车道。诚实降级：拿不到卷句柄（非管理员）
 /// 就静默走现有 notify 路径，不报错、不崩溃，只打一行日志说明原因
 /// （设计文档"与现有架构的关系"一节："诚实降级：落到哪条路径、为什么，
 /// 写日志"）。按卷缓存结果，见 `CAPABILITY_CACHE` 的文档。
 pub(crate) fn probe_root_capability(root: &Path) -> RootCapability {
+    // `dowse-core` 自己 `#[cfg(test)] mod tests`（indexer.rs/meta.rs/roots.rs/
+    // searcher.rs/status.rs/updater.rs 等）里散落的几十处 `rebuild_index` 调用
+    // 同样只关心索引结果对不对，不关心走哪条车道——同上面 `FORCE_SLOW_LANE_ENV`
+    // 一个动机，但这些是库自身的单元测试，不值得每个调用点都手动加一次逃生舱。
+    // `cfg!(test)` 在这里是精确的开关：它只在 `dowse-core` 编译自己的单元测试
+    // 二进制（`cargo test -p dowse-core --lib`）时为真；`tests/*.rs` 下的集成
+    // 测试（含 `ntfs_fast_path.rs`）是把 `dowse-core` 当普通依赖库链接，编译时
+    // 不带 `--cfg test`，不受这条短路影响，快车道覆盖不受损。
+    if cfg!(test) || std::env::var_os(FORCE_SLOW_LANE_ENV).is_some() {
+        return RootCapability::Fallback {
+            reason: "测试环境（cfg(test) 或 DOWSE_FORCE_SLOW_LANE 逃生舱），强制走慢车道"
+                .to_string(),
+        };
+    }
+
     let Some(vol) = volume_key(root) else {
         // 连卷标识都解析不出来，没法缓存，也没必要——这种路径本来就走不到
         // 探测这一步之后的任何缓存收益。

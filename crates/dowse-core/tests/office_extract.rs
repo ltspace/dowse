@@ -10,6 +10,21 @@ use anyhow::Result;
 use dowse_core::{Searcher, rebuild_index};
 use zip::write::SimpleFileOptions;
 
+/// 逃生舱开关，跟 `tests/common/mod.rs::force_slow_lane_for_tests` 同一份文档、
+/// 同一套 `Once` 理由——这个文件没有 `mod common`（不需要它的 tempdir 收尾
+/// 辅助），本地补一份最小实现，避免为了一个函数把整个 common 模块引进来。
+static FORCE_SLOW_LANE_INIT: std::sync::Once = std::sync::Once::new();
+
+fn force_slow_lane_for_tests() {
+    FORCE_SLOW_LANE_INIT.call_once(|| {
+        // Safety: 全进程只有这一处写这个环境变量，`Once` 保证只执行一次；
+        // 调用方约定"用 rebuild_index 之前先调这个函数"，不存在并发读者。
+        unsafe {
+            std::env::set_var("DOWSE_FORCE_SLOW_LANE", "1");
+        }
+    });
+}
+
 /// 建索引用的目标目录名不能带 "." 前缀——walk_index_files 会整棵跳过隐藏目录，
 /// 而 tempfile 默认给临时目录起 ".tmpXXXX" 这种名字。
 fn target_dir() -> tempfile::TempDir {
@@ -37,6 +52,8 @@ fn count_hits(index_dir: &Path, query: &str) -> usize {
 
 #[test]
 fn office_documents_are_indexed_and_searchable() -> Result<()> {
+    force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
 
@@ -87,6 +104,8 @@ fn office_documents_are_indexed_and_searchable() -> Result<()> {
 
 #[test]
 fn corrupted_docx_is_skipped_not_indexed() -> Result<()> {
+    force_slow_lane_for_tests();
+
     let index_dir = tempfile::tempdir()?;
     let target = target_dir();
 
