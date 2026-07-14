@@ -12,3 +12,6 @@
 # MCPB 打包产物：exe 由构建复制进来，bundle 是打包输出，都不进仓库
 /mcpb/server/
 *.mcpb
+
+# Tauri sidecar 产物：构建时从 target/release 复制进来，不进仓库
+/crates/dowse-app/src-tauri/binaries/

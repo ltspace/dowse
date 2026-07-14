@@ -31,6 +31,15 @@ jobs:
         working-directory: crates/dowse-app
         run: npm ci
 
+      # issue #13:CLI 作为 Tauri sidecar 打进安装包。externalBin 要求文件名
+      # 带 target triple 后缀,构建前先编好 CLI 并复制到约定路径。
+      - name: Build CLI sidecar
+        shell: pwsh
+        run: |
+          cargo build --release -p dowse
+          New-Item -ItemType Directory -Force crates/dowse-app/src-tauri/binaries | Out-Null
+          Copy-Item target/release/dowse.exe crates/dowse-app/src-tauri/binaries/dowse-x86_64-pc-windows-msvc.exe
+
       - name: Build Tauri bundle
         working-directory: crates/dowse-app
         run: npm run tauri build

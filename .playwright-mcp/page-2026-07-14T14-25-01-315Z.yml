@@ -1,0 +1,137 @@
+- generic [active] [ref=f3e1]:
+  - navigation [ref=f3e2]:
+    - generic [ref=f3e3]:
+      - generic [ref=f3e4]: dowse问渠
+      - generic [ref=f3e5]:
+        - link "功能" [ref=f3e6] [cursor=pointer]:
+          - /url: "#features"
+        - link "MCP" [ref=f3e7] [cursor=pointer]:
+          - /url: "#mcp"
+        - link "安装" [ref=f3e8] [cursor=pointer]:
+          - /url: "#install"
+        - link "GitHub ↗" [ref=f3e9] [cursor=pointer]:
+          - /url: https://github.com/ltspace/dowse
+  - banner [ref=f3e10]:
+    - paragraph [ref=f3e11]: WINDOWS · 本地 · 开源
+    - heading "文件名、文档内容、截图里的文字, 快捷键呼出,毫秒级返回。" [level=1] [ref=f3e12]: 文件名、文档内容、截图里的文字,快捷键呼出,毫秒级返回。
+    - paragraph [ref=f3e13]: tantivy 倒排索引 + jieba 中文分词 + Windows OCR。索引住在你的硬盘上,答案也是——零网络请求。
+    - generic [ref=f3e14]:
+      - link "下载 Windows 安装包" [ref=f3e15] [cursor=pointer]:
+        - /url: https://github.com/ltspace/dowse/releases/latest
+      - button "$ cargo install dowse" [ref=f3e16] [cursor=pointer]
+  - generic [ref=f3e17]:
+    - generic [ref=f3e18]:
+      - generic [ref=f3e19]:
+        - generic [ref=f3e22]: dowse — local search
+        - generic [ref=f3e23]: "net: 0"
+      - img "终端演示:搜索上海银行,命中 PDF、截图 OCR 与 Word 文档,共 3 条,1.2 毫秒" [ref=f3e24]:
+        - text: $ dowse search "上海银行"
+        - generic [ref=f3e25]: 贷款合同_2024.pdf
+        - text: …向«上海银行»申请经营性贷款,期限…
+        - generic [ref=f3e26]: screenshot_0412.png
+        - text: "ocr: …«上海银行»间同业拆放利率 (Shibor)…"
+        - generic [ref=f3e27]: 会议纪要_三月.docx
+        - text: …资金托管与«上海银行»对接,下周复核… 3 hits · 1.2ms · 全程本地 $
+    - generic [ref=f3e29]:
+      - generic [ref=f3e30]: 内容命中,不止文件名
+      - generic [ref=f3e31]: 截图走 OCR
+      - generic [ref=f3e32]: 中文按词切分
+  - generic [ref=f3e33]:
+    - generic [ref=f3e34]:
+      - generic [ref=f3e35]: 80ms
+      - text: 搜索预算
+    - generic [ref=f3e36]:
+      - generic [ref=f3e37]: ≤15MB
+      - text: 安装包预算
+    - generic [ref=f3e38]:
+      - generic [ref=f3e39]: "0"
+      - text: 网络请求
+    - generic [ref=f3e40]:
+      - generic [ref=f3e41]: 3×RO
+      - text: MCP 只读工具
+  - generic [ref=f3e42]:
+    - paragraph [ref=f3e43]: Features
+    - heading "功能" [level=2] [ref=f3e44]
+    - generic [ref=f3e45]:
+      - generic [ref=f3e46]:
+        - heading "«01»全文,不止文件名" [level=3] [ref=f3e47]
+        - paragraph [ref=f3e48]: tantivy 倒排索引,PDF、Office 文档、压缩包里的内容一并可搜——搜的是"里面写了什么"。
+      - generic [ref=f3e49]:
+        - heading "«02»中文按词切" [level=3] [ref=f3e50]
+        - paragraph [ref=f3e51]: jieba 分词,按语义命中,不是按单字碰运气;长文档里的一句话也找得回来。
+      - generic [ref=f3e52]:
+        - heading "«03»截图里的字也能搜" [level=3] [ref=f3e53]
+        - paragraph [ref=f3e54]: Windows 系统自带 OCR。报错截图、聊天截图,输入记忆里的那句话,图就回来了。
+      - generic [ref=f3e55]:
+        - heading "«04»NTFS 快速层" [level=3] [ref=f3e56]
+        - paragraph [ref=f3e57]: MFT 枚举 + USN Journal 增量更新,文件一变索引就知道,不做全盘重扫。
+      - generic [ref=f3e58]:
+        - heading "«05»数据不出机器" [level=3] [ref=f3e59]
+        - paragraph [ref=f3e60]: 零网络请求,索引落在本地目录。开着防火墙监控看,它一句话也不往外说。
+      - generic [ref=f3e61]:
+        - heading "«06»轻" [level=3] [ref=f3e62]
+        - paragraph [ref=f3e63]: 安装包预算 15MB,写进设计文档的约束:"超了就是 bug"。
+    - figure "实拍:查询 \"sql\",命中词以 «» 标出,右侧即时预览。" [ref=f3e64]:
+      - img "dowse 浮窗实际截图:查询 sql,排序结果列表与右侧预览面板" [ref=f3e65]
+  - generic [ref=f3e67]:
+    - paragraph [ref=f3e68]: MCP Server
+    - heading "给 AI 用" [level=2] [ref=f3e69]
+    - generic [ref=f3e70]:
+      - generic [ref=f3e71]:
+        - paragraph [ref=f3e72]: 你的 AI 读过整个互联网,却读不到你的硬盘。dowse 内置只读 MCP server,Claude、Cursor 等客户端接入后,可以直接检索你索引过的本地文件。
+        - list [ref=f3e73]:
+          - listitem [ref=f3e74]:
+            - generic [ref=f3e75]: search
+            - generic [ref=f3e76]: 全文搜索,按相关度排序
+            - generic [ref=f3e77]: READ-ONLY
+          - listitem [ref=f3e78]:
+            - generic [ref=f3e79]: preview
+            - generic [ref=f3e80]: 命中处约 1500 字长上下文
+            - generic [ref=f3e81]: READ-ONLY
+          - listitem [ref=f3e82]:
+            - generic [ref=f3e83]: index_status
+            - generic [ref=f3e84]: 索引概况
+            - generic [ref=f3e85]: READ-ONLY
+        - paragraph [ref=f3e86]:
+          - text: listed on
+          - link "MCP Registry" [ref=f3e87] [cursor=pointer]:
+            - /url: https://registry.modelcontextprotocol.io/v0/servers?search=dowse
+          - link "Glama (A)" [ref=f3e88] [cursor=pointer]:
+            - /url: https://glama.ai/mcp/servers/ltspace/dowse
+          - link "Smithery" [ref=f3e89] [cursor=pointer]:
+            - /url: https://smithery.ai/servers/ltspace/dowse
+          - link "ModelScope" [ref=f3e90] [cursor=pointer]:
+            - /url: https://modelscope.cn/mcp
+      - generic [ref=f3e91]:
+        - button "copy" [ref=f3e92] [cursor=pointer]
+        - text: "# Claude Code 一行接入 $ claude mcp add dowse -- dowse mcp # 任意 MCP 客户端 JSON 配置 { \"mcpServers\": { \"dowse\": { \"command\": \"dowse\", \"args\": [\"mcp\"] } } }"
+  - generic [ref=f3e93]:
+    - paragraph [ref=f3e94]: Install
+    - heading "安装" [level=2] [ref=f3e95]
+    - generic [ref=f3e96]:
+      - generic [ref=f3e97]:
+        - generic [ref=f3e98]: GUI
+        - paragraph [ref=f3e99]: 下载安装包,快捷键呼出浮窗。未签名二进制,SmartScreen 拦截时选"仍要运行";SHA-256 在 checksums.txt。
+        - link "下载最新版 ↗" [ref=f3e101] [cursor=pointer]:
+          - /url: https://github.com/ltspace/dowse/releases/latest
+      - generic [ref=f3e102]:
+        - generic [ref=f3e103]: CLI
+        - paragraph [ref=f3e104]: Rust 1.85+。建索引、搜索、起 MCP server,都在一个命令里。
+        - button "$ cargo install dowse" [ref=f3e106] [cursor=pointer]
+      - generic [ref=f3e107]:
+        - generic [ref=f3e108]: MCP
+        - paragraph [ref=f3e109]: 先用 GUI 或 CLI 建好索引,再挂进 AI 客户端。
+        - button "$ claude mcp add dowse" [ref=f3e111] [cursor=pointer]
+    - paragraph [ref=f3e112]: 非 Windows 平台可编译安装,核心检索可用;NTFS 快速层与 OCR 自动降级停用。
+  - contentinfo [ref=f3e113]:
+    - generic [ref=f3e114]:
+      - generic [ref=f3e115]: 英文名取自探水杖,中文名问的是活水:问渠那得清如许,为有源头活水来。
+      - generic [ref=f3e116]:
+        - link "github" [ref=f3e117] [cursor=pointer]:
+          - /url: https://github.com/ltspace/dowse
+        - link "crates.io" [ref=f3e118] [cursor=pointer]:
+          - /url: https://crates.io/crates/dowse
+        - link "docs.rs" [ref=f3e119] [cursor=pointer]:
+          - /url: https://docs.rs/dowse
+        - link "privacy" [ref=f3e120] [cursor=pointer]:
+          - /url: https://github.com/ltspace/dowse/blob/main/PRIVACY.md

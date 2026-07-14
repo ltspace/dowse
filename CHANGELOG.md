@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-07-14
+
+### Added
+
+- The Windows installer now bundles the `dowse` CLI as a Tauri sidecar and
+  adds the install directory to the user PATH, so `dowse` — and
+  `claude mcp add dowse -- dowse mcp` — work out of the box for GUI installs.
+  The uninstaller removes the PATH entry. (#13)
+- MCP tools now carry `title` and `readOnlyHint` annotations, as required by
+  the Claude connectors directory and used by MCP clients for auto-permission
+  decisions.
+- A privacy policy (PRIVACY.md), an MCPB desktop-extension package for Claude
+  Desktop (`mcpb/`), and a landing page at <https://lter.space/dowse/>.
+
+### Changed
+
+- dowse now has a Chinese name: 问渠 ("ask the channel", from Zhu Xi's poem
+  that also explains the index: clear water comes from a living source).
+
 ## [0.8.2] - 2026-07-13
 
 ### Changed
