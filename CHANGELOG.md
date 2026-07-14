@@ -24,6 +24,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - dowse now has a Chinese name: 问渠 ("ask the channel", from Zhu Xi's poem
   that also explains the index: clear water comes from a living source).
+- The MSI bundle is paused for this release: with the bundled CLI it exceeds
+  the 15MB installer budget (16.96MB) and WiX does not run the NSIS PATH
+  hooks, which would leave MSI installs with an inconsistent `dowse` command
+  experience. NSIS setup.exe (14.31MB, within budget) is the sole installer
+  until proper WiX Environment support lands.
 
 ## [0.8.2] - 2026-07-13
 
