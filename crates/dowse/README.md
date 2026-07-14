@@ -1,4 +1,4 @@
-# dowse
+# dowse（问渠）
 
 **Windows 本地文件极速全文搜索**的命令行工具，基于 [tantivy](https://github.com/quickwit-oss/tantivy) + jieba 中文分词。同时可作为 [MCP](https://modelcontextprotocol.io) 服务，供 AI 客户端调用本地搜索能力。
 

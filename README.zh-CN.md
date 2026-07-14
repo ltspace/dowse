@@ -4,7 +4,7 @@
   <img src="crates/dowse-app/src-tauri/icons/128x128@2x.png" width="96" height="96" alt="dowse logo">
 </p>
 
-<h1 align="center">dowse</h1>
+<h1 align="center">问渠 dowse</h1>
 
 <p align="center">
   Windows 本地全文搜索。文件名、文档内容、截图里的文字，快捷键呼出，毫秒级返回。
@@ -21,7 +21,7 @@
   <a href="https://glama.ai/mcp/servers/ltspace/dowse"><img src="https://glama.ai/mcp/servers/ltspace/dowse/badges/score.svg" alt="Glama MCP server 评分"></a>
 </p>
 
-名字取自 dowsing rod（探水杖）。
+英文名取自 dowsing rod（探水杖）；中文名「问渠」，取朱熹《观书有感》"问渠那得清如许，为有源头活水来"——探水杖找水，问渠亦问水：你的文件是源头，dowse 让你随时问得到。
 
 ![dowse 浮窗搜索中途，查询词"sql"，下方是排好序的文件结果，右侧是预览区](docs/screenshots/hero.png)
 
