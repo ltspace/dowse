@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ltspace/dowse",
+  "title": "dowse",
+  "description": "Fast local full-text search for Windows files (tantivy + jieba), exposed to AI agents over MCP.",
+  "version": "0.8.2",
+  "websiteUrl": "https://github.com/ltspace/dowse",
+  "repository": {
+    "url": "https://github.com/ltspace/dowse",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "cargo",
+      "registryBaseUrl": "https://crates.io",
+      "identifier": "dowse",
+      "version": "0.8.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}
