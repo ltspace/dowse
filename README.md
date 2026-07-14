@@ -18,6 +18,7 @@ English | [简体中文](README.zh-CN.md)
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white" alt="Platform: Windows">
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-2024_edition-orange?logo=rust&logoColor=white" alt="Rust edition 2024"></a>
   <a href="https://github.com/ltspace/dowse/releases"><img src="https://img.shields.io/github/downloads/ltspace/dowse/total" alt="Downloads"></a>
+  <a href="https://glama.ai/mcp/servers/ltspace/dowse"><img src="https://glama.ai/mcp/servers/ltspace/dowse/badges/score.svg" alt="Glama MCP server score"></a>
 </p>
 
 The name comes from a dowsing rod.
