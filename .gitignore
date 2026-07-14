@@ -15,3 +15,7 @@
 
 # Tauri sidecar 产物：构建时从 target/release 复制进来，不进仓库
 /crates/dowse-app/src-tauri/binaries/
+
+# Playwright MCP 调试产物
+/.playwright-mcp/
+/dowse-site-full.png
