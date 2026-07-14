@@ -34,6 +34,15 @@ jobs:
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
 
+      # tauri-build 的 build.rs 要求 externalBin 声明的 sidecar 文件在编译期存在
+      # (issue #13)。测试不运行 sidecar,复制 debug 产物凑数即可,免烧 release 编译时间。
+      - name: Prepare CLI sidecar for tauri-build
+        shell: pwsh
+        run: |
+          cargo build -p dowse
+          New-Item -ItemType Directory -Force crates/dowse-app/src-tauri/binaries | Out-Null
+          Copy-Item target/debug/dowse.exe crates/dowse-app/src-tauri/binaries/dowse-x86_64-pc-windows-msvc.exe
+
       - name: Test
         run: cargo test --workspace
 
