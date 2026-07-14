@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DOWSE 问渠 — LOCAL FULLTEXT SEARCH TERMINAL</title>
+<meta name="description" content="Windows 本地全文搜索:文件名、文档内容、截图 OCR,毫秒级返回,零网络请求。内置只读 MCP server,让 AI 检索你的硬盘。">
+<link rel="icon" href="assets/icon.png">
+<meta property="og:title" content="DOWSE 问渠 — Windows 本地全文搜索">
+<meta property="og:description" content="文件名、文档内容、截图里的文字——快捷键呼出,毫秒级返回。">
+<meta property="og:image" content="https://ltspace.github.io/dowse/assets/hero.png">
+<style>
+/* ─── phosphor variants: base + bright, 其余全部 color-mix 派生 ─── */
+:root{
+  --crt-base:#ffb14a; --crt-bright:#ffe0b0;           /* amber / IBM 5151 */
+  --crt-shell:#141210; --crt-under:#1a0e02;
+}
+:root[data-phosphor='green']{ --crt-base:#7eea60; --crt-bright:#d6f9c0; --crt-under:#061403; }
+:root[data-phosphor='blue']{  --crt-base:#5fc8ff; --crt-bright:#d8f1ff; --crt-under:#03101a; }
+:root{
+  --fg:var(--crt-base);
+  --fg-dim:  color-mix(in srgb, var(--crt-base) 55%, transparent);
+  --fg-faint:color-mix(in srgb, var(--crt-base) 32%, transparent);
+  --line:    color-mix(in srgb, var(--crt-base) 22%, transparent);
+  --fill:    color-mix(in srgb, var(--crt-base) 7%, transparent);
+  --glow-1:  color-mix(in srgb, var(--crt-base) 65%, transparent);
+  --glow-2:  color-mix(in srgb, var(--crt-base) 35%, transparent);
+  --env:     color-mix(in srgb, var(--crt-base) 12%, transparent);
+  --mono:"Cascadia Code","JetBrains Mono","IBM Plex Mono","Sarasa Mono SC",Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:#0a0908;
+  font-family:var(--mono);font-size:15px;line-height:1.65;
+  color:var(--fg);
+  font-feature-settings:"liga" 0;
+  padding:26px clamp(8px,3vw,40px) 48px;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--fg);color:#100800}
+a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--fg-faint)}
+a:hover{color:var(--crt-bright);border-bottom-color:var(--fg)}
+a:focus-visible,button:focus-visible{outline:1px solid var(--fg);outline-offset:3px}
+
+/* ─── bezel(机身)+ screen(凹陷屏面) ─── */
+.bezel{
+  max-width:1120px;margin:0 auto;position:relative;
+  background:linear-gradient(180deg,#191613,#0f0d0b);
+  border-radius:26px;padding:clamp(10px,2vw,22px);
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,.6),
+    inset 0 1px 0 rgba(255,220,170,.07),
+    inset 0 -1px 0 rgba(0,0,0,.7),
+    0 30px 80px rgba(0,0,0,.7),
+    0 0 90px var(--env);
+}
+.bezel::after{
+  content:"DOWSE · 问渠 TERMINAL";
+  position:absolute;left:50%;bottom:-34px;transform:translateX(-50%);
+  font-size:10px;letter-spacing:.5em;color:#4a4238;white-space:nowrap;
+}
+.screen{
+  position:relative;border-radius:18px;overflow:hidden;
+  background:radial-gradient(120% 90% at 50% 30%, color-mix(in srgb,var(--crt-under) 100%,transparent) 0%, #050403 100%);
+  box-shadow:inset 0 0 28px rgba(0,0,0,.75);
+  animation:crt-flicker 6s steps(1) infinite;
+}
+/* 屏面叠层 */
+.screen::before{ /* scanlines */
+  content:"";position:absolute;inset:0;z-index:6;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,
+    rgba(0,0,0,.30) 0, rgba(0,0,0,.30) 1px, transparent 1px, transparent 4px);
+  mix-blend-mode:multiply;
+}
+.screen::after{ /* vignette + glare */
+  content:"";position:absolute;inset:0;z-index:7;pointer-events:none;
+  background:
+    radial-gradient(90% 60% at 50% 22%, rgba(255,255,255,.05), transparent 60%),
+    radial-gradient(140% 120% at 50% 50%, transparent 62%, rgba(0,0,0,.5) 100%);
+}
+.noise{
+  position:absolute;inset:0;z-index:5;pointer-events:none;opacity:.05;mix-blend-mode:screen;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-size:160px 160px;
+  animation:noise-jitter .45s steps(2) infinite;
+}
+.sweep{
+  position:absolute;left:0;right:0;height:120px;z-index:6;pointer-events:none;
+  background:linear-gradient(to bottom,transparent,rgba(255,255,255,.028),transparent);
+  animation:sweep 11s linear infinite;
+}
+.inner{position:relative;z-index:9;padding:clamp(18px,3vw,44px) clamp(16px,3.4vw,52px) 40px}
+
+/* ─── glow 文字 ─── */
+.inner, .inner button, .inner input{ text-shadow:0 0 4px var(--glow-1), 0 0 12px var(--glow-2); }
+.hot{color:var(--crt-bright);text-shadow:0 0 4px var(--glow-1),0 0 14px var(--glow-2),0 0 36px var(--glow-2)}
+.dim{color:var(--fg-dim);}
+.faint{color:var(--fg-faint)}
+
+/* ─── topbar ─── */
+.topbar{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:baseline;border:1px solid var(--line);padding:8px 14px;font-size:12px;letter-spacing:.14em}
+.topbar .t{text-transform:uppercase;letter-spacing:.2em}
+.topbar .meta{margin-left:auto;color:var(--fg-dim)}
+.phos{display:inline-flex;gap:6px;margin-left:14px}
+.phos button{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  background:none;border:1px solid var(--line);color:var(--fg-dim);padding:2px 8px;cursor:pointer;
+}
+.phos button[aria-pressed="true"]{color:var(--crt-bright);border-color:var(--fg);background:var(--fill)}
+
+/* ─── boot log ─── */
+.boot{padding:26px 0 4px;font-size:13.5px}
+.boot .ln{opacity:0;animation:ln-in .05s steps(1) forwards, afterglow 1.2s ease-out forwards}
+.boot .dots{color:var(--fg-faint)}
+.boot .ok{color:var(--crt-bright)}
+
+/* ─── banner ─── */
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px 42px;padding:26px 0 8px}
+pre.figlet{
+  font-size:clamp(8px,1.55vw,15px);line-height:1.15;letter-spacing:.06em;
+  color:var(--crt-bright);
+  text-shadow:0 0 4px var(--glow-1),0 0 14px var(--glow-2),0 0 40px var(--glow-2);
+  user-select:none;
+}
+.hanzi{
+  font-size:clamp(46px,7vw,76px);font-weight:700;letter-spacing:.12em;line-height:1;
+  color:var(--crt-bright);
+  text-shadow:0 0 6px var(--glow-1),0 0 18px var(--glow-2),0 0 48px var(--glow-2);
+}
+.tagline{width:100%;font-size:clamp(15px,2vw,18px);margin-top:14px}
+.tagline .cursor{display:inline-block;width:.6em;height:1.1em;vertical-align:-0.15em;background:var(--crt-bright);animation:blink 1.05s steps(2,start) infinite}
+
+/* ─── prompt 行 / 按钮 ─── */
+.cta-row{display:flex;flex-wrap:wrap;gap:12px;margin:26px 0 6px}
+.btn{
+  font-family:var(--mono);font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+  padding:10px 20px;cursor:pointer;border:1px solid var(--fg);
+  background:var(--fill);color:var(--crt-bright);
+  text-shadow:0 0 4px var(--glow-1),0 0 12px var(--glow-2);
+}
+.btn:hover{background:color-mix(in srgb,var(--crt-base) 16%,transparent);box-shadow:0 0 24px var(--env)}
+.btn.alt{border-color:var(--line);color:var(--fg)}
+a.btn{border-bottom:1px solid var(--fg)}
+.stat-row{display:flex;flex-wrap:wrap;gap:6px 30px;border-top:1px dashed var(--line);border-bottom:1px dashed var(--line);padding:10px 2px;margin:24px 0;font-size:12.5px;letter-spacing:.1em}
+.stat-row b{color:var(--crt-bright);font-weight:500;margin-right:8px}
+
+/* ─── section 标题(ASCII) ─── */
+.sec{margin-top:46px}
+.sec-h{display:flex;align-items:center;gap:12px;font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:var(--fg-dim);margin-bottom:18px}
+.sec-h::before{content:"┌──[";color:var(--fg-faint);letter-spacing:0}
+.sec-h::after{content:"]" "──────────────────────────────────────";color:var(--fg-faint);letter-spacing:0;overflow:hidden;white-space:nowrap;flex:1}
+.sec-h b{color:var(--fg);font-weight:500}
+
+/* ─── 搜索演示 ─── */
+.demo{border:1px solid var(--line);padding:18px 20px;font-size:13.5px;overflow-x:auto}
+.demo .q{color:var(--crt-bright)}
+.demo .hit{color:var(--crt-bright)}
+.demo .mk{color:var(--crt-bright);text-shadow:0 0 6px var(--glow-1),0 0 20px var(--glow-2)}
+.demo .ms{display:inline-block;min-width:5.5ch;color:var(--fg-dim)}
+.demo .fn{display:inline-block;min-width:24ch;color:var(--fg)}
+.demo .body{color:var(--fg-dim)}
+.demo .sum{margin-top:8px;color:var(--fg-faint)}
+
+/* ─── features 规格表 ─── */
+.spec{list-style:none;border:1px solid var(--line)}
+.spec li{display:grid;grid-template-columns:5ch 11em 1fr;gap:0 14px;padding:11px 16px;border-bottom:1px dashed var(--line);font-size:13.5px}
+.spec li:last-child{border-bottom:none}
+.spec .id{color:var(--fg-faint)}
+.spec .k{color:var(--crt-bright);letter-spacing:.06em}
+.spec .v{color:var(--fg-dim)}
+
+/* ─── mcp ─── */
+.mcp-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start}
+.mcp-copy p{color:var(--fg-dim);font-size:14px;margin-bottom:14px}
+.mcp-copy p .hl{color:var(--fg)}
+.tools{list-style:none;margin:14px 0;border:1px solid var(--line)}
+.tools li{padding:8px 14px;border-bottom:1px dashed var(--line);font-size:13.5px;display:flex;gap:14px}
+.tools li:last-child{border:none}
+.tools .ro{margin-left:auto;color:var(--fg-faint);font-size:11px;letter-spacing:.2em}
+.dirs{font-size:12.5px;color:var(--fg-dim);line-height:2.2}
+.dirs a{margin-right:12px}
+pre.code{
+  border:1px solid var(--line);background:var(--fill);
+  padding:16px 18px;font-size:13px;line-height:1.8;overflow-x:auto;position:relative;
+}
+pre.code .c{color:var(--fg-faint)}
+.copy-btn{
+  position:absolute;top:8px;right:8px;font-family:var(--mono);font-size:10px;letter-spacing:.15em;text-transform:uppercase;
+  border:1px solid var(--line);background:none;color:var(--fg-dim);padding:3px 9px;cursor:pointer;
+}
+.copy-btn:hover{color:var(--crt-bright);border-color:var(--fg)}
+
+/* ─── 截图附件 ─── */
+.attach{margin-top:14px;border:1px solid var(--line)}
+.attach .bar{font-size:11.5px;letter-spacing:.12em;padding:7px 14px;border-bottom:1px solid var(--line);color:var(--fg-dim);display:flex;gap:16px;flex-wrap:wrap}
+.attach img{
+  display:block;width:100%;height:auto;
+  filter:grayscale(1) sepia(.9) hue-rotate(-18deg) saturate(2.2) brightness(.62) contrast(1.08);
+  transition:filter .25s ease;
+}
+:root[data-phosphor='green'] .attach img{filter:grayscale(1) sepia(.9) hue-rotate(52deg) saturate(2) brightness(.6) contrast(1.08)}
+:root[data-phosphor='blue']  .attach img{filter:grayscale(1) sepia(.9) hue-rotate(160deg) saturate(2.2) brightness(.64) contrast(1.08)}
+.attach:hover img,.attach:focus-within img{filter:none}
+.attach .bar .tip{margin-left:auto;color:var(--fg-faint)}
+
+/* ─── install ─── */
+.ways{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.way{border:1px solid var(--line);padding:18px;position:relative}
+.way .corner{position:absolute;color:var(--fg-faint);font-size:12px;user-select:none}
+.way .c1{top:2px;left:6px}.way .c2{top:2px;right:6px}.way .c3{bottom:2px;left:6px}.way .c4{bottom:2px;right:6px}
+.way h3{font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:var(--crt-bright);margin-bottom:10px}
+.way p{font-size:12.5px;color:var(--fg-dim);margin-bottom:12px}
+.way pre.code{margin-top:8px;font-size:12px;padding:10px 12px}
+.note{margin-top:16px;font-size:12px;color:var(--fg-faint)}
+
+/* ─── footer ─── */
+.foot{margin-top:52px;border-top:1px solid var(--line);padding-top:18px;font-size:12.5px;display:flex;flex-wrap:wrap;gap:8px 26px}
+.foot .rem{color:var(--fg-faint)}
+.foot .links{margin-left:auto;display:flex;gap:16px}
+
+/* ─── 动效 ─── */
+@keyframes blink{50%{opacity:0}}
+@keyframes crt-flicker{
+  0%,100%{filter:brightness(1)} 7%{filter:brightness(.97)} 9%{filter:brightness(1.02)}
+  31%{filter:brightness(.94)} 33%{filter:brightness(1)} 58%{filter:brightness(1.03)}
+  60%{filter:brightness(.98)} 83%{filter:brightness(.96)} 85%{filter:brightness(1)}
+}
+@keyframes noise-jitter{0%{transform:translate(0,0)}50%{transform:translate(-40px,26px)}100%{transform:translate(22px,-14px)}}
+@keyframes sweep{0%{top:-15%}100%{top:110%}}
+@keyframes ln-in{to{opacity:1}}
+@keyframes afterglow{0%{color:var(--crt-bright)}100%{color:var(--fg)}}
+@keyframes powerline{0%{transform:scaleX(.02);opacity:1}70%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+@keyframes content-in{0%{opacity:0;filter:blur(6px);transform:scale(.985)}100%{opacity:1;filter:blur(0);transform:scale(1)}}
+.powerline{position:absolute;left:0;right:0;top:50%;height:2px;background:var(--crt-bright);z-index:20;transform-origin:center;box-shadow:0 0 30px var(--glow-1);animation:powerline .7s ease-out forwards}
+.inner{animation:content-in .8s ease-out .35s backwards}
+@media (prefers-reduced-motion:reduce){
+  .screen,.noise,.sweep,.tagline .cursor,.powerline,.inner,.boot .ln{animation:none!important}
+  .boot .ln{opacity:1}
+  html{scroll-behavior:auto}
+}
+@media (max-width:880px){
+  .mcp-grid{grid-template-columns:1fr}
+  .ways{grid-template-columns:1fr}
+  .spec li{grid-template-columns:5ch 1fr;grid-template-rows:auto auto}
+  .spec .v{grid-column:2}
+  pre.figlet{display:none}
+}
+</style>
+</head>
+<body>
+<div class="bezel">
+  <div class="screen">
+    <div class="noise"></div><div class="sweep"></div><div class="powerline"></div>
+    <div class="inner">
+
+      <div class="topbar">
+        <span class="t hot">dowse terminal</span>
+        <span class="dim">v0.8.2 · win32 · local fulltext search</span>
+        <span class="meta">net:0 · idx:ntfs/usn
+          <span class="phos" role="group" aria-label="phosphor color">
+            <button data-p="amber" aria-pressed="true">amber</button><button data-p="green" aria-pressed="false">green</button><button data-p="blue" aria-pressed="false">blue</button>
+          </span>
+        </span>
+      </div>
+
+      <div class="boot" aria-label="boot log">
+        <div class="ln" style="animation-delay:.5s,.5s">dowse bios v0.8.2 — 问渠 <span class="dim">(c) ltspace · MIT/Apache-2.0</span></div>
+        <div class="ln" style="animation-delay:.75s,.75s">[boot] tantivy 倒排索引 <span class="dots">..............</span> <span class="ok">ok</span></div>
+        <div class="ln" style="animation-delay:.95s,.95s">[dict] jieba 中文分词 <span class="dots">................</span> <span class="ok">ok</span></div>
+        <div class="ln" style="animation-delay:1.15s,1.15s">[ocr ] windows.media.ocr <span class="dots">.............</span> <span class="ok">ready</span></div>
+        <div class="ln" style="animation-delay:1.35s,1.35s">[usn ] ntfs journal C: <span class="dots">...............</span> <span class="ok">live</span></div>
+        <div class="ln" style="animation-delay:1.55s,1.55s">[mcp ] stdio server <span class="dots">..................</span> <span class="ok">3 tools · read-only</span></div>
+        <div class="ln" style="animation-delay:1.75s,1.75s">[net ] outbound <span class="dots">......................</span> <span class="ok">0 — by design</span></div>
+        <div class="ln faint" style="animation-delay:1.95s,1.95s">rem 问渠那得清如许，为有源头活水来 —— 朱熹《观书有感》</div>
+      </div>
+
+      <div class="banner">
+        <pre class="figlet" aria-hidden="true">
+█▀▄ █▀█ █ █ █ █▀▀ █▀▀
+█ █ █ █ █ █ █ ▀▀█ █▀▀
+▀▀  ▀▀▀ ▀▀▀▀▀ ▀▀▀ ▀▀▀</pre>
+        <span class="hanzi">问渠</span>
+        <p class="tagline">文件名、文档内容、截图里的文字——快捷键呼出，毫秒级返回。<span class="cursor" aria-hidden="true"></span></p>
+      </div>
+
+      <div class="cta-row">
+        <a class="btn" href="https://github.com/ltspace/dowse/releases/latest">▶ download setup.exe</a>
+        <button class="btn alt" data-copy="cargo install dowse">$ cargo install dowse ⧉</button>
+      </div>
+
+      <div class="stat-row">
+        <span><b>80ms</b>搜索预算</span>
+        <span><b>≤15MB</b>安装包预算</span>
+        <span><b>0</b>网络请求</span>
+        <span><b>RO</b>MCP 只读</span>
+      </div>
+
+      <section class="sec">
+        <div class="sec-h"><b>search --demo</b></div>
+        <div class="demo" role="img" aria-label="搜索演示:查询上海银行,命中 PDF、截图 OCR 和 Word 文档">
+<span class="q">&gt; dowse search "上海银行"</span><br>
+<span class="ms">0.7ms</span><span class="fn">贷款合同_2024.pdf</span><span class="body">…向<span class="mk">«</span><span class="hit">上海银行</span><span class="mk">»</span>申请经营性贷款，期限…</span><br>
+<span class="ms">0.9ms</span><span class="fn">screenshot_0412.png</span><span class="body">[ocr] …<span class="mk">«</span><span class="hit">上海银行</span><span class="mk">»</span>间同业拆放利率 (Shibor)…</span><br>
+<span class="ms">1.2ms</span><span class="fn">会议纪要_三月.docx</span><span class="body">…资金托管与<span class="mk">«</span><span class="hit">上海银行</span><span class="mk">»</span>对接，下周复核…</span><br>
+<div class="sum">3 hits · jieba 按词命中 · 截图走 OCR · 全程本地</div>
+        </div>
+        <div class="attach">
+          <div class="bar"><span>attachment: hero.png</span><span class="dim">1200×750</span><span class="tip">悬停查看彩色原图</span></div>
+          <img src="assets/hero.png" alt="dowse 浮窗实际截图:查询 sql,排序结果列表与右侧预览面板" width="1200" height="750" loading="lazy">
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><b>features</b></div>
+        <ul class="spec">
+          <li><span class="id">[F1]</span><span class="k">全文索引</span><span class="v">tantivy 倒排索引;PDF / Office / 压缩包内容一并可搜</span></li>
+          <li><span class="id">[F2]</span><span class="k">中文分词</span><span class="v">jieba 按词切分命中,不是按单字碰运气</span></li>
+          <li><span class="id">[F3]</span><span class="k">截图 OCR</span><span class="v">windows.media.ocr 系统自带;报错截图、聊天截图皆入索引</span></li>
+          <li><span class="id">[F4]</span><span class="k">USN 快速层</span><span class="v">MFT 枚举 + USN Journal 增量;文件一变索引就知道</span></li>
+          <li><span class="id">[F5]</span><span class="k">零网络</span><span class="v">0 outbound;索引只存本地,防火墙里看不到它说话</span></li>
+          <li><span class="id">[F6]</span><span class="k">体积预算</span><span class="v">安装包 ≤15MB — 设计文档原文:"超了就是 bug"</span></li>
+        </ul>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><b>mcp --read-only</b></div>
+        <div class="mcp-grid">
+          <div class="mcp-copy">
+            <p><span class="hl">你的 AI 读过整个互联网,却读不到你的硬盘。</span>dowse 内置只读 MCP server,Claude / Cursor 等客户端接入后可直接检索你索引过的本地文件。</p>
+            <ul class="tools">
+              <li>search<span class="dim">全文搜索,按相关度排序</span><span class="ro">[RO]</span></li>
+              <li>preview<span class="dim">命中处 ~1500 字长上下文</span><span class="ro">[RO]</span></li>
+              <li>index_status<span class="dim">索引概况</span><span class="ro">[RO]</span></li>
+            </ul>
+            <p class="dirs">listed on:
+              <a href="https://registry.modelcontextprotocol.io/v0/servers?search=dowse">mcp-registry</a>
+              <a href="https://glama.ai/mcp/servers/ltspace/dowse">glama [A]</a>
+              <a href="https://smithery.ai/servers/ltspace/dowse">smithery</a>
+              <a href="https://modelscope.cn/mcp">modelscope</a>
+            </p>
+          </div>
+          <pre class="code"><button class="copy-btn" data-copy="claude mcp add dowse -- dowse mcp">copy</button><span class="c"># claude code 一行接入</span>
+$ claude mcp add dowse -- dowse mcp
+
+<span class="c"># 任意 mcp 客户端 json 配置</span>
+{ "mcpServers": {
+    "dowse": { "command": "dowse",
+               "args": ["mcp"] } } }</pre>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><b>install</b></div>
+        <div class="ways">
+          <div class="way">
+            <span class="corner c1">┌</span><span class="corner c2">┐</span><span class="corner c3">└</span><span class="corner c4">┘</span>
+            <h3>gui</h3>
+            <p>下载安装包,快捷键呼出浮窗。未签名二进制,SmartScreen 拦截时选"仍要运行";sha256 在 checksums.txt。</p>
+            <a class="btn" href="https://github.com/ltspace/dowse/releases/latest">▶ download</a>
+          </div>
+          <div class="way">
+            <span class="corner c1">┌</span><span class="corner c2">┐</span><span class="corner c3">└</span><span class="corner c4">┘</span>
+            <h3>cli</h3>
+            <p>Rust 1.85+。建索引、搜索、起 MCP server 都在一个命令里。</p>
+            <pre class="code"><button class="copy-btn" data-copy="cargo install dowse">copy</button>$ cargo install dowse</pre>
+          </div>
+          <div class="way">
+            <span class="corner c1">┌</span><span class="corner c2">┐</span><span class="corner c3">└</span><span class="corner c4">┘</span>
+            <h3>mcp</h3>
+            <p>先用 GUI 或 CLI 建好索引,再挂进 AI 客户端。</p>
+            <pre class="code"><button class="copy-btn" data-copy="claude mcp add dowse -- dowse mcp">copy</button>$ claude mcp add dowse \
+    -- dowse mcp</pre>
+          </div>
+        </div>
+        <p class="note">note: 非 Windows 平台可编译安装,核心检索可用;NTFS 快速层与 OCR 自动降级停用。</p>
+      </section>
+
+      <div class="foot">
+        <span class="rem">rem dowse = 探水杖;问渠 = 问活水。找的都是藏起来的东西。</span>
+        <span class="links">
+          <a href="https://github.com/ltspace/dowse">github</a>
+          <a href="https://crates.io/crates/dowse">crates.io</a>
+          <a href="https://docs.rs/dowse">docs.rs</a>
+          <a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">privacy</a>
+        </span>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const root=document.documentElement;
+const saved=localStorage.getItem("phosphor");
+if(saved&&saved!=="amber")root.dataset.phosphor=saved;
+document.querySelectorAll(".phos button").forEach(b=>{
+  if(saved)b.setAttribute("aria-pressed",String(b.dataset.p===saved));
+  b.addEventListener("click",()=>{
+    const p=b.dataset.p;
+    if(p==="amber")delete root.dataset.phosphor;else root.dataset.phosphor=p;
+    localStorage.setItem("phosphor",p);
+    document.querySelectorAll(".phos button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));
+  });
+});
+document.querySelectorAll("[data-copy]").forEach(el=>{
+  el.addEventListener("click",async()=>{
+    try{
+      await navigator.clipboard.writeText(el.dataset.copy);
+      const old=el.textContent;el.textContent=el.classList.contains("copy-btn")?"copied":"已复制 ✓";
+      setTimeout(()=>el.textContent=old,1300);
+    }catch(e){}
+  });
+});
+</script>
+</body>
+</html>
