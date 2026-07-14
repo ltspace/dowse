@@ -1,0 +1,49 @@
+{
+  "manifest_version": "0.3",
+  "name": "dowse",
+  "display_name": "dowse — Local File Search",
+  "version": "0.8.2",
+  "description": "Fast local full-text search over your Windows files: file names, document contents, and OCR'd screenshot text.",
+  "long_description": "dowse gives Claude read-only access to a full-text index of your local files — file names, document contents (PDF, Office, archives), and text inside screenshots (Windows OCR). Search is powered by tantivy with jieba Chinese tokenization, so both English and Chinese content are searchable.\n\nThis extension exposes three read-only tools: `search` (ranked full-text hits), `preview` (long-form context around a match), and `index_status` (index overview). It never modifies your files.\n\n**Note:** the index itself is built and maintained by the dowse desktop app or the `dowse` CLI (https://github.com/ltspace/dowse). Install dowse and index your folders first; this extension then lets Claude search what you indexed. Everything stays on your machine — no network requests, no telemetry.",
+  "author": {
+    "name": "ltspace",
+    "url": "https://github.com/ltspace"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ltspace/dowse"
+  },
+  "homepage": "https://github.com/ltspace/dowse",
+  "documentation": "https://docs.rs/dowse",
+  "support": "https://github.com/ltspace/dowse/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/dowse.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/dowse.exe",
+      "args": ["mcp"],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Full-text search over the local index; returns ranked hits with highlighted terms."
+    },
+    {
+      "name": "preview",
+      "description": "Long-form context (~1500 chars) around a query hit in a specific file, with file metadata."
+    },
+    {
+      "name": "index_status",
+      "description": "Overview of the local index: document count, indexed roots, on-disk size, last update time."
+    }
+  ],
+  "keywords": ["search", "full-text", "windows", "local", "chinese", "ocr", "files"],
+  "license": "MIT OR Apache-2.0",
+  "privacy_policies": ["https://github.com/ltspace/dowse/blob/main/PRIVACY.md"],
+  "compatibility": {
+    "platforms": ["win32"]
+  }
+}

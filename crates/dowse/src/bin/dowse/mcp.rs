@@ -174,7 +174,8 @@ impl DowseMcpServer {
     }
 
     #[tool(
-        description = "在本地全文索引里搜索，返回按相关度排序的命中列表；命中词用 «» 标出。先用这个工具定位候选文件，再用 preview 看更长的上下文。"
+        description = "在本地全文索引里搜索，返回按相关度排序的命中列表；命中词用 «» 标出。先用这个工具定位候选文件，再用 preview 看更长的上下文。",
+        annotations(title = "全文搜索", read_only_hint = true)
     )]
     async fn search(
         &self,
@@ -212,7 +213,8 @@ impl DowseMcpServer {
     }
 
     #[tool(
-        description = "取某个文件在索引里命中查询词的完整上下文（约 1500 字，比 search 返回的摘要长得多），附带文件大小/修改时间/类型。path 用 search 结果里的 path 字段。"
+        description = "取某个文件在索引里命中查询词的完整上下文（约 1500 字，比 search 返回的摘要长得多），附带文件大小/修改时间/类型。path 用 search 结果里的 path 字段。",
+        annotations(title = "文件预览", read_only_hint = true)
     )]
     async fn preview(
         &self,
@@ -247,7 +249,8 @@ impl DowseMcpServer {
     }
 
     #[tool(
-        description = "查看本地索引的概况：文档总数、已注册的索引根目录、索引落盘体积、最近一次更新时间。不需要参数。"
+        description = "查看本地索引的概况：文档总数、已注册的索引根目录、索引落盘体积、最近一次更新时间。不需要参数。",
+        annotations(title = "索引状态", read_only_hint = true)
     )]
     async fn index_status(&self) -> Result<CallToolResult, McpError> {
         match core_index_status(&self.index_dir) {

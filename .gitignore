@@ -8,3 +8,7 @@
 /release_notes.txt
 /dowse-cli-windows-x64.zip
 /.omc/
+
+# MCPB 打包产物：exe 由构建复制进来，bundle 是打包输出，都不进仓库
+/mcpb/server/
+*.mcpb

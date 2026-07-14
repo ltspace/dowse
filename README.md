@@ -193,9 +193,11 @@ Rust · [tantivy](https://github.com/quickwit-oss/tantivy) · jieba · Tauri 2 �
 - [docs/DESIGN-M5-MCP.md](docs/DESIGN-M5-MCP.md) (MCP server design, Chinese)
 - [docs/DESIGN-M6-NTFS快速层.md](docs/DESIGN-M6-NTFS快速层.md) (NTFS fast path design, Chinese)
 
-## Privacy
+## Privacy Policy
 
 The index is stored locally (`%LOCALAPPDATA%\dowse`). No network access, no telemetry. You can verify this yourself: watch the process in Resource Monitor or a firewall tool and confirm it opens no outbound connections. Releases also include a SHA-256 checksum for the installer so you can verify the download.
+
+Full policy — data collection, storage, retention, and contact: [PRIVACY.md](PRIVACY.md).
 
 ## License
 
