@@ -123,6 +123,7 @@ git clone https://github.com/ltspace/dowse && cd dowse
 cargo run -p dowse -- index D:\docs      # build the index
 cargo run -p dowse -- search 限流         # search
 cargo run -p dowse -- search "精确短语"   # phrase query
+cargo run -p dowse -- add E:\projects     # add another root incrementally (no full rebuild)
 cargo run -p dowse -- rules show          # view index rules (excluded dirs, extra extensions, size cap)
 
 # Overlay app (Tauri 2 + Svelte 5)
@@ -131,7 +132,7 @@ npm install
 cargo tauri build      # produces the installer under target/release/bundle
 ```
 
-Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it.
+Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it. `Ctrl+,` opens the index-rules panel (excluded directories, extra text extensions, per-file size cap).
 
 ![Preview pane for an image result: the source image rendered inline next to its OCR-extracted text with the matched terms highlighted](docs/screenshots/ocr-preview.png)
 

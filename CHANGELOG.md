@@ -27,6 +27,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is actually opened (not on every keystroke), the last 10 are kept locally,
   and an empty input shows them — ↑↓/Enter to reuse, Delete to remove one,
   plus a clear-all action. Fully keyboard-driven and bilingual.
+- `dowse add <dir>` incrementally indexes an additional root into the
+  existing index — only the new directory is scanned and upserted, documents
+  from other roots stay untouched (unlike `dowse index`, which rebuilds from
+  scratch). The incremental path uses the same NTFS MFT fast enumeration and
+  honors the same index rules as a full rebuild, and re-scanning an
+  already-registered root is idempotent.
+- The overlay gained an index-rules panel (`Ctrl+,`): view and edit excluded
+  directories, extra text extensions, and the per-file size cap without
+  touching the CLI, with a rebuild reminder and a one-click rebuild for
+  single-root setups. Rebuild completion reports now call out how many files
+  were skipped for exceeding the size cap.
+- The overlay now measures its two core latency targets — hotkey-to-visible
+  and keystroke-to-results-rendered — and writes them to the rotating log
+  (`perf` lines), so the README's design targets are finally measurable on
+  real usage rather than "not measured".
 
 ## [0.8.3] - 2026-07-14
 

@@ -122,6 +122,7 @@ git clone https://github.com/ltspace/dowse && cd dowse
 cargo run -p dowse -- index D:\docs      # 建索引
 cargo run -p dowse -- search 限流         # 搜索
 cargo run -p dowse -- search "精确短语"   # 短语查询
+cargo run -p dowse -- add E:\projects     # 增量补扫再加一个根（不全量重建）
 cargo run -p dowse -- rules show          # 查看索引规则（排除目录/追加扩展名/体积上限）
 
 # 浮窗应用（Tauri 2 + Svelte 5）
@@ -137,6 +138,7 @@ cargo tauri build      # 安装包产出在 target/release/bundle 下
 原生上下文菜单（打开/打开所在文件夹/复制完整路径/复制文件名）。输入条最右端的图钉按钮
 可以固定窗口。固定后失焦不再自动隐藏，会话级状态，重启应用后回到未固定。输入为空时
 会列出最近搜索（本地保存最近 10 条），`↑↓`/`Enter` 复用，`Delete` 删除单条。
+`Ctrl+,` 打开索引规则面板（排除目录/追加文本扩展名/单文件体积上限）。
 
 ![预览区展示一条图片类结果：原图内嵌显示，旁边是 OCR 识别出的文字及命中词高亮](docs/screenshots/ocr-preview.png)
 
