@@ -17,7 +17,7 @@ use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Te
 use crate::events::{PendingChange, PendingOp};
 use crate::indexer::PROGRESS_INTERVAL;
 use crate::indexer::{
-    add_file_document, add_image_document_with_content, commit_index_tail,
+    AddOutcome, add_file_document, add_image_document_with_content, commit_index_tail,
     is_transient_writer_killed, walk_index_files,
 };
 use crate::ocr::is_image;
@@ -67,6 +67,10 @@ impl IndexUpdater {
     /// 打开已有索引的写入端。先校验 schema 版本，不匹配就报错提示重建。
     pub fn open(index_dir: &Path) -> Result<Self> {
         crate::meta::ensure_schema_version(index_dir)?;
+        // 把这个索引目录旁的规则加载为进程级当前生效规则：增量更新/启动对账都
+        // 经由这个 updater，加载一次让运行期监听、对账整体尊重 rules.json
+        // （无规则文件时加载到的就是默认值，行为不变）。
+        crate::rules::load_active_rules(index_dir);
         let index = Index::open_in_dir(index_dir).context("打不开索引目录，先建一次索引再监听")?;
         register_tokenizers(&index);
         let (_, fields) = build_schema();
@@ -175,12 +179,12 @@ impl IndexUpdater {
         if is_image(path) {
             *touched_image = true;
         }
-        if add_file_document(&self.writer, &self.fields, path, &self.index_dir)? {
-            outcome.upserted += 1;
-        } else {
-            // 抽不出文本（不支持的格式/损坏/文件已消失）：先删的动作已生效，
-            // 相当于把这篇从索引里拿掉。计一次 skip，不中断整批。
-            outcome.skipped += 1;
+        match add_file_document(&self.writer, &self.fields, path, &self.index_dir)? {
+            AddOutcome::Indexed => outcome.upserted += 1,
+            // 抽不出文本（不支持的格式/损坏/文件已消失/体积超限）：先删的动作已
+            // 生效，相当于把这篇从索引里拿掉。计一次 skip，不中断整批。增量场景
+            // 不像全量重建那样单列超限明细，超限并进 skip 即可。
+            AddOutcome::Skipped | AddOutcome::SkippedOversize => outcome.skipped += 1,
         }
         Ok(())
     }

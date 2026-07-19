@@ -5,8 +5,7 @@ use std::path::Path;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-/// 单文件体积上限：超过就跳过，防止索引一个 2GB 日志把内存吃穿。
-const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
+use crate::rules::IndexRules;
 
 /// 按扩展名白名单认定的纯文本文件。
 const TEXT_EXTS: &[&str] = &[
@@ -22,22 +21,41 @@ const OFFICE_EXTS: &[&str] = &["docx", "xlsx", "pptx"];
 /// 这个文件是否属于能抽取文本的类型（只看扩展名，不读文件，很便宜）。
 /// 启动对账用它过滤：非文本类型的文件从来不会进索引，没必要参与三态比对——
 /// 否则每次对账都把它们当"新增"白跑一趟、还把对账统计数字撑虚。
+///
+/// 读进程级当前生效规则：追加扩展名（`extra_text_exts`）里的类型也算可抽取。
 pub(crate) fn is_extractable(path: &Path) -> bool {
+    is_extractable_with(path, &crate::rules::active_rules())
+}
+
+/// [`is_extractable`] 的纯函数版：判定逻辑接收显式规则，不碰进程级全局，便于
+/// 单测。零参的 `is_extractable` 只是用当前生效规则调它。
+pub(crate) fn is_extractable_with(path: &Path, rules: &IndexRules) -> bool {
     let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
         return false;
     };
     let ext = ext.to_ascii_lowercase();
-    ext == "pdf" || TEXT_EXTS.contains(&ext.as_str()) || OFFICE_EXTS.contains(&ext.as_str())
+    ext == "pdf"
+        || TEXT_EXTS.contains(&ext.as_str())
+        || OFFICE_EXTS.contains(&ext.as_str())
+        || rules.is_extra_text_ext(&ext)
 }
 
 /// 从文件里抽出可索引的纯文本。
 /// 返回 Option 而不是 Result：抽不出来（不支持的格式/太大/损坏）不算错误，
 /// 调用方只需要知道"这个文件没有文本"，跳过即可。
+///
+/// 体积上限和追加文本扩展名取自进程级当前生效规则（见 `rules` 模块）。
 pub fn extract_text(path: &Path) -> Option<String> {
+    extract_text_with(path, &crate::rules::active_rules())
+}
+
+/// [`extract_text`] 的纯函数版：体积上限、追加扩展名都从显式规则读，不碰进程级
+/// 全局，便于单测。零参的 `extract_text` 只是用当前生效规则调它。
+fn extract_text_with(path: &Path, rules: &IndexRules) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
 
     let meta = fs::metadata(path).ok()?;
-    if meta.len() > MAX_FILE_BYTES {
+    if meta.len() > rules.max_file_bytes() {
         return None;
     }
 
@@ -63,6 +81,8 @@ pub fn extract_text(path: &Path) -> Option<String> {
         "xlsx" => extract_xlsx(path),
         "pptx" => extract_pptx(path),
         e if TEXT_EXTS.contains(&e) => read_text_smart(path),
+        // 追加白名单里的扩展名当纯文本读（自动探测编码），跟内建文本类型同路。
+        e if rules.is_extra_text_ext(e) => read_text_smart(path),
         _ => None,
     }))
     .ok()
@@ -384,11 +404,68 @@ mod tests {
     fn file_over_size_limit_is_skipped() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("oversized_sample.txt");
+        let rules = IndexRules::default();
         // 用 set_len 造一个刚超过上限的稀疏文件，只撑大小、不真写 20MB 数据。
         let f = fs::File::create(&path).unwrap();
-        f.set_len(MAX_FILE_BYTES + 1).unwrap();
+        f.set_len(rules.max_file_bytes() + 1).unwrap();
         drop(f);
-        assert!(extract_text(&path).is_none(), "超过体积上限的文件应被跳过");
+        assert!(
+            extract_text_with(&path, &rules).is_none(),
+            "超过体积上限的文件应被跳过"
+        );
+    }
+
+    #[test]
+    fn custom_lower_size_limit_skips_file_default_would_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mid.txt");
+        // 造一个 2MB 的文件：默认 20MB 上限下能抽取，但把上限调到 1MB 就该跳过。
+        let f = fs::File::create(&path).unwrap();
+        f.set_len(2 * 1024 * 1024).unwrap();
+        drop(f);
+
+        let default_rules = IndexRules::default();
+        assert!(
+            extract_text_with(&path, &default_rules).is_some(),
+            "默认 20MB 上限下 2MB 文件应能抽取"
+        );
+
+        let tight = IndexRules {
+            max_file_mb: 1,
+            ..IndexRules::default()
+        };
+        assert!(
+            extract_text_with(&path, &tight).is_none(),
+            "上限收紧到 1MB 后 2MB 文件应被跳过"
+        );
+    }
+
+    #[test]
+    fn extra_text_ext_becomes_extractable_and_reads_as_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("note.rst");
+        fs::write(&path, "追加扩展名内容 extra-ext-marker").unwrap();
+
+        let default_rules = IndexRules::default();
+        assert!(
+            !is_extractable_with(&path, &default_rules),
+            "默认规则下 .rst 不是可抽取类型"
+        );
+        assert!(
+            extract_text_with(&path, &default_rules).is_none(),
+            "默认规则下 .rst 抽不出文本"
+        );
+
+        let with_rst = IndexRules {
+            extra_text_exts: vec!["rst".into()],
+            ..IndexRules::default()
+        };
+        assert!(
+            is_extractable_with(&path, &with_rst),
+            "追加 rst 后 .rst 应算可抽取"
+        );
+        let text = extract_text_with(&path, &with_rst).expect("追加 rst 后应能抽出文本");
+        assert!(text.contains("extra-ext-marker"));
     }
 
     #[test]

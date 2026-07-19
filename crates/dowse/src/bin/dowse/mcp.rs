@@ -8,7 +8,9 @@
 use std::ops::Range;
 use std::path::PathBuf;
 
-use dowse::{IndexStatus, PreviewHit, SearchHit, Searcher, index_status as core_index_status};
+use dowse::{
+    IndexStatus, PreviewHit, SearchHit, Searcher, SortMode, index_status as core_index_status,
+};
 use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{CallToolResult, ServerCapabilities, ServerInfo};
@@ -30,10 +32,18 @@ const DEFAULT_SEARCH_LIMIT: usize = 10;
 pub struct SearchParams {
     /// 查询词，支持空格分隔多个词（AND 语义）和 "短语查询"
     pub query: String,
-    /// 最多返回几条，默认 10
+    /// 最多返回几条，默认 10；和 offset 搭配翻页
     pub limit: Option<usize>,
-    /// 只保留该扩展名的结果（不含点，如 "md"、"pdf"），可选
+    /// 跳过前多少条命中再取，默认 0；和 limit 搭配翻页（取第 2 页就传 offset=limit）。
+    /// 返回里的 total_hits 是匹配总数，offset + 本页条数 < total_hits 就说明后面还有
+    pub offset: Option<usize>,
+    /// 只保留这些扩展名的结果（不含点）。逗号分隔可给多个，如 "md" 或 "md,pdf,txt"；
+    /// 不需要按扩展名过滤就整个字段别传（传空串或纯逗号会报参数错误）
     pub ext: Option<String>,
+    /// 排序方式：relevance（默认，按相关度）/ mtime（按修改时间，新的在前）/
+    /// size（按体积，大的在前）。非 relevance 排序下 BM25 分数没有意义，结果里
+    /// 不返回 score 字段。传其它值会报参数错误
+    pub sort: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -52,7 +62,10 @@ pub struct PreviewParams {
 pub struct SearchHitOut {
     /// 命中文件的完整路径，可直接喂给文件读取/资源管理器工具
     pub path: String,
-    pub score: f32,
+    /// BM25 相关度分数：只有 sort=relevance（默认）时才有意义并返回；按 mtime/size
+    /// 排序时分数固定为 0、没有意义，这个字段整个省略（不是返回 0）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
     /// 命中上下文片段，命中词用 «» 包起来
     pub snippet: String,
     /// 文件扩展名（不含点，小写），无扩展名是空串
@@ -62,6 +75,9 @@ pub struct SearchHitOut {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SearchOutput {
     pub hits: Vec<SearchHitOut>,
+    /// 满足本次查询的命中总数（不受 limit/offset 截断）。配合 offset 判断要不要翻
+    /// 下一页：offset + hits.len() < total_hits 就说明后面还有
+    pub total_hits: usize,
     /// 索引里的文档总数（不是本次命中数），给 agent 判断索引规模用
     pub total_docs: u64,
 }
@@ -88,6 +104,21 @@ pub struct IndexStatusOutput {
     pub disk_size_bytes: u64,
     /// 最近一次更新时间，Unix 毫秒时间戳；索引目录异常读不到文件 mtime 时是 null
     pub last_updated_unix_ms: Option<i64>,
+    /// 当前生效的索引规则：哪些目录被排除、额外当文本索引的扩展名、单文件体积上限。
+    /// 让 agent 明白"为什么某些文件搜不到"（可能被排除或超体积上限挡在索引外）
+    pub rules: IndexRulesOut,
+}
+
+/// 索引规则的对外投影，对应核心库的 `IndexRules`。只读透出给 agent 看，
+/// 让"某些文件因规则没进索引"这类现象有据可查。
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct IndexRulesOut {
+    /// 索引时排除的目录名列表（这些目录整棵子树都不收录）
+    pub exclude_dirs: Vec<String>,
+    /// 在内置文本类型之外、额外当作文本索引的扩展名（不含点）
+    pub extra_text_exts: Vec<String>,
+    /// 单文件体积上限（MB），超过的文件不进索引
+    pub max_file_mb: u64,
 }
 
 /// 把命中区间标成 «...»，供 agent 直接阅读。区间切片逻辑跟终端染色共用
@@ -96,12 +127,34 @@ fn mark_highlights(fragment: &str, ranges: &[Range<usize>]) -> String {
     crate::wrap_highlight_ranges(fragment, ranges, HL_OPEN, HL_CLOSE)
 }
 
-fn to_search_hit_out(hit: SearchHit) -> SearchHitOut {
+/// 把一条命中转成对外结构。`include_score` 只在相关性排序下为真——按 mtime/size
+/// 排序时 BM25 分数固定为 0、没有意义，此时把 score 整个省掉（跟 CLI 隐藏分数一致），
+/// 而不是回一个会误导 agent 的 0。
+fn to_search_hit_out(hit: SearchHit, include_score: bool) -> SearchHitOut {
     SearchHitOut {
         path: hit.path,
-        score: hit.score,
+        score: include_score.then_some(hit.score),
         snippet: mark_highlights(&hit.snippet, &hit.highlighted),
         kind: hit.ext,
+    }
+}
+
+/// 把 MCP 的 sort 参数映射到核心库的 [`SortMode`]。
+///
+/// 对外只暴露 relevance/mtime/size 三档（比核心库的 mtime_desc/mtime_asc/size_desc
+/// 精简）：mtime 取"新的在前"（MtimeDesc）、size 取"大的在前"（SizeDesc），是搜索
+/// 场景下最符合直觉的方向。未知值直接报参数错误——不像核心库 `SortMode::parse`
+/// 那样静默回退到相关性排序，好让 agent 立刻知道值不对，而不是拿到一份"其实没按
+/// 它要求排"的结果。
+fn parse_sort(raw: Option<&str>) -> Result<SortMode, McpError> {
+    match raw {
+        None | Some("relevance") => Ok(SortMode::Relevance),
+        Some("mtime") => Ok(SortMode::MtimeDesc),
+        Some("size") => Ok(SortMode::SizeDesc),
+        Some(other) => Err(McpError::invalid_params(
+            format!("未知的 sort 值 \"{other}\"，只支持 relevance / mtime / size"),
+            None,
+        )),
     }
 }
 
@@ -129,6 +182,11 @@ fn to_index_status_output(status: IndexStatus) -> IndexStatusOutput {
             .collect(),
         disk_size_bytes: status.disk_size_bytes,
         last_updated_unix_ms,
+        rules: IndexRulesOut {
+            exclude_dirs: status.rules.exclude_dirs,
+            extra_text_exts: status.rules.extra_text_exts,
+            max_file_mb: status.rules.max_file_mb,
+        },
     }
 }
 
@@ -174,12 +232,18 @@ impl DowseMcpServer {
     }
 
     #[tool(
-        description = "在本地全文索引里搜索，返回按相关度排序的命中列表；命中词用 «» 标出。先用这个工具定位候选文件，再用 preview 看更长的上下文。",
+        description = "在本地全文索引里搜索，返回命中列表；命中词用 «» 标出。默认按相关度排序，可用 sort 改按修改时间/体积排；ext 可按扩展名过滤（逗号分隔多个）；limit/offset 翻页，返回里的 total_hits 是匹配总数。先用这个工具定位候选文件，再用 preview 看更长的上下文。",
         annotations(title = "全文搜索", read_only_hint = true)
     )]
     async fn search(
         &self,
-        Parameters(SearchParams { query, limit, ext }): Parameters<SearchParams>,
+        Parameters(SearchParams {
+            query,
+            limit,
+            offset,
+            ext,
+            sort,
+        }): Parameters<SearchParams>,
     ) -> Result<CallToolResult, McpError> {
         if query.trim().is_empty() {
             return Err(McpError::invalid_params("query 不能为空", None));
@@ -188,25 +252,46 @@ impl DowseMcpServer {
         if limit == 0 {
             return Err(McpError::invalid_params("limit 必须大于 0", None));
         }
-        if let Some(ext) = &ext
-            && ext.trim().is_empty()
-        {
-            return Err(McpError::invalid_params(
-                "ext 传了就不能是空字符串，不需要过滤就整个字段别传",
-                None,
-            ));
-        }
+        let offset = offset.unwrap_or(0);
+        let sort_mode = parse_sort(sort.as_deref())?;
+
+        // ext 是单个逗号分隔字符串（"md" 或 "md,pdf"），按逗号拆开后走和 CLI 同一套
+        // 清洗规则（crate::clean_ext_tokens 剔空串 + trim + 小写归一）。传了 ext 却拆
+        // 不出任何有效扩展名（""、","、",," 之类）算参数错误：调用方想过滤却没给值，
+        // 别静默放宽成"不过滤"。
+        let ext_tokens: Vec<String> = match &ext {
+            Some(raw) => {
+                let tokens = crate::clean_ext_tokens(raw.split(','));
+                if tokens.is_empty() {
+                    return Err(McpError::invalid_params(
+                        "ext 传了就至少要有一个有效扩展名（逗号分隔，如 \"md,pdf\"），不需要过滤就整个字段别传",
+                        None,
+                    ));
+                }
+                tokens
+            }
+            None => Vec::new(),
+        };
+        let ext_refs: Vec<&str> = ext_tokens.iter().map(String::as_str).collect();
+        let ext_group = (!ext_refs.is_empty()).then_some(ext_refs.as_slice());
 
         let searcher = match open_and_reload(&self.index_dir) {
             Ok(s) => s,
             Err(tool_error) => return Ok(tool_error),
         };
-        let hits = searcher
-            .search_filtered(&query, limit, ext.as_deref())
+        let page = searcher
+            .search_paged(&query, limit, offset, ext_group, sort_mode)
             .map_err(|e| McpError::invalid_params(format!("查询语法有问题：{e}"), None))?;
 
+        // 只有相关性排序下 BM25 分数才有意义；mtime/size 排序时不带 score。
+        let include_score = sort_mode == SortMode::Relevance;
         Json(SearchOutput {
-            hits: hits.into_iter().map(to_search_hit_out).collect(),
+            hits: page
+                .hits
+                .into_iter()
+                .map(|hit| to_search_hit_out(hit, include_score))
+                .collect(),
+            total_hits: page.total,
             total_docs: searcher.num_docs(),
         })
         .into_call_tool_result()
@@ -249,7 +334,7 @@ impl DowseMcpServer {
     }
 
     #[tool(
-        description = "查看本地索引的概况：文档总数、已注册的索引根目录、索引落盘体积、最近一次更新时间。不需要参数。",
+        description = "查看本地索引的概况：文档总数、已注册的索引根目录、索引落盘体积、最近一次更新时间，以及当前生效的索引规则（排除目录/追加文本扩展名/单文件体积上限）。不需要参数。",
         annotations(title = "索引状态", read_only_hint = true)
     )]
     async fn index_status(&self) -> Result<CallToolResult, McpError> {
@@ -305,7 +390,9 @@ mod tests {
             .search(Parameters(SearchParams {
                 query: "   ".to_owned(),
                 limit: None,
+                offset: None,
                 ext: None,
+                sort: None,
             }))
             .await
             .expect_err("空查询词应该报参数错误");
@@ -319,7 +406,9 @@ mod tests {
             .search(Parameters(SearchParams {
                 query: "笔记".to_owned(),
                 limit: Some(0),
+                offset: None,
                 ext: None,
+                sort: None,
             }))
             .await
             .expect_err("limit=0 应该报参数错误");
@@ -333,7 +422,9 @@ mod tests {
             .search(Parameters(SearchParams {
                 query: "笔记".to_owned(),
                 limit: None,
+                offset: None,
                 ext: Some(String::new()),
+                sort: None,
             }))
             .await
             .expect_err("空字符串的 ext 应该报参数错误");
@@ -352,7 +443,9 @@ mod tests {
             .search(Parameters(SearchParams {
                 query: "笔记".to_owned(),
                 limit: None,
+                offset: None,
                 ext: None,
+                sort: None,
             }))
             .await
             .expect("索引不存在不应该让 tools/call 本身失败，而是回一个 isError:true 的结果");
@@ -441,7 +534,9 @@ mod tests {
             .search(Parameters(SearchParams {
                 query: "限流器".to_owned(),
                 limit: None,
+                offset: None,
                 ext: None,
+                sort: None,
             }))
             .await
             .expect("索引存在，search 不应该报错");
@@ -452,6 +547,9 @@ mod tests {
         assert_eq!(search_out.hits.len(), 1);
         assert!(search_out.hits[0].snippet.contains(HL_OPEN));
         assert_eq!(search_out.hits[0].kind, "md");
+        // 默认按相关度排序，score 应当带出来。
+        assert!(search_out.hits[0].score.is_some());
+        assert_eq!(search_out.total_hits, 1);
         assert_eq!(search_out.total_docs, 1);
 
         let path = search_out.hits[0].path.clone();
@@ -482,5 +580,152 @@ mod tests {
         assert_eq!(status_out.roots.len(), 1);
         assert!(status_out.disk_size_bytes > 0);
         assert!(status_out.last_updated_unix_ms.is_some());
+        // 没建 rules.json 时应回落到默认规则：单文件上限 20MB、排除列表非空。
+        assert_eq!(status_out.rules.max_file_mb, 20);
+        assert!(!status_out.rules.exclude_dirs.is_empty());
+    }
+
+    #[test]
+    fn parse_sort_maps_known_values_and_rejects_unknown() {
+        // 三个对外档位映射到核心库的 SortMode；None/relevance 都是相关性排序。
+        assert_eq!(parse_sort(None).unwrap(), SortMode::Relevance);
+        assert_eq!(parse_sort(Some("relevance")).unwrap(), SortMode::Relevance);
+        assert_eq!(parse_sort(Some("mtime")).unwrap(), SortMode::MtimeDesc);
+        assert_eq!(parse_sort(Some("size")).unwrap(), SortMode::SizeDesc);
+        // 未知值报参数错误，不静默回退（跟 CLI/核心库的静默回退刻意不同）。
+        assert!(parse_sort(Some("bogus")).is_err());
+        assert!(parse_sort(Some("mtime_desc")).is_err());
+    }
+
+    #[test]
+    fn clean_ext_tokens_drops_empty_segments() {
+        // 逗号分隔多个扩展名；`md,,txt` 拆出的空串被剔除。
+        assert_eq!(
+            crate::clean_ext_tokens("md,,txt".split(',')),
+            vec!["md", "txt"]
+        );
+        // 单个扩展名仍然可用（向后兼容）。
+        assert_eq!(crate::clean_ext_tokens("md".split(',')), vec!["md"]);
+        // 空串 / 纯逗号拆完为空，代表"没给有效扩展名"。
+        assert!(crate::clean_ext_tokens("".split(',')).is_empty());
+        assert!(crate::clean_ext_tokens(",,".split(',')).is_empty());
+        // 带空格 / 大写归一到索引里的小写无空格形态；纯空白段视同空串剔除。
+        assert_eq!(
+            crate::clean_ext_tokens("md, PDF".split(',')),
+            vec!["md", "pdf"]
+        );
+        assert!(crate::clean_ext_tokens(" , ".split(',')).is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_rejects_unknown_sort() {
+        let server = DowseMcpServer::new(PathBuf::from("does-not-matter"));
+        let err = server
+            .search(Parameters(SearchParams {
+                query: "笔记".to_owned(),
+                limit: None,
+                offset: None,
+                ext: None,
+                sort: Some("bogus".to_owned()),
+            }))
+            .await
+            .expect_err("未知 sort 应该报参数错误");
+        assert!(err.message.contains("sort"));
+    }
+
+    #[tokio::test]
+    async fn search_supports_sort_multi_ext_and_offset() {
+        let index_dir = tempfile::tempdir().unwrap();
+        let target_dir = tempfile::Builder::new()
+            .prefix("dowse-mcp-adv-")
+            .tempdir()
+            .unwrap();
+        // 三篇都含"限流"，两种扩展名、体积不同，方便验证多扩展名过滤、按 size 排序、翻页。
+        std::fs::write(target_dir.path().join("a.md"), "限流 限流 限流 aaaaaaaaaa").unwrap();
+        std::fs::write(target_dir.path().join("b.md"), "限流 bb").unwrap();
+        std::fs::write(target_dir.path().join("c.txt"), "限流 ccccc").unwrap();
+        dowse::rebuild_index(index_dir.path(), target_dir.path()).unwrap();
+        let server = DowseMcpServer::new(index_dir.path().to_path_buf());
+
+        // 多扩展名：md,txt 三篇全中，total_hits=3，相关性排序下每条都带 score。
+        let all: SearchOutput = server
+            .search(Parameters(SearchParams {
+                query: "限流".to_owned(),
+                limit: None,
+                offset: None,
+                ext: Some("md,txt".to_owned()),
+                sort: None,
+            }))
+            .await
+            .unwrap()
+            .into_typed()
+            .unwrap();
+        assert_eq!(all.total_hits, 3);
+        assert_eq!(all.hits.len(), 3);
+        assert!(all.hits.iter().all(|h| h.score.is_some()));
+
+        // 单扩展名仍然可用（向后兼容）：只 md 两篇。
+        let md: SearchOutput = server
+            .search(Parameters(SearchParams {
+                query: "限流".to_owned(),
+                limit: None,
+                offset: None,
+                ext: Some("md".to_owned()),
+                sort: None,
+            }))
+            .await
+            .unwrap()
+            .into_typed()
+            .unwrap();
+        assert_eq!(md.total_hits, 2);
+        assert!(md.hits.iter().all(|h| h.kind == "md"));
+
+        // 按 size 排序：不返回 score（跟 CLI 隐藏无意义分数一致）。
+        let by_size: SearchOutput = server
+            .search(Parameters(SearchParams {
+                query: "限流".to_owned(),
+                limit: None,
+                offset: None,
+                ext: None,
+                sort: Some("size".to_owned()),
+            }))
+            .await
+            .unwrap()
+            .into_typed()
+            .unwrap();
+        assert!(
+            by_size.hits.iter().all(|h| h.score.is_none()),
+            "size 排序不应带 score"
+        );
+
+        // 翻页：limit=1 分两次取，total_hits 恒为 3，两页拿到不同文档。
+        let page1: SearchOutput = server
+            .search(Parameters(SearchParams {
+                query: "限流".to_owned(),
+                limit: Some(1),
+                offset: Some(0),
+                ext: None,
+                sort: Some("size".to_owned()),
+            }))
+            .await
+            .unwrap()
+            .into_typed()
+            .unwrap();
+        assert_eq!(page1.total_hits, 3);
+        assert_eq!(page1.hits.len(), 1);
+        let page2: SearchOutput = server
+            .search(Parameters(SearchParams {
+                query: "限流".to_owned(),
+                limit: Some(1),
+                offset: Some(1),
+                ext: None,
+                sort: Some("size".to_owned()),
+            }))
+            .await
+            .unwrap()
+            .into_typed()
+            .unwrap();
+        assert_eq!(page2.hits.len(), 1);
+        assert_ne!(page1.hits[0].path, page2.hits[0].path, "翻页应拿到不同文档");
     }
 }

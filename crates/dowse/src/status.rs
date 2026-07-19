@@ -9,6 +9,7 @@ use anyhow::Result;
 use walkdir::WalkDir;
 
 use crate::registered_roots;
+use crate::rules::IndexRules;
 
 /// 索引的只读状态快照，给 CLI/MCP 的 `index_status` 一类查询用。
 pub struct IndexStatus {
@@ -21,6 +22,10 @@ pub struct IndexStatus {
     /// 索引目录下所有文件里最新的 mtime——近似"最近一次更新时间"。
     /// 目录为空（理论上不该发生，schema 校验已保证至少有 meta 文件）时是 None。
     pub last_updated: Option<SystemTime>,
+    /// 当前生效的索引规则（排除目录、追加文本扩展名、单文件体积上限）。读取
+    /// 索引目录旁的 rules.json，无规则文件时是默认规则。让 `dowse status`
+    /// 能把当前规则展示给用户，也让"某些文件因体积上限被挡"这类现象有据可查。
+    pub rules: IndexRules,
 }
 
 /// 读索引的只读状态：文档数、已注册根、落盘体积、最近更新时间。
@@ -69,11 +74,15 @@ pub fn index_status(index_dir: &Path) -> Result<IndexStatus> {
     // 注册这些细节只有一处实现。
     let num_docs = crate::Searcher::open(index_dir)?.num_docs();
 
+    // 只读展示当前规则，不动进程级全局（那是写入类入口的职责）。
+    let rules = crate::rules::load_rules(index_dir);
+
     Ok(IndexStatus {
         num_docs,
         roots,
         disk_size_bytes,
         last_updated,
+        rules,
     })
 }
 

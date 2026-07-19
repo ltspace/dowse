@@ -13,7 +13,7 @@ use tantivy::{Index, IndexWriter, doc};
 use walkdir::WalkDir;
 
 use crate::cursor::{UsnCursor, VolumeKey};
-use crate::extract::extract_text;
+use crate::extract::{extract_text, is_extractable};
 use crate::meta::{IndexMeta, SCHEMA_VERSION, save_meta};
 use crate::ocr;
 use crate::ocr_queue::OcrQueue;
@@ -24,10 +24,26 @@ use crate::{Fields, build_schema, register_tokenizers};
 pub struct IndexStats {
     /// 成功抽取内容并写入索引的文件数。
     pub indexed: usize,
-    /// 被跳过的文件数（无法抽取、读取失败、或不在收录范围内）。
+    /// 被跳过的文件数（无法抽取、读取失败、或不在收录范围内）。含下面
+    /// `skipped_oversize` 那部分——超限跳过是"被跳过"的一个子类，不另算。
     pub skipped: usize,
+    /// `skipped` 里因**单文件体积超过规则上限**而被跳过的文件数，单独拎出来
+    /// 计数好让 CLI 报告/`dowse status` 把"这些文件是被体积上限挡住的、不是
+    /// 内容有问题"这件事显式讲清楚（规则上限见 `rules` 模块）。
+    pub skipped_oversize: usize,
     /// 本次重建的总耗时（秒）。
     pub seconds: f64,
+}
+
+/// [`add_file_document`] 的结果：收录、跳过（无可索引文本）、或因体积超限跳过。
+/// 把"因体积超限"从普通跳过里拆出来，好让上层单独计数（[`IndexStats::skipped_oversize`]）。
+pub(crate) enum AddOutcome {
+    /// 抽到内容并写入了索引。
+    Indexed,
+    /// 没有可索引文本（不支持的格式/损坏/空文件等），跳过。
+    Skipped,
+    /// 本应可抽取，但单文件体积超过规则上限，跳过。
+    SkippedOversize,
 }
 
 /// 全量重建索引期间的进度汇报节奏：每处理这么多个文件（收录 + 跳过一起算）
@@ -45,9 +61,6 @@ pub struct IndexProgress {
     /// 刚处理完的那个文件路径。
     pub path: PathBuf,
 }
-
-/// 这些目录整棵跳过：要么是依赖/构建产物，要么是仓库内部数据。
-const SKIP_DIRS: &[&str] = &["node_modules", "target", ".git", ".venv", "__pycache__"];
 
 /// `remove_dir_all` 撞上 `PermissionDenied` 时的重试次数上限（首次尝试之外
 /// 还会再试这么多次）。
@@ -82,21 +95,31 @@ pub fn remove_dir_all_retrying(path: &Path) -> std::io::Result<()> {
     std::fs::remove_dir_all(path)
 }
 
-/// 遍历 root 下所有该收录的文件路径，统一应用跳过规则（依赖/构建产物目录、
-/// 隐藏目录）。全量重建、启动对账、监听时目录整体移入都共用这一处遍历逻辑，
-/// 保证三条路径"哪些文件算数"的判断完全一致。
+/// 遍历 root 下所有该收录的文件路径，统一应用跳过规则（排除目录、隐藏目录）。
+/// 全量重建、启动对账、监听时目录整体移入都共用这一处遍历逻辑，保证三条路径
+/// "哪些文件算数"的判断完全一致。排除目录列表取自进程级当前生效规则
+/// （见 `rules` 模块）。
 pub(crate) fn walk_index_files(root: &Path) -> impl Iterator<Item = PathBuf> {
+    walk_index_files_with(root, crate::rules::active_rules())
+}
+
+/// [`walk_index_files`] 的纯函数版：排除判定接收显式规则，不碰进程级全局，
+/// 便于单测。规则用 `Arc` 传进来直接 move 进 `filter_entry` 闭包，让它随迭代器
+/// 存活整个遍历过程。
+pub(crate) fn walk_index_files_with(
+    root: &Path,
+    rules: std::sync::Arc<crate::rules::IndexRules>,
+) -> impl Iterator<Item = PathBuf> {
     WalkDir::new(root)
         .into_iter()
-        .filter_entry(|e| {
+        .filter_entry(move |e| {
             // 根目录是显式指定的扫描起点，跳过规则不适用于它——否则 filter_entry
             // 会让 walkdir 连根都不下钻，整棵树静默扫出 0 个文件。
             if e.depth() == 0 {
                 return true;
             }
             let name = e.file_name().to_string_lossy();
-            !(e.file_type().is_dir()
-                && (SKIP_DIRS.contains(&name.as_ref()) || name.starts_with('.')))
+            !(e.file_type().is_dir() && rules.is_dir_excluded(&name))
         })
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
@@ -145,6 +168,14 @@ fn collect_via_mft(
         "MFT 快速枚举（{volume}）：整卷扫到 {} 条记录，落在监听根内 {} 条",
         stats.scanned, stats.matched
     );
+    // MFT 枚举本身不像 walkdir 那样能按目录下钻剪枝，只能拿到重建好的完整路径
+    // 再逐条筛掉穿过排除目录的文件，让快车道跟 `walk_index_files` 的排除口径
+    // 一致（否则 node_modules/target 等会在快车道照进索引）。
+    let rules = crate::rules::active_rules();
+    let files: Vec<PathBuf> = files
+        .into_iter()
+        .filter(|p| !rules.path_under_excluded_dir(p, target_dir))
+        .collect();
     let mut cursors = HashMap::new();
     cursors.insert(volume.clone(), cursor);
     Some((files, cursors))
@@ -172,8 +203,9 @@ pub(crate) fn file_stat(path: &Path) -> Option<(i64, u64)> {
     Some((mtime, meta.len()))
 }
 
-/// 抽取一个文件并写进索引（不 commit）。返回 true=收录、false=没有可索引文本被跳过。
-/// 全量重建和增量更新共用这一处建文档逻辑，保证两条路径写进去的字段完全一致。
+/// 抽取一个文件并写进索引（不 commit）。返回 [`AddOutcome`]：收录 / 跳过 /
+/// 因体积超限跳过。全量重建和增量更新共用这一处建文档逻辑，保证两条路径写进去
+/// 的字段完全一致。
 ///
 /// `index_dir` 只有图片分支会用到（去查/写 OCR 队列的持久化状态），文本文件的
 /// 建文档逻辑跟里程碑 3 完全一样。
@@ -182,13 +214,28 @@ pub(crate) fn add_file_document(
     fields: &Fields,
     path: &Path,
     index_dir: &Path,
-) -> Result<bool> {
+) -> Result<AddOutcome> {
     if ocr::is_image(path) {
-        return add_image_document(writer, fields, path, index_dir);
+        // 图片走 OCR，体积上限是另一套（ocr::MAX_IMAGE_BYTES），超限按普通跳过
+        // 计，不并进文本抽取的"因体积超限跳过"统计。
+        return Ok(if add_image_document(writer, fields, path, index_dir)? {
+            AddOutcome::Indexed
+        } else {
+            AddOutcome::Skipped
+        });
     }
 
     let Some(content) = extract_text(path) else {
-        return Ok(false);
+        // 抽不出文本可能只是不支持的格式/损坏，也可能是本应可抽取但体积超限。
+        // 只对"本应可抽取的类型"再查一次体积，把超限跳过跟其它跳过区分开——
+        // 普通不可抽取类型（.exe 等）不做这次多余的 stat。
+        if is_extractable(path)
+            && let Some((_, size)) = file_stat(path)
+            && size > crate::rules::active_rules().max_file_bytes()
+        {
+            return Ok(AddOutcome::SkippedOversize);
+        }
+        return Ok(AddOutcome::Skipped);
     };
     let (mtime, size) = file_stat(path).unwrap_or((0, 0));
 
@@ -211,7 +258,7 @@ pub(crate) fn add_file_document(
         // 文本抽取管线产出 "text"；图片走 add_image_document_with_content，写 "image"。
         fields.kind => "text",
     ))?;
-    Ok(true)
+    Ok(AddOutcome::Indexed)
 }
 
 /// 图片文档：内容来自 OCR，可能是缓存命中的旧识别结果（全量重建索引时最常见），
@@ -390,14 +437,27 @@ pub fn rebuild_index_with_progress(
     target_dir: &Path,
     mut on_progress: impl FnMut(IndexProgress),
 ) -> Result<IndexStats> {
+    // 开工前把这个索引目录旁的规则加载为进程级当前生效规则：底层的
+    // walk_index_files/is_extractable/extract_text 都读全局，加载一次让本次
+    // 重建整体尊重 rules.json（无规则文件时加载到的就是默认值，行为不变）。
+    crate::rules::load_active_rules(index_dir);
+
     let start = Instant::now();
     let mut delay = REBUILD_RETRY_BASE_DELAY;
 
     for attempt in 1..=REBUILD_RETRIES {
         let writer_threads = writer_threads_for_attempt(attempt);
         match rebuild_index_attempt(index_dir, target_dir, writer_threads, &mut on_progress) {
-            Ok((indexed, skipped, usn_cursors)) => {
-                return finish_rebuild(index_dir, target_dir, indexed, skipped, usn_cursors, start);
+            Ok((indexed, skipped, skipped_oversize, usn_cursors)) => {
+                return finish_rebuild(
+                    index_dir,
+                    target_dir,
+                    indexed,
+                    skipped,
+                    skipped_oversize,
+                    usn_cursors,
+                    start,
+                );
             }
             Err(err) if attempt < REBUILD_RETRIES && is_transient_writer_killed(&err) => {
                 eprintln!(
@@ -421,7 +481,7 @@ fn rebuild_index_attempt(
     target_dir: &Path,
     writer_threads: usize,
     on_progress: &mut impl FnMut(IndexProgress),
-) -> Result<(usize, usize, HashMap<VolumeKey, UsnCursor>)> {
+) -> Result<(usize, usize, usize, HashMap<VolumeKey, UsnCursor>)> {
     if index_dir.exists() {
         remove_dir_all_retrying(index_dir).context("清理旧索引目录失败")?;
     }
@@ -446,6 +506,7 @@ fn rebuild_index_attempt(
 
     let mut indexed = 0usize;
     let mut skipped = 0usize;
+    let mut skipped_oversize = 0usize;
 
     // 按卷判定走 MFT 快速枚举还是现有的 walkdir 遍历（设计文档第一节）。
     // 两条路径产出的文件清单语义一致——下面的收录循环完全不用关心是哪条路径
@@ -453,10 +514,14 @@ fn rebuild_index_attempt(
     let (files, usn_cursors) = collect_index_files(target_dir);
 
     for path in files {
-        if add_file_document(&writer, &fields, &path, index_dir)? {
-            indexed += 1;
-        } else {
-            skipped += 1;
+        match add_file_document(&writer, &fields, &path, index_dir)? {
+            AddOutcome::Indexed => indexed += 1,
+            // 超限跳过既计入总跳过数，也单独累加一份明细。
+            AddOutcome::Skipped => skipped += 1,
+            AddOutcome::SkippedOversize => {
+                skipped += 1;
+                skipped_oversize += 1;
+            }
         }
         let processed = indexed + skipped;
         if processed % PROGRESS_INTERVAL == 0 {
@@ -493,7 +558,7 @@ fn rebuild_index_attempt(
         .wait_merging_threads()
         .context("等待索引合并线程退出失败")?;
 
-    Ok((indexed, skipped, usn_cursors))
+    Ok((indexed, skipped, skipped_oversize, usn_cursors))
 }
 
 /// 重建成功之后的收尾：写 meta.json、拼 `IndexStats`。这一步不碰 tantivy
@@ -504,6 +569,7 @@ fn finish_rebuild(
     target_dir: &Path,
     indexed: usize,
     skipped: usize,
+    skipped_oversize: usize,
     usn_cursors: HashMap<VolumeKey, UsnCursor>,
     start: Instant,
 ) -> Result<IndexStats> {
@@ -522,6 +588,7 @@ fn finish_rebuild(
     Ok(IndexStats {
         indexed,
         skipped,
+        skipped_oversize,
         seconds: start.elapsed().as_secs_f64(),
     })
 }
@@ -627,6 +694,53 @@ mod tests {
             vec!["save_queue"],
             "队列保存失败时不该继续提交索引写入"
         );
+    }
+
+    /// 默认规则（20MB 上限）下，一个超限文件应被跳过并单独计进 skipped_oversize，
+    /// 正常文件照常收录。用 set_len 造稀疏文件，只撑大小不真写数据。
+    /// 依赖进程级全局为默认规则——本 crate 里没有任何测试会把非默认规则灌进全局
+    /// （非默认路径都走接收显式规则的 `*_with` 纯函数单测），所以这个断言稳定。
+    #[test]
+    fn rebuild_counts_oversize_skips_separately() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        std::fs::write(target_dir.path().join("normal.txt"), "正常内容 normal")?;
+        let big = target_dir.path().join("huge.log");
+        let f = std::fs::File::create(&big)?;
+        f.set_len(crate::rules::IndexRules::default().max_file_bytes() + 1)?;
+        drop(f);
+
+        let stats = rebuild_index(index_dir.path(), target_dir.path())?;
+        assert_eq!(stats.indexed, 1, "只有正常文件应被收录");
+        assert_eq!(stats.skipped, 1, "超限文件计入总跳过数");
+        assert_eq!(stats.skipped_oversize, 1, "超限文件单独计一份明细");
+        Ok(())
+    }
+
+    /// `walk_index_files_with` 应按传入规则的排除列表整棵跳过目录；不在列表里的
+    /// 目录（哪怕是抽出前的默认排除名）正常收录——列表是整体替换语义。
+    #[test]
+    fn walk_index_files_with_respects_custom_exclude() -> Result<()> {
+        let root = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::create_dir_all(root.path().join("build"))?;
+        std::fs::create_dir_all(root.path().join("node_modules"))?;
+        std::fs::write(root.path().join("keep.txt"), "a")?;
+        std::fs::write(root.path().join("build").join("skip.txt"), "b")?;
+        std::fs::write(root.path().join("node_modules").join("kept.txt"), "c")?;
+
+        // 自定义规则只排除 build；node_modules 不在列表里，应被收录。
+        let rules = std::sync::Arc::new(crate::rules::IndexRules {
+            exclude_dirs: vec!["build".into()],
+            extra_text_exts: vec![],
+            max_file_mb: 20,
+        });
+        let mut files: Vec<String> = walk_index_files_with(root.path(), rules)
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+        assert_eq!(files, vec!["keep.txt", "kept.txt"]);
+        Ok(())
     }
 
     #[test]

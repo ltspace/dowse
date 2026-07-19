@@ -7,8 +7,9 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use dowse::{
-    DEFAULT_WORKERS, IndexUpdater, OcrPipeline, Searcher, SortMode, WatchProgress, display_path,
-    drain_ocr_queue, index_status, rebuild_index_with_progress, registered_roots, watch_roots_auto,
+    DEFAULT_WORKERS, IndexRules, IndexUpdater, OcrPipeline, Searcher, SortMode, WatchProgress,
+    display_path, drain_ocr_queue, index_status, load_rules, rebuild_index_with_progress,
+    registered_roots, save_rules, watch_roots_auto,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -41,8 +42,13 @@ enum Command {
         #[arg(long)]
         sort: Option<String>,
     },
-    /// 查看索引概况：位置、文档总数、落盘体积、已注册根目录、最近更新时间
+    /// 查看索引概况：位置、文档总数、落盘体积、已注册根目录、最近更新时间、当前规则
     Status,
+    /// 查看或修改索引规则（排除目录 / 追加文本扩展名 / 单文件体积上限）
+    Rules {
+        #[command(subcommand)]
+        action: RulesAction,
+    },
     /// 前台运行文件监听，实时打印收到的事件和防抖后提交的批次（调试用），Ctrl+C 退出
     Watch {
         /// 要监听的目录；不给就用上次建索引时注册的根目录
@@ -52,6 +58,26 @@ enum Command {
     ///
     /// 例：`claude mcp add dowse -- dowse mcp`
     Mcp,
+}
+
+/// `dowse rules` 的子动作：查看或修改索引规则。
+#[derive(Subcommand)]
+enum RulesAction {
+    /// 打印当前生效的索引规则
+    Show,
+    /// 修改索引规则（改完需要重建索引才完全生效）。只给出的项被改动，未给出的
+    /// 项保持原值；列表类选项按"整体替换"语义处理。
+    Set {
+        /// 排除目录名列表（逗号分隔），整体替换现有列表
+        #[arg(long, value_delimiter = ',')]
+        exclude: Option<Vec<String>>,
+        /// 追加的文本扩展名列表（逗号分隔，不含点），整体替换现有列表
+        #[arg(long = "add-ext", value_delimiter = ',')]
+        add_ext: Option<Vec<String>>,
+        /// 单文件体积上限（MB）
+        #[arg(long = "max-file-mb")]
+        max_file_mb: Option<u64>,
+    },
 }
 
 /// 索引统一放在 %LOCALAPPDATA%\dowse\index，跟被索引的目录无关。
@@ -83,10 +109,17 @@ fn main() -> Result<()> {
                     println!("  已处理 {} 个文件…", progress.processed);
                 }
             })?;
-            println!(
-                "完成: 收录 {} 个文件, 跳过 {} 个, 用时 {:.1}s",
-                stats.indexed, stats.skipped, stats.seconds
-            );
+            if stats.skipped_oversize > 0 {
+                println!(
+                    "完成: 收录 {} 个文件, 跳过 {} 个（其中 {} 个因体积超限）, 用时 {:.1}s",
+                    stats.indexed, stats.skipped, stats.skipped_oversize, stats.seconds
+                );
+            } else {
+                println!(
+                    "完成: 收录 {} 个文件, 跳过 {} 个, 用时 {:.1}s",
+                    stats.indexed, stats.skipped, stats.seconds
+                );
+            }
 
             // 文本先行可搜之后，紧接着把 OCR 队列同步跑完——`dowse index` 是一次性
             // 命令，用户期望它退出时索引就是完整状态，而不是留一堆图片"回头再说"
@@ -121,14 +154,10 @@ fn main() -> Result<()> {
             {
                 eprintln!("未知的排序方式 \"{raw}\"，已回退到相关性排序。");
             }
-            // clap 的 value_delimiter 已经按逗号拆好；空 Vec 表示不过滤扩展名。
-            // 过滤掉空串：`--ext md,,txt` 这类多逗号会拆出 ""，若不剔除会去匹配"没有
-            // 扩展名"的文件，悄悄放宽结果。省略 --ext（空 Vec）仍表示不过滤。
-            let ext_refs: Vec<&str> = ext
-                .iter()
-                .map(String::as_str)
-                .filter(|s| !s.is_empty())
-                .collect();
+            // clap 的 value_delimiter 已经按逗号拆好；清洗规则（剔空串/trim/小写）
+            // 抽到 clean_ext_tokens 里跟 MCP 那条入口共用，见其文档说明。空列表表示不过滤。
+            let ext_tokens = clean_ext_tokens(ext.iter().map(String::as_str));
+            let ext_refs: Vec<&str> = ext_tokens.iter().map(String::as_str).collect();
             let ext_group = (!ext_refs.is_empty()).then_some(ext_refs.as_slice());
             let hits = searcher.search_advanced(&query_str, limit, ext_group, sort_mode)?;
 
@@ -148,6 +177,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Status => status()?,
+        Command::Rules { action } => rules_cmd(action)?,
         Command::Watch { dir } => watch(dir)?,
         Command::Mcp => run_mcp()?,
     }
@@ -200,7 +230,65 @@ fn status() -> Result<()> {
             println!("  {}", display_path(&r.to_string_lossy()));
         }
     }
+    println!("索引规则:");
+    print_rules(&status.rules);
     Ok(())
+}
+
+/// `dowse rules show`/`set`：查看或修改索引目录旁的 rules.json。修改后提示需要
+/// 重建索引才完全生效——规则只影响此后的抽取/遍历判定，已经在索引里的文件不会
+/// 被自动重新评估。
+fn rules_cmd(action: RulesAction) -> Result<()> {
+    let dir = index_dir()?;
+    match action {
+        RulesAction::Show => {
+            let rules = load_rules(&dir);
+            println!("当前索引规则:");
+            print_rules(&rules);
+        }
+        RulesAction::Set {
+            exclude,
+            add_ext,
+            max_file_mb,
+        } => {
+            // 在现有规则的基础上改：只覆盖显式给出的项，未给出的保持原值。
+            let mut rules = load_rules(&dir);
+            if let Some(exclude) = exclude {
+                rules.exclude_dirs = exclude;
+            }
+            if let Some(add_ext) = add_ext {
+                rules.extra_text_exts = add_ext;
+            }
+            if let Some(max_file_mb) = max_file_mb {
+                rules.max_file_mb = max_file_mb;
+            }
+            // save_rules 内部会 normalize；这里也 normalize 一份用于即时回显，
+            // 让打印出来的就是最终落盘的样子（去空白/去点/小写/去重）。
+            rules.normalize();
+            save_rules(&dir, &rules)?;
+            println!("规则已更新:");
+            print_rules(&rules);
+            println!(
+                "\n提示: 规则修改后需要重建索引（dowse index <目录>）才能完全生效——\
+                 已在索引里的文件不会被自动重新评估。"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// 把一份索引规则按统一缩进格式打给用户，`status` 和 `rules` 两处共用。
+fn print_rules(rules: &IndexRules) {
+    let fmt_list = |items: &[String]| {
+        if items.is_empty() {
+            "(无)".to_string()
+        } else {
+            items.join(", ")
+        }
+    };
+    println!("  排除目录: {}", fmt_list(&rules.exclude_dirs));
+    println!("  追加文本扩展名: {}", fmt_list(&rules.extra_text_exts));
+    println!("  单文件体积上限: {} MB", rules.max_file_mb);
 }
 
 /// 把字节数格式化成人类可读的 B/KB/MB/GB（1024 进制）。
@@ -299,6 +387,25 @@ fn watch(dir: Option<PathBuf>) -> Result<()> {
 
     println!("监听已停止。");
     Ok(())
+}
+
+/// 把扩展名过滤参数清洗成一串可用的扩展名：剔除空串——`md,,txt` 会拆出 `""`，
+/// 留着它会去匹配"没有扩展名"的文件，把结果悄悄放宽；再做 trim + 小写归一——
+/// 索引里的 ext 字段是小写无空格的（见 extract.rs 的 `to_ascii_lowercase`），
+/// `"md, PDF"` 这种带空格/大写的输入不归一就会静默匹配不到任何文件。CLI（clap
+/// 按逗号拆好的 `Vec<String>`）和 MCP（单个逗号分隔字符串自己 `split(',')`）两条
+/// 入口共用这套清洗规则，保证同样的输入在两处得到同样的解释，不用各写一份解析器。
+/// 空列表表示不按扩展名过滤。
+pub(crate) fn clean_ext_tokens<'a, I>(tokens: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    tokens
+        .into_iter()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect()
 }
 
 /// 把命中区间用 `open`/`close` 包起来切片重组（终端染色和 MCP 的 «» 标记

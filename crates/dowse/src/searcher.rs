@@ -113,6 +113,19 @@ pub struct PreviewHit {
     pub ext: String,
 }
 
+/// 一页搜索结果：当前页命中列表加上"匹配总数"。
+///
+/// `hits` 是按 `sort` 排序、再按 `limit`/`offset` 截出的当前页；`total` 是整个查询
+/// 匹配的文档数，不受 `limit`/`offset` 截断。分页调用方（MCP 的 search 工具）靠
+/// `total` 判断"还有没有下一页"——`offset + hits.len() < total` 就说明后面还有，
+/// 否则不必再翻，省得 agent 盲翻空页。
+pub struct SearchPage {
+    /// 当前页的命中列表，已按 `sort` 排序并按 `limit`/`offset` 截取。
+    pub hits: Vec<SearchHit>,
+    /// 满足查询的文档总数，不受 `limit`/`offset` 影响。
+    pub total: usize,
+}
+
 /// 一个索引的只读搜索句柄。
 ///
 /// `Searcher` 只读打开索引，可以和一个并发的写入端（[`crate::IndexUpdater`]、
@@ -240,6 +253,42 @@ impl Searcher {
         ext_group: Option<&[&str]>,
         sort: SortMode,
     ) -> Result<Vec<SearchHit>> {
+        // 复用分页实现取第一页（offset=0），丢掉总数——不给这条老入口加参数，
+        // 避免动到浮窗/CLI 等既有调用方的签名。多算的那次 Count 和 TopDocs 共用
+        // 同一次检索（见 search_paged 里的 tuple 收集器），几乎不额外花代价。
+        Ok(self
+            .search_paged(query_str, limit, 0, ext_group, sort)?
+            .hits)
+    }
+
+    /// 分页版 [`search_advanced`](Self::search_advanced)：多一个 `offset`（先跳过
+    /// 多少条命中）并额外返回匹配总数（[`SearchPage::total`]）。query 与 ext 分组
+    /// 过滤、排序都在 tantivy 查询层完成，`TopDocs` 和 `Count` 用同一次检索的
+    /// tuple 收集器一起跑——两者本就都要遍历全部命中文档，合成一次遍历，总数几乎
+    /// 是白捡的。`offset` 传 0 即取第一页。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> anyhow::Result<()> {
+    /// use std::path::Path;
+    /// use dowse::{Searcher, SortMode};
+    ///
+    /// let searcher = Searcher::open(Path::new("./my-index"))?;
+    /// // 取第 2 页（每页 20 条）。
+    /// let page = searcher.search_paged("季度 报告", 20, 20, None, SortMode::Relevance)?;
+    /// println!("本页 {} 条，共 {} 条", page.hits.len(), page.total);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn search_paged(
+        &self,
+        query_str: &str,
+        limit: usize,
+        offset: usize,
+        ext_group: Option<&[&str]>,
+        sort: SortMode,
+    ) -> Result<SearchPage> {
         let text_query = self.parser.parse_query(query_str)?;
         let query: Box<dyn Query> = match ext_group {
             Some(exts) if !exts.is_empty() => {
@@ -273,34 +322,68 @@ impl Searcher {
         // 相关性排序保留真实 BM25 分数；其余三档按 fast field 排，doc 顺序
         // 就是最终顺序，score 字段填 0.0——非相关性排序下这个分数没有意义，
         // 调用方（前端/MCP）不应该拿它做展示或二次排序。
-        let addrs: Vec<(f32, DocAddress)> = match sort {
+        //
+        // 每档都把 `TopDocs`（带 offset）和 `Count` 打成 tuple 收集器一次跑完：
+        // TopDocs 和 Count 本来都要遍历全部命中文档，合成一次遍历顺带拿到总数，
+        // 供分页调用方判断还有没有下一页。
+        let (addrs, total): (Vec<(f32, DocAddress)>, usize) = match sort {
             SortMode::Relevance => {
-                searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?
+                let (top, total) = searcher.search(
+                    &query,
+                    &(
+                        TopDocs::with_limit(limit)
+                            .and_offset(offset)
+                            .order_by_score(),
+                        Count,
+                    ),
+                )?;
+                (top, total)
             }
-            SortMode::MtimeDesc => searcher
-                .search(
+            SortMode::MtimeDesc => {
+                let (top, total) = searcher.search(
                     &query,
-                    &TopDocs::with_limit(limit).order_by_fast_field::<i64>("mtime", Order::Desc),
-                )?
-                .into_iter()
-                .map(|(_, addr)| (0.0, addr))
-                .collect(),
-            SortMode::MtimeAsc => searcher
-                .search(
+                    &(
+                        TopDocs::with_limit(limit)
+                            .and_offset(offset)
+                            .order_by_fast_field::<i64>("mtime", Order::Desc),
+                        Count,
+                    ),
+                )?;
+                (
+                    top.into_iter().map(|(_, addr)| (0.0, addr)).collect(),
+                    total,
+                )
+            }
+            SortMode::MtimeAsc => {
+                let (top, total) = searcher.search(
                     &query,
-                    &TopDocs::with_limit(limit).order_by_fast_field::<i64>("mtime", Order::Asc),
-                )?
-                .into_iter()
-                .map(|(_, addr)| (0.0, addr))
-                .collect(),
-            SortMode::SizeDesc => searcher
-                .search(
+                    &(
+                        TopDocs::with_limit(limit)
+                            .and_offset(offset)
+                            .order_by_fast_field::<i64>("mtime", Order::Asc),
+                        Count,
+                    ),
+                )?;
+                (
+                    top.into_iter().map(|(_, addr)| (0.0, addr)).collect(),
+                    total,
+                )
+            }
+            SortMode::SizeDesc => {
+                let (top, total) = searcher.search(
                     &query,
-                    &TopDocs::with_limit(limit).order_by_fast_field::<u64>("size", Order::Desc),
-                )?
-                .into_iter()
-                .map(|(_, addr)| (0.0, addr))
-                .collect(),
+                    &(
+                        TopDocs::with_limit(limit)
+                            .and_offset(offset)
+                            .order_by_fast_field::<u64>("size", Order::Desc),
+                        Count,
+                    ),
+                )?;
+                (
+                    top.into_iter().map(|(_, addr)| (0.0, addr)).collect(),
+                    total,
+                )
+            }
         };
 
         let mut hits = Vec::with_capacity(addrs.len());
@@ -331,7 +414,7 @@ impl Searcher {
                 ext,
             });
         }
-        Ok(hits)
+        Ok(SearchPage { hits, total })
     }
 
     /// 索引里的文档总数，给 CLI 的状态输出用。
