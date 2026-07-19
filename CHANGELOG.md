@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-19
+
 ### Added
 
 - Index rules are now configurable instead of hardcoded, persisted as a
