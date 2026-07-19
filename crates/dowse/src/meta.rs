@@ -198,6 +198,76 @@ pub(crate) fn append_root(index_dir: &Path, root: &Path) -> Result<()> {
     save_meta(index_dir, &meta)
 }
 
+/// 候选根是否已经**精确**注册过（按 [`best_effort_normalize`] 归一后跟某个已有根
+/// 相等）。增量补扫单个根（`roots::index_root_incremental`）的幂等语义要用它把
+/// "精确重复"从"父子嵌套"里单独拎出来：重复补扫一个已注册的根要放行（先删后加
+/// 天然幂等），但仍要挡住跟别的根形成的嵌套。用归一比较而不是裸字符串相等——
+/// 全量重建存的是未 canonicalize 的原始路径、`add_root`/本入口存的是 canonicalize
+/// 过的路径，两种拼法要先拉到一起才比得对（同 [`assert_no_root_nesting`]）。
+pub(crate) fn is_root_registered(existing: &[PathBuf], candidate: &Path) -> bool {
+    let candidate_norm = best_effort_normalize(candidate);
+    existing
+        .iter()
+        .any(|r| best_effort_normalize(r) == candidate_norm)
+}
+
+/// 同 [`assert_no_root_nesting`]，但**允许**候选跟某个已有根完全相同——增量补扫
+/// 单个根的幂等入口要求"重复补扫一个已注册的根"放行，只挡住真正的父子嵌套
+/// （那会让 `delete_tree` 的前缀圈选删除和对账的孤儿清理语义变成泥潭，见
+/// [`assert_no_root_nesting`] 的文档）。归一口径、报错文案都跟它一致。
+pub(crate) fn assert_no_root_nesting_allow_exact(
+    existing: &[PathBuf],
+    candidate: &Path,
+) -> Result<()> {
+    let candidate_norm = best_effort_normalize(candidate);
+    for root in existing {
+        let root_norm = best_effort_normalize(root);
+        if root_norm == candidate_norm {
+            // 精确重复：放行，交给上层做幂等重扫。
+            continue;
+        }
+        if candidate_norm.starts_with(&root_norm) {
+            bail!(
+                "目录 {} 是已有根 {} 的子目录，不允许嵌套添加",
+                candidate.display(),
+                root.display()
+            );
+        }
+        if root_norm.starts_with(&candidate_norm) {
+            bail!(
+                "目录 {} 是已有根 {} 的父目录，不允许嵌套添加",
+                candidate.display(),
+                root.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// 增量补扫单个新根（`roots::index_root_incremental`）收尾时的一次性 meta 落盘：
+/// 确保新根在 roots 里（已经注册过就不重复追加——幂等重扫会走到这里），并为它
+/// 所在的卷补上 USN 游标基线。一次 load-modify-save，省得追加根和写游标各存一次盘。
+///
+/// 游标只补 meta 里**还没有的卷**（`or_insert`）：已有卷的游标是更早的、覆盖这个卷
+/// 上其它根的基线，不能被这次更靠后的游标顶掉——否则下次启动快车道从新游标回放，
+/// 会漏掉旧根在两次游标之间发生的变更（快车道靠游标回放追平，不再走 mtime 全扫，
+/// 见 `usn::bootstrap_fast_roots`）。保留更早的游标只会多回放几条、幂等无害。
+/// 新根落在一个全新的卷（meta 里还没有它的游标）时，这次补扫刚拍的基线正好补上。
+pub(crate) fn register_root_with_cursors(
+    index_dir: &Path,
+    root: &Path,
+    usn_cursors: HashMap<VolumeKey, UsnCursor>,
+) -> Result<()> {
+    let mut meta = load_meta(index_dir)?;
+    if !is_root_registered(&meta.roots, root) {
+        meta.roots.push(root.to_path_buf());
+    }
+    for (vol, cursor) in usn_cursors {
+        meta.usn_cursors.entry(vol).or_insert(cursor);
+    }
+    save_meta(index_dir, &meta)
+}
+
 /// 把一个根从 meta.json 的 roots 列表里移除，其余字段原样保留。不存在的根
 /// 直接报错（调用方应该先用 `registered_roots` 确认这个根确实注册过，避免
 /// 手误传错路径时静默什么都不做）。
@@ -360,6 +430,35 @@ mod tests {
         let existing = vec![PathBuf::from(r"\\?\C:\docs\project")];
         let child = PathBuf::from(r"C:\docs\project\sub");
         assert!(assert_no_root_nesting(&existing, &child).is_err());
+    }
+
+    /// `assert_no_root_nesting_allow_exact` 放行精确重复（幂等重扫要用），但仍挡住
+    /// 真正的父子嵌套——跟 `assert_no_root_nesting` 只差"重复该不该报错"这一点。
+    #[test]
+    fn allow_exact_nesting_permits_duplicate_but_blocks_parent_child() {
+        let existing = vec![PathBuf::from(r"C:\docs\project")];
+
+        let duplicate = PathBuf::from(r"C:\docs\project");
+        assert!(
+            assert_no_root_nesting_allow_exact(&existing, &duplicate).is_ok(),
+            "跟已有根完全相同应该放行（幂等重扫）"
+        );
+        assert!(is_root_registered(&existing, &duplicate));
+
+        let child = PathBuf::from(r"C:\docs\project\sub");
+        assert!(
+            assert_no_root_nesting_allow_exact(&existing, &child).is_err(),
+            "子目录仍应被拒绝"
+        );
+        let parent = PathBuf::from(r"C:\docs");
+        assert!(
+            assert_no_root_nesting_allow_exact(&existing, &parent).is_err(),
+            "父目录仍应被拒绝"
+        );
+
+        let sibling = PathBuf::from(r"C:\docs\other");
+        assert!(assert_no_root_nesting_allow_exact(&existing, &sibling).is_ok());
+        assert!(!is_root_registered(&existing, &sibling));
     }
 
     #[test]

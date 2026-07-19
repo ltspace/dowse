@@ -16,8 +16,9 @@
 //!
 //! # 核心入口
 //!
-//! - 建索引：[`rebuild_index`] 全量重建；多根索引的增删见 [`add_root`]/
-//!   [`remove_root`]。
+//! - 建索引：[`rebuild_index`] 全量重建；多根索引里"再加一个文件夹"用
+//!   [`index_root_incremental`]（只补扫新根，不动其它根，跟全量重建同一套 MFT
+//!   快车道 / [`IndexStats`] 口径）；根的增删见 [`add_root`]/[`remove_root`]。
 //! - 搜索：[`Searcher::open`] 打开一个索引的只读句柄，[`Searcher::search`]
 //!   执行查询（`search_filtered`/`search_advanced` 支持扩展名过滤和排序）。
 //! - 实时监听：[`watch_roots_auto`] 按卷能力自动选快车道或慢车道，持续把
@@ -108,8 +109,8 @@ pub use ocr_queue::OcrQueue;
 pub use ocr_worker::{DEFAULT_WORKERS, OcrDrainStats, OcrPipeline, drain_ocr_queue};
 pub use reconcile::{ReconcileStats, reconcile, reconcile_orphans};
 pub use roots::{
-    AddRootStats, RemoveRootStats, add_root, add_root_with_progress, rebuild_root,
-    rebuild_root_with_progress, remove_root,
+    AddRootStats, RemoveRootStats, add_root, add_root_with_progress, index_root_incremental,
+    index_root_incremental_with_progress, rebuild_root, rebuild_root_with_progress, remove_root,
 };
 pub use rules::{IndexRules, load_rules, save_rules};
 pub use searcher::{PreviewHit, SearchHit, SearchPage, Searcher, SortMode, normalize_ranges};

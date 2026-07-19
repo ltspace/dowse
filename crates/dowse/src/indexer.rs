@@ -21,6 +21,7 @@ use crate::volume::{self, RootCapability};
 use crate::{Fields, build_schema, register_tokenizers};
 
 /// 一次重建索引的统计结果，CLI 拿去打报告。
+#[derive(Debug, Clone, Copy)]
 pub struct IndexStats {
     /// 成功抽取内容并写入索引的文件数。
     pub indexed: usize,
@@ -132,7 +133,13 @@ pub(crate) fn walk_index_files_with(
 /// MFT 枚举失败（探测通过了，但真枚举时出于某种原因失败——比如探测和枚举
 /// 之间权限被收回）时也静默退回 walkdir，不让一次枚举失败拖垮整个建索引
 /// 流程——诚实降级不只是"没权限就降级"，"权限看着有、用起来失败"也要兜底。
-fn collect_index_files(target_dir: &Path) -> (Vec<PathBuf>, HashMap<VolumeKey, UsnCursor>) {
+///
+/// 全量重建（[`rebuild_index_attempt`]）和增量补扫单个根（`roots::index_root_incremental`）
+/// 共用这一处枚举 + 卷能力探测，保证两条路径"哪些文件算数、走不走 MFT 快车道、
+/// 拍不拍 USN 游标基线"完全一致。
+pub(crate) fn collect_index_files(
+    target_dir: &Path,
+) -> (Vec<PathBuf>, HashMap<VolumeKey, UsnCursor>) {
     if let RootCapability::Fast { volume } = volume::probe_root_capability(target_dir)
         && let Some(result) = collect_via_mft(&volume, target_dir)
     {

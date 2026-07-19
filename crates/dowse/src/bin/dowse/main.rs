@@ -8,8 +8,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use dowse::{
     DEFAULT_WORKERS, IndexRules, IndexUpdater, OcrPipeline, Searcher, SortMode, WatchProgress,
-    display_path, drain_ocr_queue, index_status, load_rules, rebuild_index_with_progress,
-    registered_roots, save_rules, watch_roots_auto,
+    display_path, drain_ocr_queue, index_root_incremental_with_progress, index_status, load_rules,
+    rebuild_index_with_progress, registered_roots, save_rules, watch_roots_auto,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -26,6 +26,12 @@ enum Command {
     /// 全量重建索引
     Index {
         /// 要索引的目录
+        dir: PathBuf,
+    },
+    /// 增量补扫：往已有索引里再加一个根目录，只索引这个新目录，不动其它已注册的根
+    /// （对比 `index` 会删掉整个索引从头重建）
+    Add {
+        /// 要新增并索引的目录
         dir: PathBuf,
     },
     /// 搜索已建好的索引
@@ -176,10 +182,55 @@ fn main() -> Result<()> {
                 println!("  {}", render_snippet(&hit.snippet, &hit.highlighted));
             }
         }
+        Command::Add { dir } => add_root_cmd(dir)?,
         Command::Status => status()?,
         Command::Rules { action } => rules_cmd(action)?,
         Command::Watch { dir } => watch(dir)?,
         Command::Mcp => run_mcp()?,
+    }
+    Ok(())
+}
+
+/// `dowse add`：增量补扫，往已有索引里再加一个根目录。只索引这个新目录、把它
+/// 追加进已注册根列表，索引里其它根的文档原样保留（对比 `dowse index` 会删掉整个
+/// 索引从头重建）。报告风格跟 `dowse index` 保持一致。
+fn add_root_cmd(dir: PathBuf) -> Result<()> {
+    let index = index_dir()?;
+    let dir = dir.canonicalize().context("目标目录不存在")?;
+    println!("增量补扫新根: {}", display_path(&dir.to_string_lossy()));
+
+    // 补扫复用一个现开的写入端；下面 drain_ocr_queue 会自己开一个写入端，一个索引
+    // 同一时刻只能有一个 IndexWriter，所以补扫用完必须先 drop 掉再去跑 OCR。
+    let mut updater = IndexUpdater::open(&index)
+        .context("打不开索引写入端，先跑 `dowse index <目录>` 建一次索引")?;
+    // 核心层回调已降频到每 PROGRESS_INTERVAL(50) 个文件一次，这里再降到每千个
+    // （50 的整数倍）打一行，跟 `dowse index` 一样避免大目录刷屏。
+    let stats = index_root_incremental_with_progress(&index, &dir, &mut updater, |progress| {
+        if progress.processed % 1000 == 0 {
+            println!("  已处理 {} 个文件…", progress.processed);
+        }
+    })?;
+    drop(updater);
+
+    if stats.skipped_oversize > 0 {
+        println!(
+            "完成: 新增收录 {} 个文件, 跳过 {} 个（其中 {} 个因体积超限）, 用时 {:.1}s",
+            stats.indexed, stats.skipped, stats.skipped_oversize, stats.seconds
+        );
+    } else {
+        println!(
+            "完成: 新增收录 {} 个文件, 跳过 {} 个, 用时 {:.1}s",
+            stats.indexed, stats.skipped, stats.seconds
+        );
+    }
+
+    // 跟 `dowse index` 一样，把新根名下图片的 OCR 同步跑完，让命令退出时索引就是
+    // 完整状态（常驻托盘程序才把图片交给后台 worker 池慢慢消化）。
+    let ocr_stats = drain_ocr_queue(&index, DEFAULT_WORKERS)?;
+    if !ocr_stats.available {
+        println!("未检测到可用的 OCR 语言包，跳过图片文字识别（截图/图片文字不会被索引）。");
+    } else if ocr_stats.processed > 0 {
+        println!("OCR 完成: 识别 {} 张图片", ocr_stats.processed);
     }
     Ok(())
 }

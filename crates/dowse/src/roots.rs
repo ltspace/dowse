@@ -8,14 +8,15 @@
 //! 监听的场景可以现开一个 `IndexUpdater::open` 传进来，用完随手 drop。
 
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 
-use crate::IndexProgress;
 use crate::events::{PendingChange, PendingOp};
 use crate::meta;
 use crate::ocr_queue::OcrQueue;
 use crate::updater::IndexUpdater;
+use crate::{IndexProgress, IndexStats};
 
 /// 添加根的统计结果，跟 `IndexStats`（全量重建）同一口径：收录/跳过文件数。
 #[derive(Debug, Clone, Copy)]
@@ -90,6 +91,106 @@ pub fn add_root_with_progress(
     Ok(AddRootStats {
         indexed: outcome.upserted,
         skipped: outcome.skipped,
+    })
+}
+
+/// 增量补扫单个新根：只遍历并收录这个新根名下的文件，**不**碰索引里其它根已有的
+/// 文档（对比全量重建 [`crate::rebuild_index`] 会删掉整个索引目录从头再来）。给
+/// 多根索引"再加一个文件夹"用——旧根文档原样保留，新根文档逐个 upsert 进来。
+///
+/// 不需要进度直播的调用方走这个薄封装，真正的实现在
+/// [`index_root_incremental_with_progress`]。
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use std::path::Path;
+/// use dowse::{IndexUpdater, index_root_incremental};
+///
+/// let index_dir = Path::new("./my-index");
+/// let mut updater = IndexUpdater::open(index_dir)?;
+/// let stats = index_root_incremental(index_dir, Path::new("./more-documents"), &mut updater)?;
+/// println!("新根收录 {} 个文件，跳过 {}", stats.indexed, stats.skipped);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// 目标目录不存在（`canonicalize` 失败）、跟已有根形成父子嵌套、或枚举/建文档/
+/// 提交索引失败时返回 `Err`。
+pub fn index_root_incremental(
+    index_dir: &Path,
+    new_root: &Path,
+    updater: &mut IndexUpdater,
+) -> Result<IndexStats> {
+    index_root_incremental_with_progress(index_dir, new_root, updater, |_| {})
+}
+
+/// 同 [`index_root_incremental`]，多一个进度回调，每处理 `PROGRESS_INTERVAL` 个
+/// 文件（收录 + 跳过一起算）直播一次累计进度——让 CLI 的加根命令能像全量重建
+/// 一样打印进度。
+///
+/// 跟 [`add_root`] 的区别：`add_root` 走增量更新器的 `UpsertTree`（固定 walkdir
+/// 遍历）、返回 [`AddRootStats`]；本函数跟全量重建 [`crate::rebuild_index`] 共用
+/// 同一套卷能力探测——NTFS + 管理员权限时走 MFT 快速枚举，拿不到就退回 walkdir——
+/// 并沿用 [`IndexStats`]（含单列的 `skipped_oversize`）和进度口径，好让加根报告
+/// 跟建索引报告长一个样。两者都尊重 active rules 的排除目录 / 追加扩展名 / 体积
+/// 上限（排除目录在枚举阶段剪掉，扩展名 / 体积上限在逐文件建文档时判定），都靠
+/// "先删后加"保证幂等：对已存在的根重复补扫不会产生重复文档，只是把它的文件重扫
+/// 一遍（因此已注册的根重复补扫会被放行，只挡真正的父子嵌套）。
+///
+/// 顺序不变量（同 [`add_root`]，见其文档 + 设计文档"边界与失败"）：**先**把新根
+/// 的文件全部 upsert 进索引、**后**把根写进 meta。半路崩溃时 meta 还不认这批文档
+/// 属于任何根，下次启动对账的孤儿清理（[`crate::reconcile_orphans`]）会把它们当
+/// 垃圾删掉，不留"文档在、根不在"的幽灵状态。
+///
+/// 走了 MFT 快车道时，顺带把这个卷的 USN 游标基线补进 meta（只补 meta 里还没有
+/// 的卷，见 `meta::register_root_with_cursors`），让下次启动的快车道回放能覆盖
+/// 新根；拿不到快车道（非 NTFS / 非管理员）就不写游标，新根下次启动退回
+/// walkdir + notify 慢车道对账，两条路径结果一致。补扫完成后 watch/USN 的根集合
+/// 天然包含新根——`watch_roots_auto` 每次从 [`crate::registered_roots`] 现读根列表，
+/// 不缓存，加根后再起监听就自动带上。
+///
+/// # Errors
+///
+/// 同 [`index_root_incremental`]。
+pub fn index_root_incremental_with_progress(
+    index_dir: &Path,
+    new_root: &Path,
+    updater: &mut IndexUpdater,
+    on_progress: impl FnMut(IndexProgress),
+) -> Result<IndexStats> {
+    let start = Instant::now();
+    let new_root = new_root
+        .canonicalize()
+        .with_context(|| format!("目录不存在: {}", new_root.display()))?;
+
+    // 先做嵌套校验（纯路径判断），失败就直接返回，不碰索引也不白扫一遍目录树。
+    // 允许精确重复（幂等重扫），只挡真正的父子嵌套。
+    let existing = meta::registered_roots(index_dir)?;
+    meta::assert_no_root_nesting_allow_exact(&existing, &new_root)?;
+
+    // 跟全量重建同一套卷能力探测：NTFS + 管理员权限走 MFT 快速枚举，拿不到就退回
+    // walkdir。两条路径产出的文件清单都已按 active rules 的排除目录过滤，下面逐
+    // 文件 upsert 感知不到是哪条路径来的（扩展名 / 体积上限在建文档时判定）。
+    // active rules 已由 `IndexUpdater::open` 在打开这个索引时加载进进程级全局。
+    let (files, usn_cursors) = crate::indexer::collect_index_files(&new_root);
+
+    let (indexed, skipped, skipped_oversize) =
+        updater.upsert_files_with_progress(&files, on_progress)?;
+
+    // 顺序不变量：upsert 全部落盘后才登记 meta（见函数级文档）。顺带把这次若走了
+    // 快车道拿到的 USN 游标基线补进 meta（只补缺失的卷）。已注册的根重复补扫时
+    // 这一步不会重复追加根，只做（通常为空操作的）游标合并。
+    meta::register_root_with_cursors(index_dir, &new_root, usn_cursors)?;
+
+    Ok(IndexStats {
+        indexed,
+        skipped,
+        skipped_oversize,
+        seconds: start.elapsed().as_secs_f64(),
     })
 }
 
@@ -243,6 +344,141 @@ mod tests {
 
         let roots = meta::registered_roots(index_dir.path())?;
         assert_eq!(roots.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn index_root_incremental_adds_second_root_without_touching_existing() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let a = tempfile::Builder::new().prefix("dowse-a-").tempdir()?;
+        write(a.path(), "a.md", "根 A 的内容 apricot");
+        crate::rebuild_index(index_dir.path(), a.path())?;
+
+        let b = tempfile::Builder::new().prefix("dowse-b-").tempdir()?;
+        write(b.path(), "b.md", "根 B 的内容 blueberry");
+
+        let mut updater = IndexUpdater::open(index_dir.path())?;
+        let stats = index_root_incremental(index_dir.path(), b.path(), &mut updater)?;
+        assert_eq!(stats.indexed, 1);
+        drop(updater);
+
+        let searcher = crate::Searcher::open(index_dir.path())?;
+        assert_eq!(
+            searcher.search("apricot", 10)?.len(),
+            1,
+            "旧根 A 的文档应原样保留"
+        );
+        assert_eq!(
+            searcher.search("blueberry", 10)?.len(),
+            1,
+            "新根 B 的文档应进来"
+        );
+        assert_eq!(searcher.num_docs(), 2, "总文档数应为 2，无重复");
+
+        let roots = meta::registered_roots(index_dir.path())?;
+        assert_eq!(roots.len(), 2, "roots 应该追加而不是覆盖");
+        Ok(())
+    }
+
+    #[test]
+    fn index_root_incremental_is_idempotent_on_rescan() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let a = tempfile::Builder::new().prefix("dowse-a-").tempdir()?;
+        write(a.path(), "a.md", "根 A apricot");
+        crate::rebuild_index(index_dir.path(), a.path())?;
+
+        let b = tempfile::Builder::new().prefix("dowse-b-").tempdir()?;
+        write(b.path(), "b.md", "根 B blueberry");
+
+        let mut updater = IndexUpdater::open(index_dir.path())?;
+        index_root_incremental(index_dir.path(), b.path(), &mut updater)?;
+        // 同一个根再补扫一遍：先删后加，不应产生重复文档，也不应报"已经是索引根"。
+        let stats = index_root_incremental(index_dir.path(), b.path(), &mut updater)?;
+        assert_eq!(stats.indexed, 1, "重扫仍然收录同样的 1 篇");
+        drop(updater);
+
+        let searcher = crate::Searcher::open(index_dir.path())?;
+        assert_eq!(
+            searcher.search("blueberry", 10)?.len(),
+            1,
+            "重复补扫不应产生重复文档"
+        );
+        assert_eq!(searcher.num_docs(), 2, "总文档数仍为 2");
+
+        let roots = meta::registered_roots(index_dir.path())?;
+        assert_eq!(roots.len(), 2, "重复补扫不应重复登记根");
+        Ok(())
+    }
+
+    #[test]
+    fn index_root_incremental_respects_excluded_dirs() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let a = tempfile::Builder::new().prefix("dowse-a-").tempdir()?;
+        write(a.path(), "a.md", "根 A apricot");
+        crate::rebuild_index(index_dir.path(), a.path())?;
+
+        let b = tempfile::Builder::new().prefix("dowse-b-").tempdir()?;
+        write(b.path(), "keep.md", "保留 blueberry");
+        // node_modules 是默认排除目录，其下的文件不应被补扫收录。
+        let nm = b.path().join("node_modules");
+        std::fs::create_dir_all(&nm)?;
+        std::fs::write(nm.join("skip.md"), "跳过 cranberry")?;
+
+        let mut updater = IndexUpdater::open(index_dir.path())?;
+        let stats = index_root_incremental(index_dir.path(), b.path(), &mut updater)?;
+        assert_eq!(stats.indexed, 1, "只应收录 node_modules 之外的 1 篇");
+        drop(updater);
+
+        let searcher = crate::Searcher::open(index_dir.path())?;
+        assert_eq!(searcher.search("blueberry", 10)?.len(), 1);
+        assert_eq!(
+            searcher.search("cranberry", 10)?.len(),
+            0,
+            "排除目录里的文件不应进索引"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn index_root_incremental_counts_oversize_skips_separately() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let a = tempfile::Builder::new().prefix("dowse-a-").tempdir()?;
+        write(a.path(), "a.md", "根 A apricot");
+        crate::rebuild_index(index_dir.path(), a.path())?;
+
+        let b = tempfile::Builder::new().prefix("dowse-b-").tempdir()?;
+        write(b.path(), "normal.txt", "正常内容 blueberry");
+        // 用 set_len 造稀疏文件，只撑大小不真写数据（同 indexer.rs 的超限用例）。
+        let big = b.path().join("huge.log");
+        let f = std::fs::File::create(&big)?;
+        f.set_len(crate::rules::IndexRules::default().max_file_bytes() + 1)?;
+        drop(f);
+
+        let mut updater = IndexUpdater::open(index_dir.path())?;
+        let stats = index_root_incremental(index_dir.path(), b.path(), &mut updater)?;
+        assert_eq!(stats.indexed, 1, "只有正常文件应被收录");
+        assert_eq!(stats.skipped, 1, "超限文件计入总跳过数");
+        assert_eq!(stats.skipped_oversize, 1, "超限文件单独计一份明细");
+        Ok(())
+    }
+
+    #[test]
+    fn index_root_incremental_rejects_nested_directory() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let a = tempfile::Builder::new().prefix("dowse-a-").tempdir()?;
+        write(a.path(), "a.md", "内容");
+        crate::rebuild_index(index_dir.path(), a.path())?;
+
+        let nested = a.path().join("sub");
+        std::fs::create_dir_all(&nested)?;
+
+        let mut updater = IndexUpdater::open(index_dir.path())?;
+        let err = index_root_incremental(index_dir.path(), &nested, &mut updater)
+            .expect_err("子目录应该被拒绝");
+        assert!(err.to_string().contains("嵌套"));
+
+        let roots = meta::registered_roots(index_dir.path())?;
+        assert_eq!(roots.len(), 1, "校验失败不应该改动 roots");
         Ok(())
     }
 

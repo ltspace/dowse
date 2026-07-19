@@ -116,7 +116,10 @@ impl IndexUpdater {
             for change in batch {
                 match change.op {
                     PendingOp::Upsert => {
-                        this.upsert_one(&change.path, &mut outcome, &mut touched_image)?;
+                        Self::tally_upsert(
+                            this.upsert_one(&change.path, &mut touched_image)?,
+                            &mut outcome,
+                        );
                     }
                     PendingOp::UpsertTree => {
                         // 目录整体新建/移入：真正"这个目录下有哪些文件"的完整 walk
@@ -125,7 +128,10 @@ impl IndexUpdater {
                         // `watch.rs::emit_upsert` 的说明。展开后逐个文件走跟普通
                         // `Upsert` 完全一样的先删后加逻辑。
                         for file in walk_index_files(&change.path) {
-                            this.upsert_one(&file, &mut outcome, &mut touched_image)?;
+                            Self::tally_upsert(
+                                this.upsert_one(&file, &mut touched_image)?,
+                                &mut outcome,
+                            );
                             processed += 1;
                             if processed % PROGRESS_INTERVAL == 0 {
                                 on_progress(IndexProgress {
@@ -165,28 +171,93 @@ impl IndexUpdater {
         })
     }
 
-    /// 单个文件的先删后加：`PendingOp::Upsert` 和展开后的 `PendingOp::UpsertTree`
-    /// 都走这里，保证两条路径落进索引、计数的逻辑完全一致。
-    fn upsert_one(
-        &self,
-        path: &Path,
-        outcome: &mut BatchOutcome,
-        touched_image: &mut bool,
-    ) -> Result<()> {
+    /// 单个文件的先删后加，返回建文档结果（收录 / 跳过 / 因体积超限跳过），并在
+    /// 遇到图片时把 `touched_image` 置位——调用方据此决定要不要把 OCR 队列落盘。
+    /// `PendingOp::Upsert`、展开后的 `PendingOp::UpsertTree`、以及增量补扫单个根
+    /// （[`IndexUpdater::upsert_files_with_progress`]）都走这里，保证几条路径落进
+    /// 索引、判定的逻辑完全一致。**怎么计数**（超限要不要单列）交给各调用方，
+    /// 因为口径不一样：监听/对账的 [`BatchOutcome`] 把超限并进 skip，增量补扫要跟
+    /// 全量重建的 [`crate::IndexStats`] 一样把超限单拎一份明细。
+    fn upsert_one(&self, path: &Path, touched_image: &mut bool) -> Result<AddOutcome> {
         // 先删后加，天然幂等：同一 path 无论之前有没有、内容变没变，
         // 结果都是"索引里恰好有这一篇的最新版本"。
         self.delete_exact(path);
         if is_image(path) {
             *touched_image = true;
         }
-        match add_file_document(&self.writer, &self.fields, path, &self.index_dir)? {
+        add_file_document(&self.writer, &self.fields, path, &self.index_dir)
+    }
+
+    /// 把一次 [`upsert_one`](Self::upsert_one) 的结果累加进 [`BatchOutcome`]：
+    /// 监听/对账这条路径不区分超限，超限（无可索引文本）跟其它跳过一样只计一次
+    /// skip（先删的动作照常已经生效）。
+    fn tally_upsert(outcome_kind: AddOutcome, outcome: &mut BatchOutcome) {
+        match outcome_kind {
             AddOutcome::Indexed => outcome.upserted += 1,
-            // 抽不出文本（不支持的格式/损坏/文件已消失/体积超限）：先删的动作已
-            // 生效，相当于把这篇从索引里拿掉。计一次 skip，不中断整批。增量场景
-            // 不像全量重建那样单列超限明细，超限并进 skip 即可。
             AddOutcome::Skipped | AddOutcome::SkippedOversize => outcome.skipped += 1,
         }
-        Ok(())
+    }
+
+    /// 增量补扫单个新根（[`crate::index_root_incremental`]）用：把一批已经按卷能力
+    /// 探测枚举好（NTFS + 管理员权限走 MFT 快速枚举，拿不到退回 walkdir）、且已按
+    /// active rules 的排除目录过滤的文件，逐个先删后加进现有索引，末尾只 commit
+    /// 一次；图片在 upsert 过程中照常入 OCR 队列。返回
+    /// `(收录, 跳过, 其中因体积超限跳过)` 三个计数，口径跟全量重建的
+    /// [`crate::IndexStats`] 完全一致（超限既计入总跳过、也单列一份明细），并每处理
+    /// `PROGRESS_INTERVAL` 个文件（收录 + 跳过一起算）回调一次累计进度。
+    ///
+    /// 跟 [`apply`](Self::apply) 的 `UpsertTree` 分支的区别只在"文件清单从哪来"：
+    /// 这里的清单由调用方用跟全量重建同一套卷能力探测预先枚举好（可能走 MFT
+    /// 快车道）传进来，而 `UpsertTree` 固定用 walkdir 在消费侧现走。逐文件落进
+    /// 索引、幂等（先删后加）的逻辑两者共用同一个 [`upsert_one`](Self::upsert_one)。
+    ///
+    /// 撞上杀软扫描瞬时冲突时整批重做（同 [`apply_with_progress`](Self::apply_with_progress)），
+    /// `upsert_one` 全是先删后加，重做无害；进度计数在重做时从头重新累计。
+    pub(crate) fn upsert_files_with_progress(
+        &mut self,
+        files: &[PathBuf],
+        mut on_progress: impl FnMut(IndexProgress),
+    ) -> Result<(usize, usize, usize)> {
+        self.commit_with_retry(|this| {
+            let mut indexed = 0usize;
+            let mut skipped = 0usize;
+            let mut skipped_oversize = 0usize;
+            let mut touched_image = false;
+            for (i, path) in files.iter().enumerate() {
+                match this.upsert_one(path, &mut touched_image)? {
+                    AddOutcome::Indexed => indexed += 1,
+                    // 超限跳过既计入总跳过数，也单独累加一份明细——跟
+                    // `rebuild_index_attempt` 的收录循环同一口径。
+                    AddOutcome::Skipped => skipped += 1,
+                    AddOutcome::SkippedOversize => {
+                        skipped += 1;
+                        skipped_oversize += 1;
+                    }
+                }
+                let processed = i + 1;
+                if processed % PROGRESS_INTERVAL == 0 {
+                    on_progress(IndexProgress {
+                        processed,
+                        path: path.clone(),
+                    });
+                }
+            }
+            // 顺序不变量同 `apply_with_progress`：OCR 队列必须先于 commit 落盘。
+            let index_dir = this.index_dir.clone();
+            commit_index_tail(
+                || {
+                    if touched_image {
+                        OcrQueue::for_index_dir(&index_dir)
+                            .save()
+                            .context("保存 OCR 队列状态失败")
+                    } else {
+                        Ok(())
+                    }
+                },
+                || this.writer.commit().map(|_| ()).context("增量补扫提交失败"),
+            )?;
+            Ok((indexed, skipped, skipped_oversize))
+        })
     }
 
     /// OCR worker 写回一批图片的最终识别结果：每张先删旧文档、写入新内容，整批
