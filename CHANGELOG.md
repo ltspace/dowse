@@ -6,6 +6,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Index rules are now configurable instead of hardcoded, persisted as a
+  `-rules.json` file next to the index: excluded directory names, extra
+  plain-text extensions, and the per-file size cap (default unchanged: skip
+  node_modules/target/.git/.venv/__pycache__, 20MB cap). All three indexing
+  paths honor them — full rebuild, live file-watch, and startup
+  reconciliation — and the NTFS MFT fast path now applies directory
+  exclusions, which it previously skipped. New `dowse rules show` and
+  `dowse rules set --exclude a,b --add-ext rst,adoc --max-file-mb 50`
+  commands; `dowse status` prints the active rules, and rebuild reports call
+  out how many files were skipped for exceeding the size cap.
+- The MCP `search` tool is now on par with the CLI: `sort`
+  (relevance / mtime / size), comma-separated multi-extension `ext`, and
+  `offset` pagination with a `total_hits` count in the response.
+  Non-relevance sorts omit the meaningless BM25 score, matching CLI
+  behavior. `index_status` also reports the active index rules.
+- The overlay remembers recent searches: a query is recorded when a result
+  is actually opened (not on every keystroke), the last 10 are kept locally,
+  and an empty input shows them — ↑↓/Enter to reuse, Delete to remove one,
+  plus a clear-all action. Fully keyboard-driven and bilingual.
+
 ## [0.8.3] - 2026-07-14
 
 ### Added

@@ -122,6 +122,7 @@ git clone https://github.com/ltspace/dowse && cd dowse
 cargo run -p dowse -- index D:\docs      # 建索引
 cargo run -p dowse -- search 限流         # 搜索
 cargo run -p dowse -- search "精确短语"   # 短语查询
+cargo run -p dowse -- rules show          # 查看索引规则（排除目录/追加扩展名/体积上限）
 
 # 浮窗应用（Tauri 2 + Svelte 5）
 cd crates/dowse-app
@@ -134,7 +135,8 @@ cargo tauri build      # 安装包产出在 target/release/bundle 下
 类型筛选（`Ctrl+P`，全部/文档/代码/图片）和排序器（`Ctrl+S`，相关性/最新优先/最旧优先/
 最大优先），默认态几乎不占视觉存在感，选中非默认值才会显形。结果行右键弹出 Windows
 原生上下文菜单（打开/打开所在文件夹/复制完整路径/复制文件名）。输入条最右端的图钉按钮
-可以固定窗口。固定后失焦不再自动隐藏，会话级状态，重启应用后回到未固定。
+可以固定窗口。固定后失焦不再自动隐藏，会话级状态，重启应用后回到未固定。输入为空时
+会列出最近搜索（本地保存最近 10 条），`↑↓`/`Enter` 复用，`Delete` 删除单条。
 
 ![预览区展示一条图片类结果：原图内嵌显示，旁边是 OCR 识别出的文字及命中词高亮](docs/screenshots/ocr-preview.png)
 
@@ -147,8 +149,9 @@ cargo tauri build      # 安装包产出在 target/release/bundle 下
 claude mcp add dowse -- dowse mcp
 ```
 
-三个工具：`search`（查询词、条数上限、可选 `ext` 过滤）、`preview`（单条命中的完整摘要+
-元信息）、`index_status`（文档总数、索引健康状态）。这个 server 绝不碰索引写入端——每次
+三个工具：`search`（查询词、条数上限、`sort` 排序：相关性/修改时间/体积、逗号分隔的
+多扩展名 `ext` 过滤、`offset` 分页并返回 `total_hits` 总数）、`preview`（单条命中的完整摘要+
+元信息）、`index_status`（文档总数、索引健康状态、当前索引规则）。这个 server 绝不碰索引写入端——每次
 调用前只做一次 reader reload，所以可以和浮窗应用或正在跑的 `dowse watch` 同时存在，
 不会有写入冲突。
 

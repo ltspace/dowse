@@ -85,10 +85,12 @@
 
 - **schema 升级本轮没做**：第三节写的"新增 kind 字段、版本号升到 v3"这部分
   推迟到身份模型分支合并阶段统一处理，避免两个并行分支抢同一份 schema
-  定义。图片文档目前复用 v2 的字段（path/name/ext/content/mtime/size），
-  没有 kind 区分文本和图片；代码里两处建图片文档的地方
-  （`indexer.rs::add_image_document_with_content`）各留了一行 TODO 注释标
-  记接线位置。
+  定义。图片文档当轮复用 v2 的字段（path/name/ext/content/mtime/size），
+  没有 kind 区分文本和图片。
+  （后续更新：kind 字段已随 v3 schema 落地——文本文档写 "text"、图片文档写
+  "image"，见 `lib.rs` 的 schema 定义；当时留在
+  `indexer.rs::add_image_document_with_content` 的接线 TODO 注释已随实现移除，
+  本条仅存档当轮的偏离记录。）
 - **结果行缩略图本轮没做**：第三节"前端呈现"提到的"结果行给图片缩略图"
   延后。ResultRow 组件当时正被另一个分支改动，避免冲突。预览区（选中后
   的原图 + OCR 文本）已经实现。
