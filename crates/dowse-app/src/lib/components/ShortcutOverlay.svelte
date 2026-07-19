@@ -24,7 +24,8 @@
 			{ label: t.soFilterType, keys: ['Ctrl', 'P'] },
 			{ label: t.soSort, keys: ['Ctrl', 'S'] },
 			{ label: t.soPin, keys: ['Ctrl', 'D'] },
-			{ label: t.soCheatSheet, keys: ['Ctrl', '/'] }
+			{ label: t.soCheatSheet, keys: ['Ctrl', '/'] },
+			{ label: t.soRules, keys: ['Ctrl', ','] }
 		]
 	]);
 </script>

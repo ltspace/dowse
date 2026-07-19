@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { listen } from '@tauri-apps/api/event';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { animate } from 'motion';
@@ -24,6 +24,7 @@
 	import AnimatedNumber from '$lib/components/AnimatedNumber.svelte';
 	import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
 	import IndexingStrip from '$lib/components/IndexingStrip.svelte';
+	import IndexRulesPanel from '$lib/components/IndexRulesPanel.svelte';
 	import { formatHotkey } from '$lib/hotkey';
 	import { t } from '$lib/i18n';
 	import { loadHistory, recordHistory, removeHistoryEntry, clearHistory } from '$lib/searchHistory';
@@ -87,6 +88,10 @@
 	let pinned = $state(false);
 	let shortcutOverlayOpen = $state(false);
 	let hotkeyLabel = $state('Alt+`');
+	/** 索引规则面板（Ctrl+, 打开）。跟 shortcutOverlayOpen 不同，这个面板里
+	 * 有真实表单字段，打开时 DOM 焦点会移进面板本身（见 IndexRulesPanel
+	 * 组件顶部注释），不是靠 handleKeydown 拦截键盘。 */
+	let rulesPanelOpen = $state(false);
 
 	// 搜索历史：只在"打开了某条结果"的那一刻记（见 recordSearchHistory），
 	// 不在击键/出结果时记。只在输入框为空时展示（historyMode），跟结果列表的
@@ -173,13 +178,20 @@
 
 	// 键入 30ms 防抖即搜——查询词变了就重新发起，过期响应用 token 挡掉。
 	// 类型筛选 / 排序器的选择跟查询词一起参与防抖：选中即重搜，不需要额外
-	// 的"应用"按钮。
+	// 的"应用"按钮。这个常量同时喂给下面的 setTimeout 和 reportSearchPerf
+	// 的日志文案，避免两处各写一份 30 而将来改漏一处。
+	const SEARCH_DEBOUNCE_MS = 30;
 	let searchToken = 0;
 	$effect(() => {
 		const q = query;
 		const group = extGroup;
 		const sort = sortOption;
 		const token = ++searchToken;
+		// 击键到渲染性能埋点的起点：近似"触发搜索的输入事件"的时刻——
+		// $effect 因 query/extGroup/sortOption 变化而重跑，跟用户敲键盘/
+		// 切换筛选几乎同时发生。真正测的是下面 setTimeout 跑完之后（见
+		// reportSearchPerf），中间的等待就是防抖窗口本身。
+		const keystrokeAt = performance.now();
 		if (q.trim().length === 0) {
 			hits = [];
 			selectedIndex = 0;
@@ -196,15 +208,36 @@
 				hits = results;
 				selectedIndex = 0;
 				lastSearchMs = performance.now() - startedAt;
+				reportSearchPerf(keystrokeAt, startedAt, token);
 			} catch (err) {
 				if (token !== searchToken) return;
 				hits = [];
 				lastSearchMs = null;
 				console.error('search failed', err);
 			}
-		}, 30);
+		}, SEARCH_DEBOUNCE_MS);
 		return () => clearTimeout(timer);
 	});
+
+	/// 击键到渲染性能埋点：`hits` 赋值只是把新数据排进 Svelte 的响应式
+	/// 更新队列，不代表 DOM 已经画出来——`await tick()` 等 Svelte 把这次
+	/// 更新刷进 DOM，再等一帧 `requestAnimationFrame` 确认浏览器完成绘制，
+	/// 这时才是"结果渲染完成"的真实时刻。`token` 复核放在渲染之后——如果
+	/// 这次搜索已经被后续输入取代（`token !== searchToken`），说明用户又
+	/// 敲了字，这次上报的数字已经没有意义，静默丢弃。任何一步失败（理论上
+	/// 不会，但 invoke 本身可能抖动）都吞掉，不影响搜索主流程。
+	async function reportSearchPerf(keystrokeAt: number, invokedAt: number, token: number) {
+		await tick();
+		requestAnimationFrame(() => {
+			if (token !== searchToken) return;
+			const renderedAt = performance.now();
+			const e2eMs = renderedAt - keystrokeAt;
+			const netMs = renderedAt - invokedAt;
+			api.reportSearchPerf(e2eMs, netMs, SEARCH_DEBOUNCE_MS).catch(() => {
+				// 失败安全：埋点不能影响搜索主流程。
+			});
+		});
+	}
 
 	// 选中行变了就换一份更长的预览上下文；轻微防抖避免按住方向键连续刷。
 	let previewToken = 0;
@@ -241,10 +274,11 @@
 		}, 2400);
 	}
 
-	async function pickDirectoryAndRebuild() {
-		const dir = await open({ directory: true, multiple: false, title: t.dialogPickIndexFolder });
-		if (!dir || Array.isArray(dir)) return;
-
+	/// 全量重建的共同实现：`pickDirectoryAndRebuild`（先弹目录选择器）和
+	/// `rebuildCurrentIndex`（索引规则面板"立即重建"，目标目录已知）都走
+	/// 这一份，避免"实时直播 + 冷报告"这套 UI 节奏在两个入口各写一遍、
+	/// 后续改动漏改一处。
+	async function rebuildWithDir(dir: string) {
 		rebuildState = 'rebuilding';
 		indexingPhase = 'text';
 		indexingProcessed = 0;
@@ -260,7 +294,11 @@
 			applyOcrPending(stats.ocr_pending);
 			// 冷报告替换掉实时计数，停留片刻后收回整个引导层——用户看得见
 			// "完成了"，不需要再点一下才能回到搜索态。
-			const report = { indexed: stats.indexed, seconds: stats.seconds };
+			const report = {
+				indexed: stats.indexed,
+				seconds: stats.seconds,
+				skippedOversize: stats.skipped_oversize
+			};
 			indexingReport = report;
 			setTimeout(() => {
 				if (indexingReport !== report) return;
@@ -272,6 +310,37 @@
 			rebuildError = String(err);
 			indexingPhase = 'idle';
 		}
+	}
+
+	async function pickDirectoryAndRebuild() {
+		const dir = await open({ directory: true, multiple: false, title: t.dialogPickIndexFolder });
+		if (!dir || Array.isArray(dir)) return;
+		await rebuildWithDir(dir);
+	}
+
+	/// 索引规则面板"立即重建"：只在恰好一个索引根时可用（面板自己按
+	/// `roots.length === 1` 禁用了按钮，这里的判断是防御性的，防止将来
+	/// 谁绕过面板直接调这个函数）。`rebuild_index` 命令用单个目标目录整体
+	/// 替换索引，多根场景下这么做会把其它根一并冲掉——多根索引目前没有
+	/// 暴露"重建全部根"的前端命令，只有托盘每根子菜单的单根重建，所以
+	/// 多根时不做任何事，交给面板上的提示文案引导用户去托盘操作。
+	async function rebuildCurrentIndex() {
+		if (roots.length !== 1) return;
+		await rebuildWithDir(roots[0]);
+	}
+
+	function openRulesPanel() {
+		typeMenuOpen = false;
+		sortMenuOpen = false;
+		rulesPanelOpen = true;
+	}
+
+	function closeRulesPanel() {
+		rulesPanelOpen = false;
+		// 面板关闭后把焦点交还给搜索框——面板打开期间焦点在表单字段里
+		// （见 IndexRulesPanel 组件顶部注释），关闭动作不该让用户还要再点
+		// 一下才能继续打字，跟呼出浮窗时 focusAndSelectAll 是同一个诉求。
+		inputEl?.focus();
 	}
 
 	/// 空态"添加文件夹"链接：多根索引场景下追加一个根，不动现有内容——跟
@@ -292,7 +361,11 @@
 			const stats = await api.addRoot(dir);
 			refreshIndexStatus();
 			applyOcrPending(stats.ocr_pending);
-			const report = { indexed: stats.indexed, seconds: stats.seconds };
+			const report = {
+				indexed: stats.indexed,
+				seconds: stats.seconds,
+				skippedOversize: stats.skipped_oversize
+			};
 			indexingReport = report;
 			setTimeout(() => {
 				if (indexingReport !== report) return;
@@ -400,6 +473,18 @@
 			shortcutOverlayOpen = false;
 			return;
 		}
+		// 规则面板打开期间的保险丝：正常情况下 DOM 焦点在面板内、本处理器
+		// （绑在 .search-input 上）根本不会触发。但焦点转移可能落空——比如
+		// 字段还在 loading disabled 态、或未来某个改动打断了聚焦时机——那时
+		// 绝不能让按键漏进面板背后的搜索 UI：Esc 只关面板（不是藏整个窗口），
+		// 其余按键一律吞掉。
+		if (rulesPanelOpen) {
+			e.preventDefault();
+			if (e.key === 'Escape') {
+				closeRulesPanel();
+			}
+			return;
+		}
 		if (e.ctrlKey && e.key === '/') {
 			e.preventDefault();
 			closeMenus();
@@ -423,6 +508,12 @@
 		if (e.ctrlKey && e.key.toLowerCase() === 'd') {
 			e.preventDefault();
 			togglePinned();
+			return;
+		}
+		if (e.ctrlKey && e.key === ',') {
+			e.preventDefault();
+			closeMenus();
+			openRulesPanel();
 			return;
 		}
 
@@ -560,6 +651,22 @@
 		});
 	}
 
+	/// 呼出延迟性能埋点：`dowse://shown` 事件到这里只说明 Rust 侧调用过
+	/// `window.show()`，不代表前端这一帧已经真正绘制上屏——用双重
+	/// requestAnimationFrame 确认至少完成一次绘制之后再回报给 Rust 侧，
+	/// Rust 那边拿热键回调进入的单调时钟算差值打日志（见 perf.rs）。非
+	/// 热键触发的显示（托盘点击等）Rust 侧没有起始时刻可算，命令内部会
+	/// 静默跳过，这里不需要关心那个区分。
+	function reportShownPerf() {
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				api.reportShownPerf().catch(() => {
+					// 失败安全：埋点不能影响呼出主流程。
+				});
+			});
+		});
+	}
+
 	// 鼠标点了 .controls（两个下拉 + 图钉）以外的地方就收起菜单——两个下拉
 	// 平时几乎不占视觉存在感，不能指望用户记得回来点一下 trigger 才能关掉。
 	function handleDocumentClick(e: MouseEvent) {
@@ -595,6 +702,7 @@
 			focusAndSelectAll();
 			playShowAnimation();
 			closeMenus();
+			reportShownPerf();
 		});
 		const unlistenEffect = listen<EffectLevel>('dowse://effect-level', (evt) => {
 			document.documentElement.dataset.effect = evt.payload;
@@ -760,6 +868,17 @@
 
 	{#if shortcutOverlayOpen}
 		<ShortcutOverlay hotkey={hotkeyLabel} onclose={() => (shortcutOverlayOpen = false)} />
+	{/if}
+
+	{#if rulesPanelOpen}
+		<IndexRulesPanel
+			{roots}
+			onclose={closeRulesPanel}
+			onrebuild={() => {
+				closeRulesPanel();
+				rebuildCurrentIndex();
+			}}
+		/>
 	{/if}
 </div>
 

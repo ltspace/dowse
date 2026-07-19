@@ -4,6 +4,7 @@ import type {
 	ExtGroup,
 	GlassAlpha,
 	IndexingSnapshot,
+	IndexRules,
 	IndexStats,
 	IndexStatus,
 	PreviewResult,
@@ -86,10 +87,47 @@ export function showResultContextMenu(path: string): Promise<void> {
 	return invoke('show_result_context_menu', { path });
 }
 
+/// 呼出延迟性能埋点：窗口 `dowse://shown` 之后确认首帧真正绘制完成（双重
+/// requestAnimationFrame）才调这个，让 Rust 侧拿热键回调进入的单调时钟算
+/// 差值打日志。非热键触发的显示（比如托盘点击）Rust 侧没有起始时刻，
+/// 命令内部会静默跳过，前端不需要关心这个区分。
+export function reportShownPerf(): Promise<void> {
+	return invoke('report_shown_perf');
+}
+
+/// 击键到渲染性能埋点：搜索防抖触发、拿到结果、DOM 渲染完成后调一次。
+/// `e2eMs` 含防抖等待（触发输入事件到渲染完成），`netMs` 不含（发起后端
+/// 调用到渲染完成），`debounceMs` 是当前防抖窗口，一并打进日志避免端到端
+/// 数字被误读。
+export function reportSearchPerf(e2eMs: number, netMs: number, debounceMs: number): Promise<void> {
+	return invoke('report_search_perf', { e2eMs, netMs, debounceMs });
+}
+
 /// Esc 收起浮窗。不用 `@tauri-apps/api/window` 的 `getCurrentWindow().hide()`——
 /// 那走的是 Tauri core 插件的 `window|hide` 权限点，默认 capability 没放开，
 /// 真机上会被 ACL 拒绝。这里走自定义命令，复用全局呼出快捷键同一条隐藏路径，
 /// 自定义命令不受 ACL 权限点约束。
 export function hideWindow(): Promise<void> {
 	return invoke('hide_window');
+}
+
+/// 索引规则面板 Ctrl+, 打开时拉一次当前规则填表单初值。
+export function getRules(): Promise<IndexRules> {
+	return invoke('get_rules');
+}
+
+/// 索引规则面板"保存"：`maxFileMb` 必须是非负整数（Rust 侧是 u64，负数/小数
+/// 会在反序列化阶段直接报错，调用方要先归一；0 会被 Rust 侧兜底成 1）；
+/// 列表项的 trim/去空/大小写/去重由 Rust 侧统一处理，前端不用重复一遍
+/// 规范化逻辑。返回规范化之后的最终值，用来回填表单，让展示的就是落盘的样子。
+export function setRules(
+	excludeDirs: string[],
+	extraTextExts: string[],
+	maxFileMb: number
+): Promise<IndexRules> {
+	return invoke('set_rules', {
+		excludeDirs,
+		extraTextExts,
+		maxFileMb
+	});
 }

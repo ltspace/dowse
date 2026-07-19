@@ -28,6 +28,22 @@ export interface IndexStats {
 	seconds: number;
 	/** 建索引结束时 OCR 队列里还没识别完的图片数，0 表示没有存量。 */
 	ocr_pending: number;
+	/** `skipped` 里因单文件体积超过规则里 `max_file_mb` 上限而被跳过的那一部分。
+	 * `null` 表示这次操作拿不到这份明细（`add_root`/托盘单根重建走的是没有
+	 * 这个细分字段的统计结构），不是"这次没有文件超限"。 */
+	skipped_oversize: number | null;
+}
+
+/// 索引规则面板的读/写对象，跟 Rust 侧 `dowse::IndexRules` 一一对应——
+/// 字段名保持 snake_case（不转 camelCase），跟这个代码库其它 DTO
+/// （`IndexStatus`/`IndexStats` 等）的惯例一致。
+export interface IndexRules {
+	/** 整棵跳过的目录名列表（精确名匹配）。 */
+	exclude_dirs: string[];
+	/** 在内建文本扩展名白名单之外追加认定为纯文本的扩展名（不含点）。 */
+	extra_text_exts: string[];
+	/** 单文件体积上限（MB），超过则不抽取、跳过。 */
+	max_file_mb: number;
 }
 
 /** `dowse://rebuild-progress` 事件载荷——建索引期间每处理若干文件推一次。 */

@@ -54,6 +54,15 @@ pub struct IndexStatsDto {
     /// 展示：`dowse://ocr-progress` 事件 + `indexing_status` 查询命令会在
     /// 队列消化过程中持续刷新这个数字（v0.6.1 之前它是静态的，永远不变）。
     pub ocr_pending: usize,
+    /// `skipped` 里因单文件体积超过规则里的 `max_file_mb` 上限而被跳过的
+    /// 那一部分——索引规则面板保存新的体积上限后，用户点"立即重建"，这个
+    /// 数字让他们看得见新规则是否真的生效了（而不是自己去猜哪些文件被跳过）。
+    /// `None` 表示这条路径拿不到这份明细：`add_root`/`rebuild_root` 走的是
+    /// `dowse::AddRootStats`，只有 `indexed`/`skipped` 两个字段，没有细分
+    /// 超限跳过这一档（跟全量重建的 `dowse::IndexStats` 不是同一个结构体）。
+    /// 宁可缺省成"不知道"也不编一个假的 0 出来，避免误导成"这次没有文件
+    /// 超限"。
+    pub skipped_oversize: Option<usize>,
 }
 
 /// 移除根的结果，托盘"移除"动作用；跟 `IndexStatsDto` 分开成一份独立的
@@ -144,6 +153,7 @@ pub fn perform_rebuild(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDto
         skipped: stats.skipped,
         seconds: stats.seconds,
         ocr_pending,
+        skipped_oversize: Some(stats.skipped_oversize),
     })
 }
 
@@ -239,6 +249,7 @@ pub fn perform_add_root(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDt
         skipped: stats.skipped,
         seconds: start.elapsed().as_secs_f64(),
         ocr_pending,
+        skipped_oversize: None,
     })
 }
 
@@ -340,5 +351,6 @@ pub fn perform_rebuild_root(app: &AppHandle, root: PathBuf) -> Result<IndexStats
         skipped: stats.skipped,
         seconds: start.elapsed().as_secs_f64(),
         ocr_pending,
+        skipped_oversize: None,
     })
 }

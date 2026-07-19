@@ -67,6 +67,8 @@ interface Strings {
 	esRepick: string;
 	esNoMatch: (numDocs: number) => string;
 	esNoMatchSub: string;
+	// 建索引报告里"因体积超限跳过"的补充说明（有才展示）
+	esSkippedOversize: (n: number) => string;
 	// 搜索历史（空态区域上方，输入框为空时展示）
 	historyTitle: string;
 	historyClear: string;
@@ -88,6 +90,23 @@ interface Strings {
 	soSort: string;
 	soPin: string;
 	soCheatSheet: string;
+	soRules: string;
+	// 索引规则面板（Ctrl+, 打开）
+	rpTitle: string;
+	rpCloseLabel: string;
+	rpExcludeDirsLabel: string;
+	rpExcludeDirsHint: string;
+	rpExtraExtsLabel: string;
+	rpExtraExtsHint: string;
+	rpMaxFileMbLabel: string;
+	rpSave: string;
+	rpSaving: string;
+	rpSaved: string;
+	rpSaveFailed: (err: string) => string;
+	rpLoadFailed: string;
+	rpRebuildNow: string;
+	rpRebuildMultiRootHint: string;
+	rpRebuildNoIndexHint: string;
 }
 
 const zh: Strings = {
@@ -139,6 +158,7 @@ const zh: Strings = {
 	esRepick: '重新选择目录',
 	esNoMatch: (numDocs) => `没有匹配的结果。索引包含 ${numDocs} 篇文档。`,
 	esNoMatchSub: '换一个查询词，或确认文件在已建索引的目录中。',
+	esSkippedOversize: (n) => `其中 ${n} 个因体积超限跳过。`,
 	historyTitle: '最近搜索',
 	historyClear: '清空',
 	historyLabel: '最近搜索列表',
@@ -156,7 +176,23 @@ const zh: Strings = {
 	soFilterType: '筛选类型',
 	soSort: '排序',
 	soPin: '固定',
-	soCheatSheet: '速查'
+	soCheatSheet: '速查',
+	soRules: '索引规则',
+	rpTitle: '索引规则',
+	rpCloseLabel: '关闭索引规则面板',
+	rpExcludeDirsLabel: '排除目录',
+	rpExcludeDirsHint: '目录名，逗号或换行分隔（如 node_modules, dist）。以 . 开头的目录始终排除，不用列出来。',
+	rpExtraExtsLabel: '追加文本扩展名',
+	rpExtraExtsHint: '不含点，逗号分隔（如 rst, adoc）。在内建白名单之外追加，不是覆盖。',
+	rpMaxFileMbLabel: '单文件体积上限（MB）',
+	rpSave: '保存',
+	rpSaving: '保存中…',
+	rpSaved: '已保存，重建索引后完全生效。',
+	rpSaveFailed: (err) => `保存失败：${err}`,
+	rpLoadFailed: '规则加载失败，已显示默认值。',
+	rpRebuildNow: '立即重建',
+	rpRebuildMultiRootHint: '已注册多个索引目录，请到托盘菜单里逐个重建。',
+	rpRebuildNoIndexHint: '还没有索引目录，先在空态或托盘菜单里添加一个文件夹。'
 };
 
 const en: Strings = {
@@ -208,6 +244,7 @@ const en: Strings = {
 	esRepick: 'Pick another folder',
 	esNoMatch: (numDocs) => `No matches. The index holds ${numDocs} documents.`,
 	esNoMatchSub: 'Try another query, or check the file is in an indexed folder.',
+	esSkippedOversize: (n) => `${n} skipped for exceeding the size limit.`,
 	historyTitle: 'Recent searches',
 	historyClear: 'Clear',
 	historyLabel: 'Recent searches list',
@@ -225,7 +262,24 @@ const en: Strings = {
 	soFilterType: 'Filter type',
 	soSort: 'Sort',
 	soPin: 'Pin',
-	soCheatSheet: 'Cheat sheet'
+	soCheatSheet: 'Cheat sheet',
+	soRules: 'Index rules',
+	rpTitle: 'Index rules',
+	rpCloseLabel: 'Close index rules panel',
+	rpExcludeDirsLabel: 'Excluded folders',
+	rpExcludeDirsHint:
+		'Folder names, comma- or newline-separated (e.g. node_modules, dist). Dot-folders are always excluded, no need to list them.',
+	rpExtraExtsLabel: 'Extra text extensions',
+	rpExtraExtsHint: 'No leading dot, comma-separated (e.g. rst, adoc). Adds to the built-in list, does not replace it.',
+	rpMaxFileMbLabel: 'Max file size (MB)',
+	rpSave: 'Save',
+	rpSaving: 'Saving…',
+	rpSaved: 'Saved. Rebuild the index for this to fully take effect.',
+	rpSaveFailed: (err) => `Save failed: ${err}`,
+	rpLoadFailed: 'Could not load rules; showing defaults.',
+	rpRebuildNow: 'Rebuild now',
+	rpRebuildMultiRootHint: 'Multiple index folders are registered; rebuild each one from the tray menu.',
+	rpRebuildNoIndexHint: 'No index folder yet — add one from the empty state or the tray menu first.'
 };
 
 export const t: Strings = isZh ? zh : en;

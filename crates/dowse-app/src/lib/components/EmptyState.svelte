@@ -12,6 +12,11 @@
 	interface IndexReport {
 		indexed: number;
 		seconds: number;
+		/** 本次因体积超限被跳过的文件数，0/null/未给出都不展示这一行——索引
+		 * 规则面板改了 `max_file_mb` 之后，用户点"立即重建"，这一行让他们
+		 * 看得见新上限是否真的生效了。`null` 见 `IndexStats.skipped_oversize`
+		 * 的注释：不是所有重建路径都拿得到这份明细。 */
+		skippedOversize?: number | null;
 	}
 
 	let {
@@ -105,6 +110,9 @@
 					formatSeconds(indexingReport.seconds)
 				)}
 			</p>
+			{#if indexingReport.skippedOversize}
+				<p class="sub">{t.esSkippedOversize(indexingReport.skippedOversize)}</p>
+			{/if}
 		{:else}
 			<!-- 阶段一：文本索引，总量未知。就是数字本身，不带"正在处理"之类的
 			     废话前缀；不放进度条/百分比——总量未知时装作知道进度是廉价感的

@@ -7,6 +7,7 @@ mod highlight;
 mod i18n;
 mod indexing_status;
 mod logging;
+mod perf;
 mod rebuild;
 mod state;
 mod tray;
@@ -22,6 +23,7 @@ use config::ConfigState;
 use context_menu::ContextMenuTarget;
 use file_icons::FileIconCache;
 use indexing_status::IndexingStatus;
+use perf::HotkeyPerfState;
 use rebuild::RebuildGuard;
 use state::SearchState;
 use watcher::WatchController;
@@ -66,6 +68,12 @@ pub fn run() {
                         && event.state() == ShortcutState::Pressed
                         && let Some(window) = app.get_webview_window("main")
                     {
+                        // 呼出延迟埋点的起点：热键回调刚进来的这一刻。只在窗口当前
+                        // 不可见（即将变成"显示"而不是"隐藏"）时标记——toggle 同时
+                        // 承担两种职责，隐藏路径不该污染下一次呼出的计时基准。
+                        if !window.is_visible().unwrap_or(false) {
+                            app.state::<HotkeyPerfState>().mark_hotkey_show();
+                        }
                         window_fx::toggle_window(&window);
                     }
                 })
@@ -79,6 +87,7 @@ pub fn run() {
         .manage(ContextMenuTarget::new())
         .manage(IndexingStatus::new())
         .manage(RebuildGuard::new())
+        .manage(HotkeyPerfState::new())
         .invoke_handler(tauri::generate_handler![
             commands::index_status,
             commands::indexing_status,
@@ -91,9 +100,13 @@ pub fn run() {
             commands::get_effect_level,
             commands::get_glass_alpha,
             commands::get_hotkey,
+            commands::get_rules,
+            commands::set_rules,
             commands::file_icon,
             commands::set_pinned,
             commands::hide_window,
+            commands::report_shown_perf,
+            commands::report_search_perf,
             context_menu::show_result_context_menu,
         ])
         .setup(move |app| {

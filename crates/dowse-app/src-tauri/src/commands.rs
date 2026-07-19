@@ -9,6 +9,8 @@ use crate::config::ConfigState;
 use crate::file_icons::FileIconCache;
 use crate::highlight::{TextSegment, highlight_name, segments_from_ranges};
 use crate::indexing_status::{IndexingSnapshot, IndexingStatus};
+use crate::logging;
+use crate::perf::HotkeyPerfState;
 use crate::rebuild::{IndexStatsDto, RebuildGuard};
 use crate::state::SearchState;
 use crate::window_fx::{self, EffectLevel, EffectLevelState, GlassAlpha};
@@ -269,6 +271,43 @@ pub fn set_pinned(suppressor: State<AutoHideSuppressor>, pinned: bool) {
     suppressor.set_pinned(pinned);
 }
 
+/// 索引规则面板的读取入口：取当前索引目录旁 rules.json 里的规则（没配过就
+/// 是逐字节等于老硬编码行为的默认值，见 `dowse::rules` 模块文档）。面板
+/// Ctrl+, 打开时调一次拿表单初值。索引目录跟 `rebuild_index`/`add_root`
+/// 用的是同一个（`crate::config::index_dir()`，固定在
+/// `%LOCALAPPDATA%\dowse\index`），不需要额外传参区分。
+#[tauri::command]
+pub fn get_rules() -> Result<dowse::IndexRules, String> {
+    let dir = crate::config::index_dir().map_err(|e| e.to_string())?;
+    Ok(dowse::load_rules(&dir))
+}
+
+/// 索引规则面板的保存入口。`max_file_mb` 兜底至少 1——0 或负数（前端数字
+/// 输入框理论上传不出负数，但 0 是合法的用户输入）会让所有文件都判定超限
+/// 跳过，没有意义。列表项的 trim/去空/大小写/去重统一交给
+/// `IndexRules::normalize`，跟 CLI `dowse rules set` 落盘前那一步是同一份
+/// 逻辑，两个入口保存出来的规则文件形态一致。
+///
+/// 只落盘规则文件，不在这里顺带触发重建——规则改了但索引没重建之前，
+/// 新规则不会立刻生效（见 `dowse::rules` 模块文档"改规则后需重建索引才
+/// 完全生效"），要不要立刻重建交给用户在面板上点"立即重建"决定。
+#[tauri::command]
+pub fn set_rules(
+    exclude_dirs: Vec<String>,
+    extra_text_exts: Vec<String>,
+    max_file_mb: u64,
+) -> Result<dowse::IndexRules, String> {
+    let dir = crate::config::index_dir().map_err(|e| e.to_string())?;
+    let mut rules = dowse::IndexRules {
+        exclude_dirs,
+        extra_text_exts,
+        max_file_mb: max_file_mb.max(1),
+    };
+    rules.normalize();
+    dowse::save_rules(&dir, &rules).map_err(|e| e.to_string())?;
+    Ok(rules)
+}
+
 /// Esc 收起浮窗。前端原先直接调 JS 侧 `getCurrentWindow().hide()`，那是
 /// Tauri core 插件的 `window|hide` 权限点，默认 capability（`core:default`）
 /// 不包含它，真机上被 ACL 拒绝、Esc 按了没反应。这里改成走自定义命令，
@@ -278,4 +317,39 @@ pub fn set_pinned(suppressor: State<AutoHideSuppressor>, pinned: bool) {
 #[tauri::command]
 pub fn hide_window(window: tauri::WebviewWindow) {
     window_fx::hide_window(&window);
+}
+
+/// 呼出延迟性能埋点的落地端：前端在窗口 `dowse://shown` 之后确认首帧真正
+/// 绘制完成（双重 `requestAnimationFrame`，见 +page.svelte 的
+/// `reportShownPerf`）才调这个命令。`HotkeyPerfState` 只在全局热键触发
+/// "显示"这条路径上被标记过（见 lib.rs 的快捷键回调）——取不到值就说明
+/// 这次显示不是热键触发的（比如托盘点击），静默跳过，不是错误。
+#[tauri::command]
+pub fn report_shown_perf(perf: State<HotkeyPerfState>) {
+    let Some(started_at) = perf.take() else {
+        return;
+    };
+    logging::log_line(
+        "perf",
+        &format!("呼出到可见 {}ms", started_at.elapsed().as_millis()),
+    );
+}
+
+/// 击键到渲染性能埋点的落地端：前端搜索防抖(30ms)触发、拿到结果、Svelte
+/// 完成 DOM 渲染后调一次（见 +page.svelte 的 `reportSearchPerf`）。
+/// `e2e_ms` 是从触发搜索的输入事件到渲染完成的端到端耗时（含防抖等待），
+/// `net_ms` 是从发起后端搜索调用到渲染完成的净耗时——README"击键到结果
+/// 渲染"的语义更贴近端到端，但防抖窗口本身会把数字拉高一截，一并把
+/// `debounce_ms` 打进日志，避免看日志的人把端到端数字误读成引擎有多慢。
+/// 每次防抖触发记一条，不做采样聚合（日志按体积轮转，见 logging.rs）。
+#[tauri::command]
+pub fn report_search_perf(e2e_ms: f64, net_ms: f64, debounce_ms: u32) {
+    logging::log_line(
+        "perf",
+        &format!(
+            "击键到渲染 {}ms (端到端, 含防抖 {debounce_ms}ms) / 净 {}ms",
+            e2e_ms.round() as i64,
+            net_ms.round() as i64
+        ),
+    );
 }
