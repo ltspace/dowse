@@ -80,7 +80,7 @@ files) is kept with the benchmark working directory, outside this repo.
 | Keystroke to results rendered | < 80ms | not measured — same |
 | OCR, single image | ~112ms / 1080p screenshot | ~170ms isolated (480×200 synthetic image), unchanged from v0.6.1 — the OCR pipeline was not modified this release. Sub-30ms readings on immediate repeat runs of the same image reflect OS-level recognition caching, not real recognition, and are excluded here. Not real 1080p screenshots |
 | Resident memory | < 150MB idle | not measured (idle); peak working set during full-corpus indexing was ~327MB — a different metric, not a regression against the idle target |
-| Installer size | < 15MB | **9.77MB** (`dowse-app_0.7.0_x64-setup.exe`, published release) |
+| Installer size | < 50MB (revised 2026-07 — the original 15MB target predates the bundled CLI sidecar) | **14.98MB** (`dowse-app_0.9.0_x64-setup.exe`, published release) |
 | Full-text index build, 10,000 files / 437MB | seconds (planned filename-only fast path) | 10.0–10.6s — current full-content `dowse index`, not the planned filename-only MFT path |
 | Full-text index build + OCR, 15,100 files (incl. 5,100 images) | — | ~46.6s first pass, all 5,100/5,100 images OCR'd in that same pass — no pending, no second pass needed |
 | Search latency, P50 (5 required categories) | — | 30.7–161.1ms across single word / Chinese phrase / English phrase / multi-word AND / zero-result, on a 15,100-document index |
