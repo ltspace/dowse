@@ -67,6 +67,10 @@ interface Strings {
 	esRepick: string;
 	esNoMatch: (numDocs: number) => string;
 	esNoMatchSub: string;
+	// 搜索历史（空态区域上方，输入框为空时展示）
+	historyTitle: string;
+	historyClear: string;
+	historyLabel: string;
 	// 建索引完成冷报告 + 秒数格式
 	formatSeconds: (seconds: number) => string;
 	indexReport: (indexed: string, seconds: string) => string;
@@ -135,6 +139,9 @@ const zh: Strings = {
 	esRepick: '重新选择目录',
 	esNoMatch: (numDocs) => `没有匹配的结果。索引包含 ${numDocs} 篇文档。`,
 	esNoMatchSub: '换一个查询词，或确认文件在已建索引的目录中。',
+	historyTitle: '最近搜索',
+	historyClear: '清空',
+	historyLabel: '最近搜索列表',
 	formatSeconds: (seconds) => (seconds < 10 ? `${seconds.toFixed(1)} 秒` : `${Math.round(seconds)} 秒`),
 	indexReport: (indexed, seconds) => `${indexed} 篇，${seconds}。`,
 	soCardTitle: '快捷键',
@@ -201,6 +208,9 @@ const en: Strings = {
 	esRepick: 'Pick another folder',
 	esNoMatch: (numDocs) => `No matches. The index holds ${numDocs} documents.`,
 	esNoMatchSub: 'Try another query, or check the file is in an indexed folder.',
+	historyTitle: 'Recent searches',
+	historyClear: 'Clear',
+	historyLabel: 'Recent searches list',
 	formatSeconds: (seconds) => (seconds < 10 ? `${seconds.toFixed(1)} seconds` : `${Math.round(seconds)} seconds`),
 	indexReport: (indexed, seconds) => `${indexed} documents, ${seconds}.`,
 	soCardTitle: 'Shortcuts',

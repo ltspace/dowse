@@ -26,6 +26,7 @@
 	import IndexingStrip from '$lib/components/IndexingStrip.svelte';
 	import { formatHotkey } from '$lib/hotkey';
 	import { t } from '$lib/i18n';
+	import { loadHistory, recordHistory, removeHistoryEntry, clearHistory } from '$lib/searchHistory';
 
 	// 类型筛选 / 排序器两个幽灵态下拉的选项表——顺序即菜单里的显示顺序，
 	// 第一项永远是"默认值"（对应 GhostDropdown 的 defaultValue）。文案跟随系统语言。
@@ -86,6 +87,18 @@
 	let pinned = $state(false);
 	let shortcutOverlayOpen = $state(false);
 	let hotkeyLabel = $state('Alt+`');
+
+	// 搜索历史：只在"打开了某条结果"的那一刻记（见 recordSearchHistory），
+	// 不在击键/出结果时记。只在输入框为空时展示（historyMode），跟结果列表的
+	// ↑↓/Enter 天然互斥——查询非空时 hits 才可能非空，两套导航不会抢键。
+	let history = $state<string[]>([]);
+	let historyIndex = $state(0);
+	let historyMode = $derived(query.trim().length === 0 && history.length > 0);
+
+	// 历史条目增删后夹紧选中下标，避免删空/删到末尾后指向一个不存在的位置。
+	$effect(() => {
+		if (historyIndex >= history.length) historyIndex = Math.max(0, history.length - 1);
+	});
 
 	let inputEl: HTMLInputElement | undefined = $state();
 	let panelEl: HTMLDivElement | undefined = $state();
@@ -293,13 +306,23 @@
 		}
 	}
 
+	/// 记一次搜索历史：只在用户明确要"打开"某条结果的时刻调用（openSelected/
+	/// revealSelected/showContextMenu），不在击键或结果刷新时调用——那会把
+	/// 历史刷满中间态。当前查询词为空时不记（没有词可记）。
+	function recordSearchHistory() {
+		if (query.trim().length === 0) return;
+		history = recordHistory(query);
+	}
+
 	function openSelected() {
 		if (!selectedHit) return;
+		recordSearchHistory();
 		api.openFile(selectedHit.path).catch((err) => showToast(t.toastOpenFailed(String(err))));
 	}
 
 	function revealSelected() {
 		if (!selectedHit) return;
+		recordSearchHistory();
 		api.revealInFolder(selectedHit.path).catch((err) => showToast(t.toastRevealFailed(String(err))));
 	}
 
@@ -320,7 +343,30 @@
 		selectedIndex = i;
 		const hit = hits[i];
 		if (!hit) return;
+		// 右键菜单的具体动作（打开/定位/复制路径）是 Rust 侧原生处理的
+		// （context_menu.rs::handle_context_menu_event），前端拿不到"选中了
+		// 哪一项"的回调；退而在弹出菜单的这一刻记录，近似"用户对这条结果
+		// 表达了打开/定位的意图"——唯一的误差是"仅复制路径"也会计入历史，
+		// 可接受（历史本身就是去重+faint 展示，不是精确审计）。
+		recordSearchHistory();
 		api.showResultContextMenu(hit.path).catch((err) => console.error('showResultContextMenu failed', err));
+	}
+
+	/// 历史条目被选中（Enter 或鼠标点击）：填入查询词并让已有的搜索 $effect
+	/// 接管防抖+发起搜索，这里不用重复实现一遍。
+	function selectHistoryEntry(q: string) {
+		query = q;
+		inputEl?.focus();
+	}
+
+	function removeHistoryAt(index: number) {
+		const target = history[index];
+		if (target === undefined) return;
+		history = removeHistoryEntry(target);
+	}
+
+	function clearAllHistory() {
+		history = clearHistory();
 	}
 
 	function closeMenus() {
@@ -410,6 +456,33 @@
 			return;
 		}
 
+		// 历史条目导航：只在输入框为空且有历史时生效（historyMode）。查询非空
+		// 时 hits 才可能非空，两套 ↑↓/Enter 天然互斥，不会抢键。Delete 删除
+		// 选中条目——不影响 Backspace，输入框这时本来就是空的，Backspace
+		// 依旧是正常的编辑行为。
+		if (historyMode) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				historyIndex = Math.min(historyIndex + 1, history.length - 1);
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				historyIndex = Math.max(historyIndex - 1, 0);
+				return;
+			}
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				selectHistoryEntry(history[historyIndex]);
+				return;
+			}
+			if (e.key === 'Delete') {
+				e.preventDefault();
+				removeHistoryAt(historyIndex);
+				return;
+			}
+		}
+
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			api.hideWindow().catch((err) => console.error('hideWindow failed', err));
@@ -496,6 +569,7 @@
 	}
 
 	onMount(() => {
+		history = loadHistory();
 		refreshIndexStatus();
 		// 窗口挂载时也拉一次进度快照——覆盖"托盘触发的建索引正在跑，浮窗这时
 		// 才第一次打开"的场景，不用等下一条事件才能看到活的进度。
@@ -636,8 +710,13 @@
 				{indexingCurrentFile}
 				{indexingReport}
 				{roots}
+				{history}
+				{historyIndex}
 				onpick={pickDirectoryAndRebuild}
 				onaddfolder={pickDirectoryAndAddRoot}
+				onselecthistory={selectHistoryEntry}
+				onhoverhistory={(i) => (historyIndex = i)}
+				onclearhistory={clearAllHistory}
 			/>
 		{:else}
 			<div class="results">

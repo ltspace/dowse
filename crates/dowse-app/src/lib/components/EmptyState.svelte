@@ -23,8 +23,13 @@
 		indexingCurrentFile = '',
 		indexingReport = null,
 		roots = [],
+		history = [],
+		historyIndex = 0,
 		onpick,
-		onaddfolder
+		onaddfolder,
+		onselecthistory,
+		onhoverhistory,
+		onclearhistory
 	}: {
 		kind: Kind;
 		query: string;
@@ -35,8 +40,14 @@
 		indexingReport?: IndexReport | null;
 		/** 已注册的全部索引根（已过 display_path 清洗），空态逐行列出。 */
 		roots?: string[];
+		/** 最近查询词，最新在前——只在 kind === 'idle'（输入框为空）时展示。 */
+		history?: string[];
+		historyIndex?: number;
 		onpick: () => void;
 		onaddfolder?: () => void;
+		onselecthistory?: (query: string) => void;
+		onhoverhistory?: (index: number) => void;
+		onclearhistory?: () => void;
 	} = $props();
 
 	// "37 秒" 这种整数量级用四舍五入；不到 10 秒时留一位小数——冒烟测试用的
@@ -48,6 +59,30 @@
 
 <div class="empty">
 	{#if kind === 'idle'}
+		{#if history.length > 0}
+			<!-- 最近查询：贴在空态提示上方，键盘导航（↑↓/Enter/Delete）由父组件
+			     （+page.svelte 的 handleKeydown）统一处理——这里跟 GhostDropdown
+			     一样只负责呈现和鼠标交互，避免抢走输入框的 DOM 焦点。 -->
+			<div class="history" role="listbox" aria-label={t.historyLabel}>
+				<div class="history-head">
+					<span class="history-title">{t.historyTitle}</span>
+					<button type="button" class="history-clear" onclick={onclearhistory}>{t.historyClear}</button>
+				</div>
+				{#each history as q, i (q)}
+					<button
+						type="button"
+						class="history-item"
+						class:active={i === historyIndex}
+						role="option"
+						aria-selected={i === historyIndex}
+						onmouseenter={() => onhoverhistory?.(i)}
+						onclick={() => onselecthistory?.(q)}
+					>
+						{q}
+					</button>
+				{/each}
+			</div>
+		{/if}
 		<p class="title">{t.esTypeToSearch}</p>
 		<p class="sub">{t.esSearchHelp}</p>
 		{#if roots.length > 0}
@@ -182,6 +217,74 @@
 		font-size: 11px;
 		opacity: 0.75;
 		max-width: 360px;
+	}
+
+	/* 最近查询：整块比 .sub 再淡一档，跟空态其余内容一样克制——不是主角，
+	   只是"顺手能拿到"的入口。宽度卡住不跟随内容拉伸，行内文字左对齐，
+	   跟 .empty 本身的居中布局区分开（.empty 只负责把这个整块居中）。 */
+	.history {
+		width: min(280px, 100%);
+		margin-bottom: 8px;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		text-align: left;
+	}
+
+	.history-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
+		padding: 0 2px 4px;
+	}
+
+	.history-title {
+		font-size: 11px;
+		letter-spacing: 0.04em;
+		color: var(--fg-tertiary);
+		opacity: 0.85;
+	}
+
+	/* 清空入口：跟 .link 同一档处理——无边框无底色，比标题本身更淡，
+	   只有 hover 才提示可点。 */
+	.history-clear {
+		font: inherit;
+		font-size: 11px;
+		color: var(--accent-strong);
+		opacity: 0.7;
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: default;
+	}
+
+	.history-clear:hover {
+		opacity: 1;
+		text-decoration: underline;
+	}
+
+	.history-item {
+		display: block;
+		width: 100%;
+		font: inherit;
+		font-size: 12.5px;
+		text-align: left;
+		padding: 5px 8px;
+		border: none;
+		border-radius: var(--radius-row);
+		background: transparent;
+		color: var(--fg-secondary);
+		cursor: default;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.history-item:hover,
+	.history-item.active {
+		background: var(--row-hover);
+		color: var(--fg-primary);
 	}
 
 	.pick {
