@@ -25,7 +25,7 @@
 			{ label: t.soSort, keys: ['Ctrl', 'S'] },
 			{ label: t.soPin, keys: ['Ctrl', 'D'] },
 			{ label: t.soCheatSheet, keys: ['Ctrl', '/'] },
-			{ label: t.soRules, keys: ['Ctrl', ','] }
+			{ label: t.soSettings, keys: ['Ctrl', ','] }
 		]
 	]);
 </script>

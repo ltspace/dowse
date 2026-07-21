@@ -81,6 +81,25 @@ export type SortOption = 'relevance' | 'mtime_desc' | 'mtime_asc' | 'size_desc';
 
 export type EffectLevel = 'acrylic' | 'mica' | 'solid';
 
+/// 透明度三档，跟 Rust 侧 `window_fx.rs::TransparencyTier`
+/// （`serde(rename_all = "lowercase")`）一一对应。
+export type TransparencyTier = 'low' | 'mid' | 'high';
+
+/// 界面语言覆盖，跟 Rust 侧 `config.rs::AppConfig::lang` 一一对应：
+/// 'auto' 跟随系统，'zh'/'en' 钉死为中/英。见 i18n.ts 顶部的启动镜像说明。
+export type LangOption = 'auto' | 'zh' | 'en';
+
+/// 设置面板通用区一次拉齐的初值，跟 Rust 侧 `commands.rs::SettingsDto`
+/// 一一对应。`autostart_enabled` 是自启插件报告的真实系统态（不是 config 里
+/// 语义不同的 `autostart_user_disabled`），字段名保持 snake_case 跟其它 DTO 一致。
+export interface AppSettings {
+	hotkey: string;
+	transparency_enabled: boolean;
+	transparency_tier: TransparencyTier;
+	autostart_enabled: boolean;
+	lang: LangOption;
+}
+
 /// 面板可视不透明度的明/暗两套 CSS alpha（0~1），跟托盘"透明度"三档挂钩，
 /// 见 Rust 侧 window_fx.rs 的 `TransparencyTier`/`GlassAlpha`。
 export interface GlassAlpha {

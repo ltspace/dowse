@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
+	AppSettings,
 	EffectLevel,
 	ExtGroup,
 	GlassAlpha,
@@ -7,9 +8,11 @@ import type {
 	IndexRules,
 	IndexStats,
 	IndexStatus,
+	LangOption,
 	PreviewResult,
 	SearchHit,
-	SortOption
+	SortOption,
+	TransparencyTier
 } from './types';
 
 export function indexStatus(): Promise<IndexStatus> {
@@ -130,4 +133,37 @@ export function setRules(
 		extraTextExts,
 		maxFileMb
 	});
+}
+
+/// 设置面板打开时拉一次通用区（改键/透明/自启/语言）的全部初值。
+export function getConfig(): Promise<AppSettings> {
+	return invoke('get_config');
+}
+
+/// 设置面板"改键"：`hotkey` 是 `tauri-plugin-global-shortcut` 认的格式
+/// （如 "Ctrl+Alt+KeyK"，修饰键在前、一个主键在后）。注册失败（多半被别的
+/// 程序占用）时 Promise reject，错误文案里说清楚——Rust 侧已回滚到旧键。
+export function setHotkey(hotkey: string): Promise<void> {
+	return invoke('set_hotkey', { hotkey });
+}
+
+/// 设置面板"透明效果"开关——复用托盘同一条命令路径，托盘勾选态与面板同步。
+export function setTransparencyEnabled(enabled: boolean): Promise<void> {
+	return invoke('set_transparency_enabled', { enabled });
+}
+
+/// 设置面板"透明度"三档——复用托盘同一条命令路径。
+export function setTransparencyTier(tier: TransparencyTier): Promise<void> {
+	return invoke('set_transparency_tier', { tier });
+}
+
+/// 设置面板"开机自启"——复用托盘同一条命令路径。系统拒绝写自启项时 reject，
+/// 调用方据此回滚 UI 勾选态。
+export function setAutostart(enabled: boolean): Promise<void> {
+	return invoke('set_autostart', { enabled });
+}
+
+/// 设置面板"界面语言"：只落盘，重启后生效（不做运行时热切换，见 i18n.ts）。
+export function setLang(lang: LangOption): Promise<void> {
+	return invoke('set_lang', { lang });
 }

@@ -1,10 +1,31 @@
-// 界面文案的中英双语字典，跟随系统语言：navigator.language 以 "zh" 开头走
-// 中文，其余一律英文。判定只做一次（模块首次求值时），没有运行时切换、没有
-// 语言开关、没有设置项——纯跟随系统区域。只收界面可见文案（按钮、占位符、
-// 下拉项、toast、空态、快捷键提示、tooltip、aria-label 等）；注释和开发者
-// 面向的日志不在此列，仍按仓库惯例保留中文。
+// 界面文案的中英双语字典。判定只做一次（模块首次求值时），没有运行时切换——
+// t 是一个"启动时定死"的同步 const。只收界面可见文案（按钮、占位符、下拉项、
+// toast、空态、快捷键提示、tooltip、aria-label 等）；注释和开发者面向的日志
+// 不在此列，仍按仓库惯例保留中文。
+//
+// 语言来源（0.9.0 起）：设置面板可以把界面语言钉死为中/英，或 "auto" 跟随
+// 系统。权威存储在 Rust 侧 config.lang（托盘 i18n 也读它）。但这里的 t 是同步
+// const、等不了异步 IPC，所以用 localStorage 存一份"上次已知的语言选择"作
+// **同步启动镜像**：模块首次求值时同步读它决定语言；app 挂载后再异步从 config
+// 拉一次写回镜像（见 +page.svelte 的启动同步、以及设置面板改语言时的即时写入）。
+// 配合"改语言重启后生效"的交互，语言本来就只在下次启动生效，这份一拍延迟正好
+// 落在可接受范围内。镜像缺失/为 "auto" 时回落到 navigator.language，跟 0.7.0
+// 起的纯跟随系统行为完全一致。
+export const LANG_OVERRIDE_KEY = 'dowse.lang-override';
 
-export const isZh = navigator.language.toLowerCase().startsWith('zh');
+function resolveIsZh(): boolean {
+	let override: string | null = null;
+	try {
+		override = localStorage.getItem(LANG_OVERRIDE_KEY);
+	} catch {
+		// localStorage 不可用（隐私模式等）就当没有覆盖，回落系统语言。
+	}
+	if (override === 'zh') return true;
+	if (override === 'en') return false;
+	return navigator.language.toLowerCase().startsWith('zh');
+}
+
+export const isZh = resolveIsZh();
 
 interface Strings {
 	// 类型筛选下拉
@@ -90,7 +111,39 @@ interface Strings {
 	soSort: string;
 	soPin: string;
 	soCheatSheet: string;
-	soRules: string;
+	soSettings: string;
+	// 设置面板（Ctrl+, 打开）：分区标题 + 通用区各项
+	setTitle: string;
+	setCloseLabel: string;
+	setTabGeneral: string;
+	setTabRules: string;
+	// 通用区 - 呼出快捷键改键
+	setHotkeyLabel: string;
+	setHotkeyHint: string;
+	setHotkeyChange: string;
+	setHotkeyCapturing: string;
+	setHotkeyConfirm: string;
+	setHotkeyCancel: string;
+	setHotkeyNeedModifier: string;
+	setHotkeySaved: string;
+	setHotkeyFailed: (err: string) => string;
+	// 通用区 - 透明效果 + 三档
+	setTransparencyLabel: string;
+	setTierLabel: string;
+	setTierLow: string;
+	setTierMid: string;
+	setTierHigh: string;
+	// 通用区 - 开机自启
+	setAutostartLabel: string;
+	// 通用区 - 界面语言
+	setLangLabel: string;
+	setLangAuto: string;
+	setLangZh: string;
+	setLangEn: string;
+	setLangRestartHint: string;
+	// 通用区 - 开/关两态（透明/自启共用）
+	setOn: string;
+	setOff: string;
 	// 索引规则面板（Ctrl+, 打开）
 	rpTitle: string;
 	rpCloseLabel: string;
@@ -177,7 +230,33 @@ const zh: Strings = {
 	soSort: '排序',
 	soPin: '固定',
 	soCheatSheet: '速查',
-	soRules: '索引规则',
+	soSettings: '设置',
+	setTitle: '设置',
+	setCloseLabel: '关闭设置面板',
+	setTabGeneral: '通用',
+	setTabRules: '索引规则',
+	setHotkeyLabel: '呼出快捷键',
+	setHotkeyHint: '需包含至少一个修饰键（Ctrl / Alt / Shift / Win）加一个主键。',
+	setHotkeyChange: '改键',
+	setHotkeyCapturing: '按下新的组合键…（Esc 取消）',
+	setHotkeyConfirm: '确认',
+	setHotkeyCancel: '取消',
+	setHotkeyNeedModifier: '至少需要一个修饰键（Ctrl / Alt / Shift / Win）。',
+	setHotkeySaved: '快捷键已更新。',
+	setHotkeyFailed: (err) => `改键失败：${err}`,
+	setTransparencyLabel: '透明效果',
+	setTierLabel: '透明度',
+	setTierLow: '低',
+	setTierMid: '中',
+	setTierHigh: '高',
+	setAutostartLabel: '开机自启',
+	setLangLabel: '界面语言',
+	setLangAuto: '跟随系统',
+	setLangZh: '中文',
+	setLangEn: 'English',
+	setLangRestartHint: '重启后生效。',
+	setOn: '开',
+	setOff: '关',
 	rpTitle: '索引规则',
 	rpCloseLabel: '关闭索引规则面板',
 	rpExcludeDirsLabel: '排除目录',
@@ -263,7 +342,33 @@ const en: Strings = {
 	soSort: 'Sort',
 	soPin: 'Pin',
 	soCheatSheet: 'Cheat sheet',
-	soRules: 'Index rules',
+	soSettings: 'Settings',
+	setTitle: 'Settings',
+	setCloseLabel: 'Close settings',
+	setTabGeneral: 'General',
+	setTabRules: 'Index rules',
+	setHotkeyLabel: 'Toggle shortcut',
+	setHotkeyHint: 'Needs at least one modifier (Ctrl / Alt / Shift / Win) plus a main key.',
+	setHotkeyChange: 'Change',
+	setHotkeyCapturing: 'Press the new combo… (Esc to cancel)',
+	setHotkeyConfirm: 'Confirm',
+	setHotkeyCancel: 'Cancel',
+	setHotkeyNeedModifier: 'Needs at least one modifier (Ctrl / Alt / Shift / Win).',
+	setHotkeySaved: 'Shortcut updated.',
+	setHotkeyFailed: (err) => `Rebind failed: ${err}`,
+	setTransparencyLabel: 'Transparency',
+	setTierLabel: 'Opacity',
+	setTierLow: 'Low',
+	setTierMid: 'Medium',
+	setTierHigh: 'High',
+	setAutostartLabel: 'Launch at startup',
+	setLangLabel: 'Language',
+	setLangAuto: 'System',
+	setLangZh: '中文',
+	setLangEn: 'English',
+	setLangRestartHint: 'Takes effect after restart.',
+	setOn: 'On',
+	setOff: 'Off',
 	rpTitle: 'Index rules',
 	rpCloseLabel: 'Close index rules panel',
 	rpExcludeDirsLabel: 'Excluded folders',

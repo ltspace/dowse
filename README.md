@@ -69,7 +69,7 @@ The closest open-source implementation is sist2, but it targets Linux (on Window
 
 - Word segmentation via jieba, ranking via BM25 (tantivy engine). No trigrams.
 - Automatic file encoding detection (chardetng). GBK-encoded files are decoded correctly before indexing — this matters because a large share of Chinese-language documents on Windows, especially older ones, are still saved in GBK rather than UTF-8, and a search tool that assumes UTF-8 will silently mis-index or garble them.
-- Multi-term queries default to AND semantics. Quoted phrase queries match on exact position.
+- Multi-term queries default to AND semantics. Quoted phrase queries match on exact position. Inline operators narrow things down further: `path:reports`, `mtime:>2026-01-01`, `size:>10mb`, uppercase `OR` between groups, `-term` to exclude.
 - OCR runs on the Windows-native engine (Windows.Media.Ocr), fully offline. The zh-Hans language pack also covers mixed Chinese/English text, no extra configuration required.
 
 ## Performance
@@ -138,7 +138,7 @@ npm install
 cargo tauri build      # produces the installer under target/release/bundle
 ```
 
-Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it. `Ctrl+,` opens the index-rules panel (excluded directories, extra text extensions, per-file size cap).
+Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it. `Ctrl+,` opens the settings panel — general (hotkey rebinding, transparency, autostart, interface language) and index rules (excluded directories, extra text extensions, per-file size cap).
 
 ![Preview pane for an image result: the source image rendered inline next to its OCR-extracted text with the matched terms highlighted](docs/screenshots/ocr-preview.png)
 

@@ -14,6 +14,8 @@ mod tray;
 mod watcher;
 mod window_fx;
 
+use std::sync::Mutex;
+
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -28,6 +30,13 @@ use rebuild::RebuildGuard;
 use state::SearchState;
 use watcher::WatchController;
 use window_fx::EffectLevelState;
+
+/// 当前生效的全局呼出快捷键。启动时初始化成配置里的键，设置面板"改键"
+/// （`commands::set_hotkey`）注册成功后更新它——全局快捷键回调据此判断收到
+/// 的到底是不是我们这一个呼出键。之所以要一份可更新的共享态、而不是像从前
+/// 那样把 `toggle` 常量 move 进回调：改键后新键跟旧常量必然失配，回调会认不
+/// 出新键；把"当前键"放进 State，改键时更新一处，回调每次现读，就不会失配。
+pub struct HotkeyState(pub Mutex<Shortcut>);
 
 /// 默认全局呼出快捷键：Alt+`（反引号）。原先是 Alt+Space，跟部分用户机器上的
 /// PowerToys Run 冲突，改成配置项后这个只是兜底默认值和解析失败时的回退。
@@ -63,11 +72,23 @@ pub fn run() {
         ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, shortcut, event| {
-                    if *shortcut == toggle
-                        && event.state() == ShortcutState::Pressed
-                        && let Some(window) = app.get_webview_window("main")
-                    {
+                .with_handler(|app, shortcut, event| {
+                    // 全程只注册一个快捷键（改键时先退旧再注册新），但仍跟当前
+                    // 生效的呼出键（HotkeyState）比一次：既防御未来注册多个快捷键
+                    // 的情况，也明确"只认呼出键"。当前键改键后会变，所以现读 State
+                    // 而不是比一个启动时定死的常量。
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    let current = *app
+                        .state::<HotkeyState>()
+                        .0
+                        .lock()
+                        .expect("hotkey mutex poisoned");
+                    if *shortcut != current {
+                        return;
+                    }
+                    if let Some(window) = app.get_webview_window("main") {
                         // 呼出延迟埋点的起点：热键回调刚进来的这一刻。只在窗口当前
                         // 不可见（即将变成"显示"而不是"隐藏"）时标记——toggle 同时
                         // 承担两种职责，隐藏路径不该污染下一次呼出的计时基准。
@@ -80,6 +101,7 @@ pub fn run() {
                 .build(),
         )
         .manage(ConfigState::new())
+        .manage(HotkeyState(Mutex::new(toggle)))
         .manage(SearchState::load_initial())
         .manage(WatchController::new())
         .manage(FileIconCache::new())
@@ -102,6 +124,12 @@ pub fn run() {
             commands::get_hotkey,
             commands::get_rules,
             commands::set_rules,
+            commands::get_config,
+            commands::set_hotkey,
+            commands::set_transparency_enabled,
+            commands::set_transparency_tier,
+            commands::set_autostart,
+            commands::set_lang,
             commands::file_icon,
             commands::set_pinned,
             commands::hide_window,

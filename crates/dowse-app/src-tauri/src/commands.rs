@@ -2,8 +2,11 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{Manager, State};
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tauri_plugin_opener::OpenerExt;
 
+use crate::HotkeyState;
 use crate::autohide::AutoHideSuppressor;
 use crate::config::ConfigState;
 use crate::file_icons::FileIconCache;
@@ -13,7 +16,7 @@ use crate::logging;
 use crate::perf::HotkeyPerfState;
 use crate::rebuild::{IndexStatsDto, RebuildGuard};
 use crate::state::SearchState;
-use crate::window_fx::{self, EffectLevel, EffectLevelState, GlassAlpha};
+use crate::window_fx::{self, EffectLevel, EffectLevelState, GlassAlpha, TransparencyTier};
 
 #[derive(Serialize)]
 pub struct SearchHitDto {
@@ -306,6 +309,111 @@ pub fn set_rules(
     rules.normalize();
     dowse::save_rules(&dir, &rules).map_err(|e| e.to_string())?;
     Ok(rules)
+}
+
+/// 设置面板通用区一次拉齐的初值。刻意不直接返回 `AppConfig`：一是不想把
+/// `target_dir` 这类跟设置面板无关的内部字段泄漏给前端；二是"开机自启"要的
+/// 是自启插件报告的**真实系统态**（`autolaunch().is_enabled()`），而 config
+/// 里只存了"用户是否主动关过"（`autostart_user_disabled`）这个语义不同的位，
+/// 不能拿来直接当勾选态用。`transparency_tier` 按 `serde(rename_all=lowercase)`
+/// 序列化成 "low"/"mid"/"high"，跟前端 `TransparencyTier` 类型对齐。
+#[derive(Serialize)]
+pub struct SettingsDto {
+    pub hotkey: String,
+    pub transparency_enabled: bool,
+    pub transparency_tier: TransparencyTier,
+    pub autostart_enabled: bool,
+    pub lang: String,
+}
+
+/// 设置面板打开时拉一次通用区的全部初值（改键/透明/自启/语言）。
+#[tauri::command]
+pub fn get_config(app: tauri::AppHandle) -> SettingsDto {
+    let cfg = app.state::<ConfigState>().get();
+    let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    SettingsDto {
+        hotkey: cfg.hotkey,
+        transparency_enabled: cfg.transparency_enabled,
+        transparency_tier: cfg.transparency_tier,
+        autostart_enabled,
+        lang: cfg.lang,
+    }
+}
+
+/// 设置面板"改键"：把新的组合键（`tauri-plugin-global-shortcut` 认的格式，
+/// 如 "Ctrl+Alt+KeyK"）注册为全局呼出快捷键，并即时生效。
+///
+/// 流程严格按"先退旧、再注册新、失败回滚"来（任务书要求）：先 `unregister`
+/// 旧键，再 `register` 新键；新键注册失败（最常见是被别的程序占用）就把旧键
+/// **重新注册回去**、返回错误文案，绝不把用户留在"旧的退了、新的没上、两头
+/// 空"的状态。注册成功才更新内存里的当前呼出键（`HotkeyState`——全局快捷键
+/// 回调据它判断收到的是不是我们这个键；改键后启动时 move 进回调的旧常量会
+/// 失配，所以必须用一份可更新的共享态）并落盘。
+///
+/// 内存态先于落盘更新：万一落盘失败（磁盘异常等极端情况），至少运行时是
+/// 自洽的——新键已注册、回调也认它，只是这次没持久化，重启会回到旧键，
+/// 错误文案里说清楚。
+#[tauri::command]
+pub fn set_hotkey(app: tauri::AppHandle, hotkey: String) -> Result<(), String> {
+    let new_sc: Shortcut = hotkey
+        .parse()
+        .map_err(|e| format!("快捷键格式无法识别：{e}"))?;
+    let state = app.state::<HotkeyState>();
+    let old_sc = *state.0.lock().expect("hotkey mutex poisoned");
+    // 没变化直接成功：避免"退了再注册同一个键"的无谓抖动，也兜住前端重复提交。
+    if new_sc == old_sc {
+        return Ok(());
+    }
+
+    let gs = app.global_shortcut();
+    // 先退旧键。旧键当初可能压根没注册上（比如启动时就被占用），unregister
+    // 报错无所谓，忽略。
+    let _ = gs.unregister(old_sc);
+    match gs.register(new_sc) {
+        Ok(()) => {
+            *state.0.lock().expect("hotkey mutex poisoned") = new_sc;
+            app.state::<ConfigState>().set_hotkey(hotkey).map_err(|e| {
+                format!("快捷键已即时生效，但写入配置失败（重启后会回到旧键）：{e}")
+            })?;
+            Ok(())
+        }
+        Err(err) => {
+            // 回滚：新键没抢到，把旧键重新注册回去，维持改键前的可用状态。
+            let _ = gs.register(old_sc);
+            Err(format!("这个组合键可能已被其它程序占用，注册失败：{err}"))
+        }
+    }
+}
+
+/// 设置面板"透明效果"开关：复用托盘同一条实现（`tray::apply_transparency_enabled`），
+/// 托盘勾选态与面板因此天然同步。
+#[tauri::command]
+pub fn set_transparency_enabled(app: tauri::AppHandle, enabled: bool) {
+    crate::tray::apply_transparency_enabled(&app, enabled);
+}
+
+/// 设置面板"透明度"三档：复用托盘同一条实现（`tray::apply_transparency_tier`）。
+#[tauri::command]
+pub fn set_transparency_tier(app: tauri::AppHandle, tier: TransparencyTier) {
+    crate::tray::apply_transparency_tier(&app, tier);
+}
+
+/// 设置面板"开机自启"：复用托盘同一条实现（`tray::apply_autostart`），失败
+/// （系统拒绝写注册表/LaunchAgent 等）把错误返回给前端好回滚 UI 勾选态。
+#[tauri::command]
+pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    crate::tray::apply_autostart(&app, enabled)
+}
+
+/// 设置面板"界面语言"：只落盘，不做运行时热切换（见 `config.rs` 的 `lang`
+/// 字段说明与前端 `i18n.ts`）。只认 auto/zh/en 三种取值，多一道防御防止脏值
+/// 落盘让下次启动的语言解析出意外。
+#[tauri::command]
+pub fn set_lang(config: State<ConfigState>, lang: String) -> Result<(), String> {
+    if !matches!(lang.as_str(), "auto" | "zh" | "en") {
+        return Err(format!("不支持的语言取值：{lang}"));
+    }
+    config.set_lang(lang).map_err(|e| e.to_string())
 }
 
 /// Esc 收起浮窗。前端原先直接调 JS 侧 `getCurrentWindow().hide()`，那是

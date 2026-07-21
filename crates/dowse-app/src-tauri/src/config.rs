@@ -28,9 +28,16 @@ pub struct AppConfig {
     pub autostart_user_disabled: bool,
     /// 全局呼出快捷键，格式跟 tauri-plugin-global-shortcut 的 `Shortcut::from_str`
     /// 一致（如 "Alt+Backquote"）。默认 Alt+`（反引号），原先的 Alt+Space
-    /// 跟部分用户机器上的 PowerToys Run 冲突。
+    /// 跟部分用户机器上的 PowerToys Run 冲突。设置面板"改键"改的就是这个字段。
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
+    /// 界面语言覆盖："auto"（默认）跟随系统 UI 语言，保持 0.7.0 起"纯跟随
+    /// 系统"的行为不变；"zh"/"en" 把界面钉死为中/英。设置面板"界面语言"写
+    /// 这个字段。前端 `lib/i18n.ts` 和 Rust 托盘 `i18n.rs` 都在**启动时**读它
+    /// 决定语言，运行中不热切换——改完要重启才生效（热切换要把整套文案改成
+    /// 响应式，本轮不做），所以这里只负责持久化选择。
+    #[serde(default = "default_lang")]
+    pub lang: String,
 }
 
 fn default_true() -> bool {
@@ -41,6 +48,10 @@ fn default_hotkey() -> String {
     "Alt+Backquote".to_string()
 }
 
+fn default_lang() -> String {
+    "auto".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -49,6 +60,7 @@ impl Default for AppConfig {
             transparency_tier: TransparencyTier::default(),
             autostart_user_disabled: false,
             hotkey: default_hotkey(),
+            lang: default_lang(),
         }
     }
 }
@@ -118,6 +130,23 @@ impl ConfigState {
     pub fn set_autostart_user_disabled(&self, disabled: bool) -> Result<()> {
         let mut guard = self.0.lock().expect("config mutex poisoned");
         guard.autostart_user_disabled = disabled;
+        save(&guard)
+    }
+
+    /// 设置面板"改键"落盘：传入的是已经被 `Shortcut::from_str` 验证过能解析
+    /// 的字符串（见 `commands::set_hotkey` 里先解析、注册成功才写这里），
+    /// 所以这层不再重复校验格式。
+    pub fn set_hotkey(&self, hotkey: String) -> Result<()> {
+        let mut guard = self.0.lock().expect("config mutex poisoned");
+        guard.hotkey = hotkey;
+        save(&guard)
+    }
+
+    /// 设置面板"界面语言"落盘。取值合法性（auto/zh/en）由 `commands::set_lang`
+    /// 把关，这层只管持久化。
+    pub fn set_lang(&self, lang: String) -> Result<()> {
+        let mut guard = self.0.lock().expect("config mutex poisoned");
+        guard.lang = lang;
         save(&guard)
     }
 }

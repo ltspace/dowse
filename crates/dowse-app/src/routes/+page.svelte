@@ -24,9 +24,9 @@
 	import AnimatedNumber from '$lib/components/AnimatedNumber.svelte';
 	import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
 	import IndexingStrip from '$lib/components/IndexingStrip.svelte';
-	import IndexRulesPanel from '$lib/components/IndexRulesPanel.svelte';
+	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import { formatHotkey } from '$lib/hotkey';
-	import { t } from '$lib/i18n';
+	import { t, LANG_OVERRIDE_KEY } from '$lib/i18n';
 	import { loadHistory, recordHistory, removeHistoryEntry, clearHistory } from '$lib/searchHistory';
 
 	// 类型筛选 / 排序器两个幽灵态下拉的选项表——顺序即菜单里的显示顺序，
@@ -88,10 +88,10 @@
 	let pinned = $state(false);
 	let shortcutOverlayOpen = $state(false);
 	let hotkeyLabel = $state('Alt+`');
-	/** 索引规则面板（Ctrl+, 打开）。跟 shortcutOverlayOpen 不同，这个面板里
-	 * 有真实表单字段，打开时 DOM 焦点会移进面板本身（见 IndexRulesPanel
-	 * 组件顶部注释），不是靠 handleKeydown 拦截键盘。 */
-	let rulesPanelOpen = $state(false);
+	/** 设置面板（Ctrl+, 打开）。跟 shortcutOverlayOpen 不同，这个面板里有真实
+	 * 表单字段，打开时 DOM 焦点会移进面板本身（见 SettingsPanel 组件顶部
+	 * 注释），不是靠 handleKeydown 拦截键盘。 */
+	let settingsPanelOpen = $state(false);
 
 	// 搜索历史：只在"打开了某条结果"的那一刻记（见 recordSearchHistory），
 	// 不在击键/出结果时记。只在输入框为空时展示（historyMode），跟结果列表的
@@ -329,16 +329,16 @@
 		await rebuildWithDir(roots[0]);
 	}
 
-	function openRulesPanel() {
+	function openSettingsPanel() {
 		typeMenuOpen = false;
 		sortMenuOpen = false;
-		rulesPanelOpen = true;
+		settingsPanelOpen = true;
 	}
 
-	function closeRulesPanel() {
-		rulesPanelOpen = false;
-		// 面板关闭后把焦点交还给搜索框——面板打开期间焦点在表单字段里
-		// （见 IndexRulesPanel 组件顶部注释），关闭动作不该让用户还要再点
+	function closeSettingsPanel() {
+		settingsPanelOpen = false;
+		// 面板关闭后把焦点交还给搜索框——面板打开期间焦点在面板内
+		// （见 SettingsPanel 组件顶部注释），关闭动作不该让用户还要再点
 		// 一下才能继续打字，跟呼出浮窗时 focusAndSelectAll 是同一个诉求。
 		inputEl?.focus();
 	}
@@ -473,15 +473,16 @@
 			shortcutOverlayOpen = false;
 			return;
 		}
-		// 规则面板打开期间的保险丝：正常情况下 DOM 焦点在面板内、本处理器
+		// 设置面板打开期间的保险丝：正常情况下 DOM 焦点在面板内、本处理器
 		// （绑在 .search-input 上）根本不会触发。但焦点转移可能落空——比如
 		// 字段还在 loading disabled 态、或未来某个改动打断了聚焦时机——那时
 		// 绝不能让按键漏进面板背后的搜索 UI：Esc 只关面板（不是藏整个窗口），
-		// 其余按键一律吞掉。
-		if (rulesPanelOpen) {
+		// 其余按键一律吞掉。改键捕获态的 Esc 由面板自己（stopPropagation）先
+		// 行拦截，走不到这里，所以这里的 Esc 只会是"关面板"语义。
+		if (settingsPanelOpen) {
 			e.preventDefault();
 			if (e.key === 'Escape') {
-				closeRulesPanel();
+				closeSettingsPanel();
 			}
 			return;
 		}
@@ -513,7 +514,7 @@
 		if (e.ctrlKey && e.key === ',') {
 			e.preventDefault();
 			closeMenus();
-			openRulesPanel();
+			openSettingsPanel();
 			return;
 		}
 
@@ -690,6 +691,20 @@
 		api.getHotkey().then((raw) => {
 			hotkeyLabel = formatHotkey(raw);
 		});
+		// 语言启动镜像自愈：config.lang 是权威（Rust 托盘 i18n 也读它），把它
+		// 同步进 localStorage，供下次启动时 i18n.ts 同步读取决定界面语言（见
+		// i18n.ts 顶部说明）。即使有人手改了 config.json，这一步也能在下一次
+		// 启动前把镜像纠正过来——本轮语言本就"重启后生效"，一拍延迟可接受。
+		api
+			.getConfig()
+			.then((cfg) => {
+				try {
+					localStorage.setItem(LANG_OVERRIDE_KEY, cfg.lang);
+				} catch {
+					// localStorage 不可用就算了，i18n.ts 会回落系统语言。
+				}
+			})
+			.catch(() => {});
 
 		document.addEventListener('click', handleDocumentClick);
 
@@ -870,12 +885,12 @@
 		<ShortcutOverlay hotkey={hotkeyLabel} onclose={() => (shortcutOverlayOpen = false)} />
 	{/if}
 
-	{#if rulesPanelOpen}
-		<IndexRulesPanel
+	{#if settingsPanelOpen}
+		<SettingsPanel
 			{roots}
-			onclose={closeRulesPanel}
+			onclose={closeSettingsPanel}
 			onrebuild={() => {
-				closeRulesPanel();
+				closeSettingsPanel();
 				rebuildCurrentIndex();
 			}}
 		/>

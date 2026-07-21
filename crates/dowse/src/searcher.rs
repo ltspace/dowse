@@ -7,13 +7,17 @@
 use std::ops::{Bound, Range};
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tantivy::collector::{Count, TopDocs};
-use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
+use tantivy::query::{
+    AllQuery, BooleanQuery, Occur, PhraseQuery, Query, QueryParser, RangeQuery, TermQuery,
+};
 use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::snippet::SnippetGenerator;
+use tantivy::tokenizer::{TokenStream, Tokenizer};
 use tantivy::{DocAddress, Index, IndexReader, Order, TantivyDocument, Term};
 
+use crate::query::{self, Cmp};
 use crate::{Fields, build_schema, register_tokenizers};
 
 /// 结果排序方式。相关性是默认值——不传排序参数、或者从前端传来的字符串
@@ -289,7 +293,12 @@ impl Searcher {
         ext_group: Option<&[&str]>,
         sort: SortMode,
     ) -> Result<SearchPage> {
-        let text_query = self.parser.parse_query(query_str)?;
+        // 把查询串解析成（检索用查询, 只含内容词的高亮查询）：无操作符时两者都退回
+        // 老的整串 parse_query，逐字节向后兼容；有操作符时按结构化规则拼。摘要高亮只
+        // 认内容词那份，path:/mtime:/size: 这些操作符不进高亮（它们的 term 落在别的
+        // 字段上，SnippetGenerator 绑定在 content 字段，本就不会拿它们去标原文，这里
+        // 再用纯内容查询喂它是双保险，也让意图更清楚）。
+        let (retrieval_query, snippet_query) = self.build_queries(query_str)?;
         let query: Box<dyn Query> = match ext_group {
             Some(exts) if !exts.is_empty() => {
                 let ext_should: Vec<(Occur, Box<dyn Query>)> = exts
@@ -305,18 +314,19 @@ impl Searcher {
                     })
                     .collect();
                 Box::new(BooleanQuery::new(vec![
-                    (Occur::Must, text_query),
+                    (Occur::Must, retrieval_query),
                     (
                         Occur::Must,
                         Box::new(BooleanQuery::new(ext_should)) as Box<dyn Query>,
                     ),
                 ]))
             }
-            _ => text_query,
+            _ => retrieval_query,
         };
         let searcher = self.reader.searcher();
 
-        let mut snippet_gen = SnippetGenerator::create(&searcher, &query, self.fields.content)?;
+        let mut snippet_gen =
+            SnippetGenerator::create(&searcher, &snippet_query, self.fields.content)?;
         snippet_gen.set_max_num_chars(SNIPPET_MAX_CHARS);
 
         // 相关性排序保留真实 BM25 分数；其余三档按 fast field 排，doc 顺序
@@ -417,6 +427,159 @@ impl Searcher {
         Ok(SearchPage { hits, total })
     }
 
+    /// 把查询串翻成两份 tantivy 查询：`.0` 用于检索（含全部操作符条件），`.1` 只含
+    /// 内容词、供摘要/预览高亮用。
+    ///
+    /// 向后兼容的关键分叉在这里：一旦 [`query::parse`] 判定整串**没有**任何操作符，
+    /// 就把原始查询串原样交回老的 `QueryParser`（两份都是），跟从前逐字节一致——
+    /// 短语、`ext:`、多词 AND 等既有行为一个字节都不动。只有确实出现 `path:` /
+    /// `mtime:` / `size:` / `OR` / `NOT` / `-` 时才走下面的结构化拼装。
+    fn build_queries(&self, query_str: &str) -> Result<(Box<dyn Query>, Box<dyn Query>)> {
+        let parsed = query::parse(query_str)?;
+        if !parsed.has_operators {
+            return Ok((
+                self.parser.parse_query(query_str)?,
+                self.parser.parse_query(query_str)?,
+            ));
+        }
+        self.build_from_parsed(&parsed)
+    }
+
+    /// 把结构化的 [`query::Parsed`] 拼成（检索查询, 纯内容高亮查询）。
+    ///
+    /// 组内各条件 AND（`Occur::Must`，排除词走 `Occur::MustNot`），组间 OR
+    /// （`Occur::Should`），落实"AND 优先级高于 OR"。纯内容查询把所有组的正内容词
+    /// 以 `Should` 并起来喂给 SnippetGenerator——高亮只关心"哪些词出现在原文里"，
+    /// 不需要复刻 AND/OR 的结构。
+    fn build_from_parsed(
+        &self,
+        parsed: &query::Parsed,
+    ) -> Result<(Box<dyn Query>, Box<dyn Query>)> {
+        let mut group_queries: Vec<Box<dyn Query>> = Vec::new();
+        // 所有组的正内容词并集，只给高亮用。
+        let mut content_only: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+
+        for group in &parsed.groups {
+            let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+
+            for term in &group.content {
+                // 内容词原样交给主 QueryParser（同时查 name+content，短语/子词都由它处理）。
+                clauses.push((Occur::Must, self.parser.parse_query(term)?));
+                // 再解析一份进高亮集合——Box<dyn Query> 不能克隆，只能重解析一次。
+                content_only.push((Occur::Should, self.parser.parse_query(term)?));
+            }
+            for term in &group.excluded {
+                clauses.push((Occur::MustNot, self.parser.parse_query(term)?));
+            }
+            for path in &group.paths {
+                clauses.push((Occur::Must, self.build_path_query(path)?));
+            }
+            for bound in &group.mtimes {
+                clauses.push((Occur::Must, self.build_mtime_query(bound)));
+            }
+            for bound in &group.sizes {
+                clauses.push((Occur::Must, self.build_size_query(bound)));
+            }
+
+            // 只有排除条件、没有任何正向条件的组（如 `-草稿` 单独成组）：tantivy 的
+            // BooleanQuery 只有 MustNot 会匹配空集，补一个 AllQuery 当正向底座，
+            // 语义才是"全部里排掉这些"。
+            let has_positive = clauses.iter().any(|(occ, _)| *occ != Occur::MustNot);
+            if !has_positive {
+                clauses.push((Occur::Must, Box::new(AllQuery)));
+            }
+            group_queries.push(Box::new(BooleanQuery::new(clauses)));
+        }
+
+        let retrieval: Box<dyn Query> = if group_queries.len() == 1 {
+            // 单组不套 OR 外壳，省一层 BooleanQuery。
+            group_queries.pop().expect("已判定非空")
+        } else {
+            let shoulds = group_queries
+                .into_iter()
+                .map(|q| (Occur::Should, q))
+                .collect();
+            Box::new(BooleanQuery::new(shoulds))
+        };
+
+        // 纯内容查询可能为空（整串只有操作符、没有内容词）：空 BooleanQuery 不匹配任何
+        // term，SnippetGenerator 拿不到高亮词，摘要走"文档开头无高亮"兜底，符合预期。
+        let snippet: Box<dyn Query> = Box::new(BooleanQuery::new(content_only));
+        Ok((retrieval, snippet))
+    }
+
+    /// 把一条 `path:` 操作数拼成 path_text 字段上的查询。
+    ///
+    /// 用跟索引侧同一个 [`crate::tokenizer::MixedTokenizer`] 把操作数切成 token，
+    /// 保证"查"和"建"两侧口径一致（否则大小写/子词边界对不上就搜不到）。带引号的
+    /// 操作数（`path:"my docs"`）且切出多个 token 时按短语（相邻位置）匹配，落实
+    /// "按整体处理"；否则多个 token 之间 AND、单 token 直接一个 TermQuery。
+    fn build_path_query(&self, path: &query::PathTerm) -> Result<Box<dyn Query>> {
+        let mut tokenizer = crate::tokenizer::MixedTokenizer::new();
+        let mut stream = tokenizer.token_stream(&path.operand);
+        let mut terms: Vec<Term> = Vec::new();
+        while stream.advance() {
+            terms.push(Term::from_field_text(
+                self.fields.path_text,
+                &stream.token().text,
+            ));
+        }
+        if terms.is_empty() {
+            bail!(
+                "path: 操作数 \"{}\" 里没有可检索的内容（全是标点/空白？）",
+                path.operand
+            );
+        }
+        if path.phrase && terms.len() >= 2 {
+            return Ok(Box::new(PhraseQuery::new(terms)));
+        }
+        if terms.len() == 1 {
+            let term = terms.pop().expect("刚判过长度为 1");
+            return Ok(Box::new(TermQuery::new(term, IndexRecordOption::Basic)));
+        }
+        let clauses: Vec<(Occur, Box<dyn Query>)> = terms
+            .into_iter()
+            .map(|t| {
+                (
+                    Occur::Must,
+                    Box::new(TermQuery::new(t, IndexRecordOption::Basic)) as Box<dyn Query>,
+                )
+            })
+            .collect();
+        Ok(Box::new(BooleanQuery::new(clauses)))
+    }
+
+    /// 把一条 `mtime:` 过滤拼成 mtime 字段上的 [`RangeQuery`]。mtime 是 i64 FAST 字段，
+    /// tantivy 0.26 的 RangeQuery 直接走 fast field 扫描，不需要额外索引属性。
+    /// 日期已在 [`query`] 层归约成"当天/次日 0 点"两个毫秒边界，这里只按比较符
+    /// 选开闭端（见 [`query::DateBound`] 对"整天"语义的说明）。
+    fn build_mtime_query(&self, bound: &query::DateBound) -> Box<dyn Query> {
+        let field = self.fields.mtime;
+        let start = Term::from_field_i64(field, bound.start_ms);
+        let next = Term::from_field_i64(field, bound.next_ms);
+        let (lower, upper) = match bound.cmp {
+            Cmp::Gt => (Bound::Included(next), Bound::Unbounded),
+            Cmp::Ge => (Bound::Included(start), Bound::Unbounded),
+            Cmp::Lt => (Bound::Unbounded, Bound::Excluded(start)),
+            Cmp::Le => (Bound::Unbounded, Bound::Excluded(next)),
+        };
+        Box::new(RangeQuery::new(lower, upper))
+    }
+
+    /// 把一条 `size:` 过滤拼成 size 字段上的 [`RangeQuery`]。size 是 u64 FAST 字段，
+    /// 同样走 fast field 范围扫描。阈值已在 [`query`] 层折算成字节。
+    fn build_size_query(&self, bound: &query::SizeBound) -> Box<dyn Query> {
+        let field = self.fields.size;
+        let term = Term::from_field_u64(field, bound.bytes);
+        let (lower, upper) = match bound.cmp {
+            Cmp::Gt => (Bound::Excluded(term), Bound::Unbounded),
+            Cmp::Ge => (Bound::Included(term), Bound::Unbounded),
+            Cmp::Lt => (Bound::Unbounded, Bound::Excluded(term)),
+            Cmp::Le => (Bound::Unbounded, Bound::Included(term)),
+        };
+        Box::new(RangeQuery::new(lower, upper))
+    }
+
     /// 索引里的文档总数，给 CLI 的状态输出用。
     ///
     /// 读的是这个 searcher 当前 reader 快照里的数字——是打开（或上一次
@@ -494,12 +657,15 @@ impl Searcher {
         let path_term = Term::from_field_text(self.fields.path, path);
         let path_query = TermQuery::new(path_term, IndexRecordOption::Basic);
 
-        // path 精确匹配 AND 用户查询词：既锁定这一篇文档，又让 SnippetGenerator
-        // 拿到查询词去定位高亮位置。
-        let user_query = self.parser.parse_query(query_str)?;
+        // path 精确匹配 AND 用户查询词的**内容词部分**：既锁定这一篇文档，又让
+        // SnippetGenerator 拿到内容词去定位高亮位置。用内容词那份而不是整串，是为了
+        // 让预览查询词里若带了 path:/mtime:/size: 等操作符时不会把预览搞挂——操作符
+        // 交给搜索层过滤即可，预览只关心"高亮哪些词"。纯词查询下这份就等于老的整串
+        // parse_query，行为不变。
+        let (_retrieval, content_query) = self.build_queries(query_str)?;
         let combined = BooleanQuery::new(vec![
             (Occur::Must, Box::new(path_query.clone()) as Box<dyn Query>),
-            (Occur::Must, user_query),
+            (Occur::Must, content_query),
         ]);
 
         let top_docs = searcher.search(&combined, &TopDocs::with_limit(1).order_by_score())?;
@@ -1119,6 +1285,194 @@ mod tests {
             .expect("路径存在，应该退回开头预览而不是 None");
         assert!(!preview.snippet.is_empty());
         assert!(preview.highlighted.is_empty(), "回退分支不应该产生假的高亮");
+        Ok(())
+    }
+
+    #[test]
+    fn search_path_operator_matches_by_directory_and_filename() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        // 一篇埋在带辨识度名字的子目录里，一篇直接放根下。
+        let sub = target_dir.path().join("zzreportfolder");
+        std::fs::create_dir_all(&sub)?;
+        std::fs::write(sub.join("note.md"), "内容")?;
+        std::fs::write(target_dir.path().join("other.md"), "内容")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        // path: 命中目录名——只应中子目录里那篇。
+        let by_dir = searcher.search("path:zzreportfolder", 10)?;
+        assert_eq!(
+            by_dir.len(),
+            1,
+            "path: 目录名应只中一篇: {by_dir:?}",
+            by_dir = by_dir.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+        assert!(by_dir[0].path.ends_with("note.md"));
+
+        // path: 命中文件名词——only other.md 名里有 other。
+        let by_name = searcher.search("path:other", 10)?;
+        assert_eq!(by_name.len(), 1);
+        assert!(by_name[0].path.ends_with("other.md"));
+
+        // 内容词 AND path: 组合——两篇都含"内容"，但只有子目录那篇路径含 zzreportfolder。
+        let combined = searcher.search("内容 path:zzreportfolder", 10)?;
+        assert_eq!(combined.len(), 1);
+        assert!(combined[0].path.ends_with("note.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn search_path_operator_quoted_phrase_operand() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        // 目录名切成相邻的两个 token（my / docs），验证带引号按整体（相邻短语）匹配。
+        let sub = target_dir.path().join("my docs");
+        std::fs::create_dir_all(&sub)?;
+        std::fs::write(sub.join("a.md"), "内容")?;
+        std::fs::write(target_dir.path().join("b.md"), "内容")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        let hits = searcher.search("path:\"my docs\"", 10)?;
+        assert_eq!(hits.len(), 1, "带引号的 path 操作数应按整体匹配那一篇");
+        assert!(hits[0].path.ends_with("a.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn search_mtime_operator_filters_by_date() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("note.md"), "笔记内容")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        // 文件 mtime 是"现在"，稳定地落在 2000 与 2099 之间，无需 sleep 也确定。
+        assert_eq!(searcher.search("笔记 mtime:>2000-01-01", 10)?.len(), 1);
+        assert_eq!(searcher.search("笔记 mtime:>=2000-01", 10)?.len(), 1);
+        assert_eq!(
+            searcher.search("笔记 mtime:<2000-01-01", 10)?.len(),
+            0,
+            "2000 年之前的过滤应把当前文件排除"
+        );
+        assert_eq!(
+            searcher.search("笔记 mtime:>2099-01-01", 10)?.len(),
+            0,
+            "未来日期之后的过滤应无命中"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn search_size_operator_filters_by_bytes() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("small.md"), "小")?;
+        // 2KB 以上的大文件。
+        std::fs::write(target_dir.path().join("big.md"), "大".repeat(2000))?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        let big = searcher.search("size:>1kb", 10)?;
+        assert_eq!(big.len(), 1, "size:>1kb 只应中大文件");
+        assert!(big[0].path.ends_with("big.md"));
+
+        let small = searcher.search("size:<1kb", 10)?;
+        assert_eq!(small.len(), 1, "size:<1kb 只应中小文件");
+        assert!(small[0].path.ends_with("small.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn search_or_groups_and_within_group_and() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("a.md"), "alpha 内容")?;
+        std::fs::write(target_dir.path().join("b.md"), "beta 内容")?;
+        std::fs::write(target_dir.path().join("c.md"), "gamma 内容")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        // OR：两组各中一篇。
+        let either = searcher.search("alpha OR beta", 10)?;
+        assert_eq!(either.len(), 2, "alpha OR beta 应中两篇");
+
+        // OR 里有一组无命中：只中 alpha 那篇。
+        let one = searcher.search("alpha OR zzznotthere", 10)?;
+        assert_eq!(one.len(), 1);
+        assert!(one[0].path.ends_with("a.md"));
+
+        // 组内 AND 优先于 OR：`alpha 缺失词 OR beta` → 第一组 (alpha AND 缺失词) 无命中，
+        // 只剩第二组 beta。
+        let grouped = searcher.search("alpha zzmissing OR beta", 10)?;
+        assert_eq!(grouped.len(), 1, "AND 组优先，只应中 beta 那篇");
+        assert!(grouped[0].path.ends_with("b.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn search_exclusion_via_dash_and_not() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("keep.md"), "限流 中间件")?;
+        std::fs::write(target_dir.path().join("drop.md"), "限流 废弃")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        for query in ["限流 -废弃", "限流 NOT 废弃"] {
+            let hits = searcher.search(query, 10)?;
+            assert_eq!(hits.len(), 1, "查询 {query:?} 应排除含'废弃'那篇");
+            assert!(hits[0].path.ends_with("keep.md"), "查询 {query:?} 结果不对");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn search_invalid_operand_errors_not_silently_ignored() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("note.md"), "内容")?;
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        // 非法操作数必须报错，而不是静默当普通词——否则用户以为过滤生效了。
+        assert!(searcher.search("mtime:>abc", 10).is_err());
+        assert!(searcher.search("size:>10tb", 10).is_err());
+        assert!(
+            searcher.search("mtime:2026-01-01", 10).is_err(),
+            "缺比较符应报错"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn plain_query_without_operators_is_unchanged_regression() -> Result<()> {
+        // 不含操作符的查询要跟从前逐字节一致：多词 AND + 短语都照旧。
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("both.md"), "限流中间件的实现")?;
+        std::fs::write(target_dir.path().join("one.md"), "限流方案对比")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        // 多词默认 AND（无操作符走老路径）。
+        let and_hits = searcher.search("限流 中间件", 10)?;
+        assert_eq!(and_hits.len(), 1);
+        assert!(and_hits[0].path.ends_with("both.md"));
+
+        // 短语查询照旧。
+        let phrase = searcher.search("\"限流中间件\"", 10)?;
+        assert!(phrase.iter().any(|h| h.path.ends_with("both.md")));
         Ok(())
     }
 

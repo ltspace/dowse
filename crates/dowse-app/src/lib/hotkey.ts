@@ -17,6 +17,11 @@ const CODE_LABELS: Record<string, string> = {
 	Period: '.',
 	Slash: '/',
 	Space: 'Space',
+	// 修饰键：改键时前端把 Windows 键发成 "Super"（Tauri 的 Shortcut 解析认
+	// SUPER/CMD/COMMAND 这几个 token），这里统一显示成用户熟悉的 "Win"。
+	// Ctrl/Alt/Shift 本身已可读，走 labelOf 的原样透传即可，不用在这里列。
+	Super: 'Win',
+	Meta: 'Win',
 	Enter: '↵',
 	Tab: 'Tab',
 	Escape: 'Esc',

@@ -255,8 +255,11 @@ pub(crate) fn add_file_document(
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
 
+    // path_text 是 path 的分词镜像（专供 `path:` 查询），值和 path 完全相同，
+    // 只是走 jieba 分词、不落 STORED；绑一次字符串两处共用，别求两遍。
+    let path_str = path.to_string_lossy().into_owned();
     writer.add_document(doc!(
-        fields.path => path.to_string_lossy().into_owned(),
+        fields.path => path_str.clone(),
         fields.name => name,
         fields.ext => ext,
         fields.content => content,
@@ -264,6 +267,7 @@ pub(crate) fn add_file_document(
         fields.size => size,
         // 文本抽取管线产出 "text"；图片走 add_image_document_with_content，写 "image"。
         fields.kind => "text",
+        fields.path_text => path_str,
     ))?;
     Ok(AddOutcome::Indexed)
 }
@@ -320,14 +324,17 @@ pub(crate) fn add_image_document_with_content(
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
 
+    // path_text：path 的分词镜像，值同 path，专供 `path:` 查询（见文本文档那处说明）。
+    let path_str = path.to_string_lossy().into_owned();
     writer.add_document(doc!(
-        fields.path => path.to_string_lossy().into_owned(),
+        fields.path => path_str.clone(),
         fields.name => name,
         fields.ext => ext,
         fields.kind => "image",
         fields.content => content.to_string(),
         fields.mtime => mtime,
         fields.size => size,
+        fields.path_text => path_str,
     ))?;
     Ok(())
 }

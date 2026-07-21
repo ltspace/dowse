@@ -332,6 +332,67 @@ pub fn set_busy(app: &AppHandle, busy: bool) {
     refresh_menu(app);
 }
 
+/// 透明效果开关的单一实现：托盘"关闭透明效果"菜单项和设置面板的
+/// `set_transparency_enabled` 命令都走这里，`refresh_menu` 保证托盘勾选态
+/// 跟面板永远同步，`dowse://effect-level` 事件让前端 CSS 兜底层跟上。
+/// 传入的是目标状态（不是 toggle），托盘那边自己先算出"取反"再调进来。
+pub fn apply_transparency_enabled(app: &AppHandle, enabled: bool) {
+    let config = app.state::<ConfigState>();
+    let _ = config.set_transparency_enabled(enabled);
+    let tier = config.get().transparency_tier;
+    if let Some(window) = app.get_webview_window("main") {
+        let level = window_fx::apply_with_fallback(&window, enabled, tier);
+        app.state::<EffectLevelState>().set(level);
+        let _ = window.emit("dowse://effect-level", level);
+    }
+    refresh_menu(app);
+}
+
+/// 透明度三档的单一实现：托盘子菜单和设置面板的 `set_transparency_tier`
+/// 命令共用。挡位无论透明效果当前开没开都先落盘；只有开着时才立刻重新申请
+/// Acrylic 把新 alpha 送进 DWM 层。CSS 层的 alpha（`dowse://glass-alpha`）
+/// 不管开没开都广播——纯色档下前端会被 `data-effect='solid'` 覆盖，更新
+/// 变量无副作用，还能保证下次切回玻璃档时前端已是最新值。`refresh_menu`
+/// 让托盘三档勾选态跟面板同步。
+pub fn apply_transparency_tier(app: &AppHandle, tier: TransparencyTier) {
+    let config = app.state::<ConfigState>();
+    let _ = config.set_transparency_tier(tier);
+
+    let transparency_enabled = config.get().transparency_enabled;
+    if transparency_enabled && let Some(window) = app.get_webview_window("main") {
+        let level = window_fx::apply_with_fallback(&window, true, tier);
+        app.state::<EffectLevelState>().set(level);
+        let _ = window.emit("dowse://effect-level", level);
+    }
+
+    let _ = app.emit("dowse://glass-alpha", tier.glass_alpha());
+    refresh_menu(app);
+}
+
+/// 开机自启的单一实现：托盘"开机自启"菜单项和设置面板的 `set_autostart`
+/// 命令共用。传入目标状态（托盘那边先读当前态再取反调进来）。`enable` 落地
+/// 后同步记下 `autostart_user_disabled`——下次启动"默认开"逻辑只在"用户没
+/// 主动关过"时才生效，不能覆盖用户选择。成功/失败都 `refresh_menu` 让托盘
+/// 勾选态跟真实状态一致；失败把错误返回给调用方（命令据此报给前端）。
+pub fn apply_autostart(app: &AppHandle, enable: bool) -> Result<(), String> {
+    let mgr = app.autolaunch();
+    let res = if enable { mgr.enable() } else { mgr.disable() };
+    let out = match res {
+        Ok(()) => {
+            let _ = app
+                .state::<ConfigState>()
+                .set_autostart_user_disabled(!enable);
+            Ok(())
+        }
+        Err(err) => {
+            eprintln!("切换开机自启失败: {err}");
+            Err(format!("{err}"))
+        }
+    };
+    refresh_menu(app);
+    out
+}
+
 fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     let id = event.id().as_ref();
     match id {
@@ -342,32 +403,13 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         }
         MENU_FOLDERS_ADD => add_folder(app),
         MENU_AUTOSTART => {
-            let mgr = app.autolaunch();
-            let enabled = mgr.is_enabled().unwrap_or(false);
-            let toggled = if enabled { mgr.disable() } else { mgr.enable() };
-            match toggled {
-                Ok(()) => {
-                    // 记下用户是主动关的还是主动开的——下次启动时的默认开逻辑
-                    // 只在"用户没关过"的前提下生效，不能覆盖用户的选择。
-                    let _ = app
-                        .state::<ConfigState>()
-                        .set_autostart_user_disabled(enabled);
-                }
-                Err(err) => eprintln!("切换开机自启失败: {err}"),
-            }
-            refresh_menu(app);
+            // 托盘是 toggle 语义：读当前态、取反，交给共用实现落地。
+            let enabled = app.autolaunch().is_enabled().unwrap_or(false);
+            let _ = apply_autostart(app, !enabled);
         }
         MENU_TRANSPARENCY => {
-            let config = app.state::<ConfigState>();
-            let now_enabled = !config.get().transparency_enabled;
-            let _ = config.set_transparency_enabled(now_enabled);
-            let tier = config.get().transparency_tier;
-            if let Some(window) = app.get_webview_window("main") {
-                let level = window_fx::apply_with_fallback(&window, now_enabled, tier);
-                app.state::<EffectLevelState>().set(level);
-                let _ = window.emit("dowse://effect-level", level);
-            }
-            refresh_menu(app);
+            let now_enabled = !app.state::<ConfigState>().get().transparency_enabled;
+            apply_transparency_enabled(app, now_enabled);
         }
         MENU_TRANSPARENCY_LOW | MENU_TRANSPARENCY_MID | MENU_TRANSPARENCY_HIGH => {
             let tier = match id {
@@ -375,25 +417,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
                 MENU_TRANSPARENCY_MID => TransparencyTier::Mid,
                 _ => TransparencyTier::High,
             };
-            let config = app.state::<ConfigState>();
-            let _ = config.set_transparency_tier(tier);
-
-            // 挡位无论透明效果当前开没开都先存下来；只有透明效果开着的时候
-            // 才需要立刻重新申请 Acrylic 把新 alpha 应用到 DWM 那一层——
-            // 关着的话已经是纯色，档位只是记下来等下次重新打开时生效。
-            let transparency_enabled = config.get().transparency_enabled;
-            if transparency_enabled && let Some(window) = app.get_webview_window("main") {
-                let level = window_fx::apply_with_fallback(&window, true, tier);
-                app.state::<EffectLevelState>().set(level);
-                let _ = window.emit("dowse://effect-level", level);
-            }
-
-            // CSS 那一层的 alpha 不管透明效果开没开都要广播给前端——纯色档
-            // 下 app.css 的 `data-effect='solid'` 规则会整体覆盖掉
-            // `--glass-tint`，这里更新变量不会有副作用，且能保证下次切回
-            // 玻璃档时前端已经是最新值，不用等一次额外的往返。
-            let _ = app.emit("dowse://glass-alpha", tier.glass_alpha());
-            refresh_menu(app);
+            apply_transparency_tier(app, tier);
         }
         MENU_QUIT => app.exit(0),
         _ if id.starts_with(FOLDER_REBUILD_PREFIX) => {

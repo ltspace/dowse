@@ -57,11 +57,12 @@ pub struct IndexStatsDto {
     /// `skipped` 里因单文件体积超过规则里的 `max_file_mb` 上限而被跳过的
     /// 那一部分——索引规则面板保存新的体积上限后，用户点"立即重建"，这个
     /// 数字让他们看得见新规则是否真的生效了（而不是自己去猜哪些文件被跳过）。
-    /// `None` 表示这条路径拿不到这份明细：`add_root`/`rebuild_root` 走的是
-    /// `dowse::AddRootStats`，只有 `indexed`/`skipped` 两个字段，没有细分
-    /// 超限跳过这一档（跟全量重建的 `dowse::IndexStats` 不是同一个结构体）。
-    /// 宁可缺省成"不知道"也不编一个假的 0 出来，避免误导成"这次没有文件
-    /// 超限"。
+    /// `None` 表示这条路径拿不到这份明细：托盘单根重建（`rebuild_root`）走的
+    /// 是 `dowse::AddRootStats`，只有 `indexed`/`skipped` 两个字段，没有细分
+    /// 超限跳过这一档（跟全量重建/`add_root` 用的 `dowse::IndexStats` 不是
+    /// 同一个结构体——`add_root` 已切到 `index_root_incremental_with_progress`，
+    /// 这条路径能拿到明细，见 `perform_add_root`）。宁可缺省成"不知道"也不
+    /// 编一个假的 0 出来，避免误导成"这次没有文件超限"。
     pub skipped_oversize: Option<usize>,
 }
 
@@ -183,8 +184,17 @@ fn fail_root_op<T>(app: &AppHandle, index_dir: &Path, err: String) -> Result<T, 
 
 /// 添加一个根：跟 `perform_rebuild` 共用"停旧监听 → 操作 → 换新 Searcher →
 /// 重新挂监听"的节奏和进度事件（`dowse://rebuild-progress`）/状态机制
-/// （`IndexingStatus`），但操作本身走 `dowse::add_root_with_progress`——
-/// 不删现有索引，只对新根做一次目录树 upsert（设计文档"核心操作语义"）。
+/// （`IndexingStatus`），但操作本身走
+/// `dowse::index_root_incremental_with_progress`——不删现有索引，只对新根
+/// 做一次增量补扫（设计文档"核心操作语义"）。
+///
+/// 跟旧版 `dowse::add_root_with_progress`（固定 walkdir 遍历）的区别：这条
+/// 新路径跟全量重建共用同一套卷能力探测——NTFS + 管理员权限时走 MFT 快速
+/// 枚举，拿不到就退回 walkdir——并且返回 [`dowse::IndexStats`]（多一份
+/// `skipped_oversize` 明细），跟 `perform_rebuild` 的报告口径完全对齐，不再
+/// 是 `AddRootStats` 那种"拿不到超限明细"的缺省态。CLI `dowse add`
+/// （`crates/dowse/src/bin/dowse/main.rs` 的 `add_root_cmd`）已经走这条路径，
+/// 这里只是把 GUI 也切过去，两边报告风格保持一致。
 ///
 /// 现开一个 `IndexUpdater::open`：`WatchController::stop()` 已经 join 完常驻
 /// 监听线程，它那份 `IndexUpdater` 连同索引写入端句柄一起释放了，这里开一份
@@ -192,7 +202,6 @@ fn fail_root_op<T>(app: &AppHandle, index_dir: &Path, err: String) -> Result<T, 
 /// 内部自己开写入端是同一个前提条件）。
 pub fn perform_add_root(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDto, String> {
     let index_dir = crate::config::index_dir().map_err(|e| e.to_string())?;
-    let start = Instant::now();
 
     app.state::<WatchController>().stop();
     app.state::<IndexingStatus>().begin_text();
@@ -205,8 +214,11 @@ pub fn perform_add_root(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDt
     };
 
     let app_for_progress = app.clone();
-    let add_result =
-        dowse::add_root_with_progress(&index_dir, &target, &mut updater, move |progress| {
+    let add_result = dowse::index_root_incremental_with_progress(
+        &index_dir,
+        &target,
+        &mut updater,
+        move |progress| {
             let display_path = dowse::display_path(&progress.path.to_string_lossy());
             app_for_progress
                 .state::<IndexingStatus>()
@@ -219,9 +231,14 @@ pub fn perform_add_root(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDt
                 },
             );
             crate::tray::refresh_tooltip(&app_for_progress);
-        });
+        },
+    );
     // 写入端用完立刻放掉——下面开只读 Searcher/重新挂监听都要求索引目录
-    // 没有活着的 IndexWriter 占着。
+    // 没有活着的 IndexWriter 占着（同 CLI add_root_cmd 的写入端互斥约束：
+    // 补扫用完必须先 drop IndexUpdater，OCR 才能跟着走；GUI 这里 OCR 走的是
+    // 后台 worker 池而不是同步 drain，但"先 drop 写入端"这条约束一样适用，
+    // 因为下面的 Searcher::open / WatchController::start 都要求索引目录没有
+    // 活着的 IndexWriter）。
     drop(updater);
 
     let stats = match add_result {
@@ -247,9 +264,9 @@ pub fn perform_add_root(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDt
     Ok(IndexStatsDto {
         indexed: stats.indexed,
         skipped: stats.skipped,
-        seconds: start.elapsed().as_secs_f64(),
+        seconds: stats.seconds,
         ocr_pending,
-        skipped_oversize: None,
+        skipped_oversize: Some(stats.skipped_oversize),
     })
 }
 

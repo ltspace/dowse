@@ -30,10 +30,24 @@ fn detect_lang() -> Lang {
     Lang::En
 }
 
-/// 当前进程生效的界面语言，首次调用时检测一次后缓存。
+/// 当前进程生效的界面语言，首次调用时解析一次后缓存。
 pub fn lang() -> Lang {
     static LANG: OnceLock<Lang> = OnceLock::new();
-    *LANG.get_or_init(detect_lang)
+    *LANG.get_or_init(resolve_lang)
+}
+
+/// 语言解析：设置面板可以把界面语言钉死（写进 `config.lang`），config 是
+/// 权威存储。这里在进程首次取语言时读一次配置——显式选了 "zh"/"en" 就用它，
+/// "auto"/没配过才回落到系统 UI 语言检测。只解析一次（`OnceLock` 缓存），
+/// 运行中改了配置也不热切，跟设置面板"改语言重启后生效"的交互一致。这里读
+/// 文件（`config::load`）而不是 `ConfigState`，是为了让不持有 `AppHandle` 的
+/// `strings()` 调用点也能用；首次之外不再重复读，多一次启动期文件读可忽略。
+fn resolve_lang() -> Lang {
+    match crate::config::load().lang.as_str() {
+        "zh" => Lang::Zh,
+        "en" => Lang::En,
+        _ => detect_lang(),
+    }
 }
 
 /// 所有 Rust 侧界面可见文案的一张表。字段全是 `&'static str`，带插值的地方

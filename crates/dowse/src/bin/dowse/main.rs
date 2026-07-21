@@ -36,7 +36,11 @@ enum Command {
     },
     /// 搜索已建好的索引
     Search {
-        /// 查询词，支持多个词（AND）和 "短语"
+        /// 查询词，支持多个词（AND）和 "短语"。还支持内联操作符：path:关键词（按
+        /// 路径）、mtime:>2026-01-01 / mtime:<=2026-07（按修改日期，比较符 > >= < <=，
+        /// 日期 YYYY-MM-DD 或 YYYY-MM）、size:>10mb / size:<500kb（按体积，单位
+        /// kb/mb/gb）、大写 OR 分组（组内空格为 AND）、-词 或 NOT 词 排除；带空格
+        /// 的操作数加引号，如 path:"我的 文档"
         query: Vec<String>,
         /// 最多返回几条
         #[arg(short = 'n', long, default_value_t = 10)]

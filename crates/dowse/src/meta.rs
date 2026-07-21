@@ -16,9 +16,14 @@ use crate::cursor::{UsnCursor, VolumeKey};
 /// 补上 FAST 属性（排序器需要）、新增 kind 字段（为里程碑 4 OCR 预留），
 /// 再从 v2 升到 v3。v4 换了内容分词器：汉字仍交 jieba，非汉字改成按字母数字
 /// 切词并统一小写——token 边界跟 v3 不一样，旧倒排索引搜不准，必须重建。
+/// v5 为查询语法升级新增 path_text 字段（path 的 jieba 分词镜像），让查询串里的
+/// `path:关键词` 能在查询层按路径子串命中——旧索引里没有这个字段，搜 `path:` 只会
+/// 空转，所以也算不兼容变更，从 v4 升到 v5。（mtime:/size: 的范围过滤没有另立字段：
+/// mtime/size 从 v3 起就是 FAST，tantivy 0.26 的 RangeQuery 直接走 fast field 扫描，
+/// 无需额外索引属性。）
 /// 打开索引时版本对不上就要求重建，不做静默迁移、不做自动升级——旧字段布局
 /// 搜出来的结果不可靠，宁可让用户重建一次。
-pub(crate) const SCHEMA_VERSION: u32 = 4;
+pub(crate) const SCHEMA_VERSION: u32 = 5;
 
 /// 索引目录旁的元数据：schema 版本号 + 已注册的索引根目录列表 + 每个卷的
 /// USN 游标（里程碑 6）。
@@ -330,6 +335,37 @@ mod tests {
         assert!(
             err.to_string().contains("重建"),
             "错误信息应提示用户重建索引，实际: {err}"
+        );
+        Ok(())
+    }
+
+    /// 查询语法升级把 schema 升到 v5（新增 path_text 字段）。用上一版 v4 建的旧索引
+    /// 打开时必须报错、并明确引导重建，不能拿缺字段的旧布局硬搜出不可靠结果。
+    #[test]
+    fn opening_previous_schema_version_index_errors_with_rebuild_hint() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("note.md"), "内容")?;
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+
+        // 把 meta 改回上一版版本号，模拟"程序升级了、索引还是旧的"。
+        save_meta(
+            index_dir.path(),
+            &IndexMeta {
+                schema_version: SCHEMA_VERSION - 1,
+                roots: vec![target_dir.path().to_path_buf()],
+                usn_cursors: HashMap::new(),
+            },
+        )?;
+
+        // Searcher 不实现 Debug，用 match 取错误（不能用 expect_err）。
+        let err = match crate::Searcher::open(index_dir.path()) {
+            Ok(_) => panic!("旧 schema 版本打开索引应报错"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_string().contains("重建"),
+            "错误信息应引导用户重建索引，实际: {err}"
         );
         Ok(())
     }

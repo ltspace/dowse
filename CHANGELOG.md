@@ -6,6 +6,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Inline query operators, shared by CLI, overlay, and MCP alike: `path:关键词`
+  (match on the file path), `mtime:>2026-01-01` / `mtime:<=2026-07` (modified
+  date, `> >= < <=`, dates as `YYYY-MM-DD` or `YYYY-MM`), `size:>10mb` /
+  `size:<500kb` (units kb/mb/gb, 1024-based), uppercase `OR` for grouping
+  (space-separated terms inside a group stay AND), and `-term` / `NOT term`
+  to exclude. Queries without operators behave exactly as before, and
+  malformed operands (e.g. `mtime:>abc`) return a clear error instead of
+  silently degrading into an ordinary search term.
+- The overlay's `Ctrl+,` panel grew into a full settings panel with two
+  tabs. General: rebind the summon hotkey visually (capture a combination,
+  instant re-registration with rollback if the new key is taken),
+  transparency effect and tier, autostart, and interface language
+  (follow system / 中文 / English, applied on restart) — all previously
+  tray-only or config-file-only. Index rules keep their existing tab.
+- The overlay's "Add folder" now uses the same incremental path as
+  `dowse add`: only the new folder is scanned (NTFS MFT fast enumeration
+  included), other roots' documents stay untouched, and the completion
+  report includes the oversize-skip count.
+
+### Changed
+
+- The index schema is now version 5 (a tokenized path field backs the new
+  `path:` operator). Existing indexes must be rebuilt once after upgrading;
+  opening an older index reports a clear error asking for a rebuild.
+
 ## [0.9.0] - 2026-07-19
 
 ### Added

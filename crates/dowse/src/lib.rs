@@ -85,6 +85,7 @@ mod mft;
 mod ocr;
 mod ocr_queue;
 mod ocr_worker;
+mod query;
 mod reconcile;
 mod roots;
 mod rules;
@@ -134,6 +135,13 @@ use tantivy::schema::{
 /// 本版一律写 "text"，图片管线接入后会写 "image"，让筛选/展示逻辑将来
 /// 不需要再摸一遍全部索引。三个字段变化叠在一起，schema 版本从里程碑 3 的
 /// v2 一次性升到 v3（见 meta.rs），只需要用户重建一次索引就把两个未来都接上。
+///
+/// `path_text` 是查询语法升级（schema v5）新加的字段：查询串里的 `path:关键词`
+/// 要在**查询层**按路径子串命中（好让匹配总数、翻页都准确，不做拿到结果再后过滤
+/// 的近似），而原有的 `path` 是 STRING（整条路径当**单个不分词的 term** 存），
+/// 只能精确/前缀匹配，没法命中路径中段的目录名。于是单独加一个跟 name/content
+/// 同款 jieba 分词、但**不落 STORED**（检索用，取回展示仍读 `path`）的镜像字段，
+/// 让路径按与正文一致的词/子词粒度可搜。加字段是不兼容变更，schema 从 v4 升到 v5。
 pub(crate) struct Fields {
     pub path: tantivy::schema::Field,
     pub name: tantivy::schema::Field,
@@ -142,21 +150,29 @@ pub(crate) struct Fields {
     pub mtime: tantivy::schema::Field,
     pub size: tantivy::schema::Field,
     pub kind: tantivy::schema::Field,
+    /// 路径的分词镜像（jieba 分词、INDEXED 不 STORED），专供 `path:` 查询按
+    /// 路径子串命中；取回展示仍用 `path`。
+    pub path_text: tantivy::schema::Field,
 }
 
 /// 定义 schema：path/ext/kind 原样存（不分词），name/content 走 jieba 分词，
 /// mtime/size 是 FAST + STORED 的数值字段——FAST 供排序器用列式存储直接扫，
 /// STORED 供对账遍历读回来比对、也顺手给搜索结果展示用。
 /// content 必须 STORED，否则搜索命中后没有原文可做摘要高亮。
+/// path_text 是 path 的 jieba 分词镜像，只 INDEXED 不 STORED——它只服务
+/// `path:` 查询的路径子串匹配，取回展示照旧读 STORED 的 path，没必要再存一份。
 pub(crate) fn build_schema() -> (Schema, Fields) {
     let mut builder: SchemaBuilder = Schema::builder();
 
     let jieba_indexing = TextFieldIndexing::default()
         .set_tokenizer("jieba")
         .set_index_option(IndexRecordOption::WithFreqsAndPositions);
+    // name/content 要分词 + STORED（命中后取原文做摘要高亮）；path_text 同一套
+    // 分词但只 INDEXED 不 STORED（见上：取回展示读 path）。共用同一份 indexing 配置。
     let jieba_text = TextOptions::default()
-        .set_indexing_options(jieba_indexing)
+        .set_indexing_options(jieba_indexing.clone())
         .set_stored();
+    let jieba_indexed_only = TextOptions::default().set_indexing_options(jieba_indexing);
 
     let fields = Fields {
         path: builder.add_text_field("path", STRING | STORED),
@@ -166,6 +182,7 @@ pub(crate) fn build_schema() -> (Schema, Fields) {
         mtime: builder.add_i64_field("mtime", STORED | FAST),
         size: builder.add_u64_field("size", STORED | FAST),
         kind: builder.add_text_field("kind", STRING | STORED),
+        path_text: builder.add_text_field("path_text", jieba_indexed_only),
     };
     (builder.build(), fields)
 }
