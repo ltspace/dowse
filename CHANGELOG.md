@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-21
+
 ### Added
 
 - Inline query operators, shared by CLI, overlay, and MCP alike: `path:关键词`
@@ -364,7 +366,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
 - The index root directory is no longer skipped by exclusion rules.
 
-[Unreleased]: https://github.com/ltspace/dowse/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/ltspace/dowse/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/ltspace/dowse/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/ltspace/dowse/compare/v0.8.3...v0.9.0
+[0.8.3]: https://github.com/ltspace/dowse/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/ltspace/dowse/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/ltspace/dowse/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/ltspace/dowse/compare/v0.7.0...v0.8.0

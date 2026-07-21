@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "dowse",
   "display_name": "dowse — Local File Search",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Fast local full-text search over your Windows files: file names, document contents, and OCR'd screenshot text.",
   "long_description": "dowse gives Claude read-only access to a full-text index of your local files — file names, document contents (PDF, DOCX, XLSX, PPTX, text, and code), and text inside screenshots (Windows OCR). Search is powered by tantivy with jieba Chinese tokenization, so both English and Chinese content are searchable.\n\nThis extension exposes three read-only tools: `search` (ranked full-text hits), `preview` (long-form context around a match), and `index_status` (index overview). It never modifies your files.\n\n**Note:** the index itself is built and maintained by the dowse desktop app or the `dowse` CLI (https://github.com/ltspace/dowse). Install dowse and index your folders first; this extension then lets Claude search what you indexed. Everything stays on your machine — no network requests, no telemetry.",
   "author": {

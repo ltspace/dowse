@@ -3,7 +3,7 @@
   "name": "io.github.ltspace/dowse",
   "title": "dowse",
   "description": "Fast local full-text search for Windows files (tantivy + jieba), exposed to AI agents over MCP.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "websiteUrl": "https://lter.space/dowse/en/",
   "repository": {
     "url": "https://github.com/ltspace/dowse",
@@ -14,7 +14,7 @@
       "registryType": "cargo",
       "registryBaseUrl": "https://crates.io",
       "identifier": "dowse",
-      "version": "0.9.0",
+      "version": "0.10.0",
       "transport": {
         "type": "stdio"
       },
