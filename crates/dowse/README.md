@@ -1,6 +1,8 @@
 # dowse（问渠）
 
-**Windows 本地文件极速全文搜索**的命令行工具，基于 [tantivy](https://github.com/quickwit-oss/tantivy) + jieba 中文分词。同时可作为 [MCP](https://modelcontextprotocol.io) 服务，供 AI 客户端调用本地搜索能力。
+**Windows 本地文件内容全文搜索**的命令行工具，搜索文件名、PDF / Office 正文与图片 OCR 文字，基于 [tantivy](https://github.com/quickwit-oss/tantivy) + jieba 中文分词。同时可作为 [MCP](https://modelcontextprotocol.io) 服务，供 AI 客户端调用本地搜索能力。
+
+[产品官网](https://lter.space/dowse/) · [Windows 搜索文件内容指南](https://lter.space/dowse/windows-file-content-search/) · [GitHub](https://github.com/ltspace/dowse)
 
 > ⚙️ **平台**：主要面向 **Windows**（NTFS/USN 快速索引、OCR 均为 Windows 专属能力）。
 > 其他平台可编译安装，核心全文检索仍可用，但上述加速/OCR 功能会自动降级停用。

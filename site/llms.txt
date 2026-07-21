@@ -1,0 +1,29 @@
+# Dowse（问渠）
+
+> Open-source local full-text file search for Windows. Dowse searches file names, PDF and Office document contents, source code, and text inside images through offline Windows OCR. It uses tantivy, jieba Chinese tokenization, a native hotkey overlay, and read-only MCP tools. Files and indexes stay on the user's computer.
+
+## Primary pages
+
+- [Chinese product page](https://lter.space/dowse/): Features, privacy model, comparison, installation, MCP setup, and FAQ.
+- [English product page](https://lter.space/dowse/en/): English overview of local Windows file-content search, OCR, and MCP.
+- [Windows file-content search guide](https://lter.space/dowse/windows-file-content-search/): How Windows Search, Everything content queries, dnGrep, and persistent full-text indexes differ.
+- [Source repository](https://github.com/ltspace/dowse): Rust/Tauri/Svelte source, issues, releases, and design documents.
+- [Latest Windows release](https://github.com/ltspace/dowse/releases/latest): Installer and checksums.
+- [Rust API documentation](https://docs.rs/dowse): Library and CLI documentation.
+- [Privacy statement](https://github.com/ltspace/dowse/blob/main/PRIVACY.md): Local storage, no telemetry, and MCP boundaries.
+
+## Verified capabilities
+
+- Persistent full-text index over file names and extracted content.
+- Text and code files with UTF-8/GBK encoding detection.
+- Text extraction from PDF, DOCX, XLSX, and PPTX.
+- Offline OCR for PNG, JPG/JPEG, WebP, and BMP on Windows.
+- jieba tokenization and BM25 ranking for Chinese content.
+- Optional NTFS MFT enumeration and USN Journal updates; normal indexing works without administrator rights.
+- Read-only MCP tools: `search`, `preview`, and `index_status`.
+
+## Important limitations
+
+- Image-only scanned PDFs are not currently OCRed page by page; PDF search uses the existing text layer.
+- Legacy DOC, XLS, and PPT formats are not the same as supported DOCX, XLSX, and PPTX formats.
+- Windows OCR and the NTFS fast path are Windows-specific; the core search library can compile elsewhere with those capabilities disabled.

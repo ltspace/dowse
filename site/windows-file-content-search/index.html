@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Windows 怎么搜索文件内容？全文搜索、PDF、Office 与 OCR 指南</title>
+  <meta name="description" content="Windows 搜索文件内容的完整指南：配置系统内容索引、使用 Everything content:、选择全文索引工具，并搜索 PDF、Word、Excel、代码和截图 OCR 文字。">
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+  <meta name="theme-color" content="#0b0c0e">
+  <link rel="canonical" href="https://lter.space/dowse/windows-file-content-search/">
+  <link rel="sitemap" type="application/xml" href="https://lter.space/dowse/sitemap.xml">
+  <link rel="icon" href="../assets/icon.png" type="image/png">
+  <link rel="stylesheet" href="../assets/content.css">
+  <meta property="og:type" content="article">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:url" content="https://lter.space/dowse/windows-file-content-search/">
+  <meta property="og:title" content="Windows 怎么搜索文件内容？全文搜索、PDF、Office 与 OCR 指南">
+  <meta property="og:description" content="从 Windows 系统索引、Everything 到持久全文索引，选择适合自己的文件内容搜索方法。">
+  <meta property="og:image" content="https://lter.space/dowse/assets/hero.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Windows 怎么搜索文件内容？全文搜索、PDF、Office 与 OCR 指南",
+    "description": "介绍 Windows 搜索文件内容的三种路径，以及 PDF、Office、代码与图片 OCR 的工具选择。",
+    "datePublished": "2026-07-21",
+    "dateModified": "2026-07-21",
+    "inLanguage": "zh-CN",
+    "author": {"@type": "Person", "name": "ltspace", "url": "https://github.com/ltspace"},
+    "publisher": {"@type": "Organization", "name": "Dowse", "url": "https://lter.space/dowse/"},
+    "mainEntityOfPage": "https://lter.space/dowse/windows-file-content-search/",
+    "image": "https://lter.space/dowse/assets/hero.png"
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {"@type": "ListItem", "position": 1, "name": "Dowse", "item": "https://lter.space/dowse/"},
+      {"@type": "ListItem", "position": 2, "name": "Windows 搜索文件内容", "item": "https://lter.space/dowse/windows-file-content-search/"}
+    ]
+  }
+  </script>
+</head>
+<body>
+  <nav class="site-nav"><div class="wrap">
+    <a class="brand" href="../">dowse / 问渠</a>
+    <a href="#methods">三种方法</a>
+    <a href="#choose">怎么选</a>
+    <a href="#faq">常见问题</a>
+    <a href="https://github.com/ltspace/dowse">GitHub ↗</a>
+  </div></nav>
+
+  <header><div class="wrap">
+    <div class="eyebrow">Windows · File Content Search</div>
+    <h1>Windows 怎么搜索文件内容？</h1>
+    <p class="lead">文件名记不住，只记得 Word 里的一句话、PDF 中的项目名称，甚至截图上的几个字。这篇指南把 Windows 自带索引、Everything 内容查询和持久化全文索引三条路径讲清楚。</p>
+    <p class="meta">发布于 2026-07-21 · 约 8 分钟阅读</p>
+  </div></header>
+
+  <main class="wrap"><article>
+    <div class="toc">
+      <b>本文内容</b>
+      <ol>
+        <li><a href="#why">为什么搜得到文件名，却搜不到内容</a></li>
+        <li><a href="#methods">Windows 搜索文件内容的三种方法</a></li>
+        <li><a href="#formats">PDF、Office、代码与截图有什么不同</a></li>
+        <li><a href="#choose">应该选择哪一种工具</a></li>
+      </ol>
+    </div>
+
+    <h2 id="why">为什么 Windows 经常搜不到文件内容？</h2>
+    <p>“文件搜索”其实包含两件不同的事：按<strong>文件名和路径</strong>定位，以及按<strong>文件正文</strong>全文检索。前者只需要保存一小段元数据；后者必须先解析 PDF、Word、Excel 等格式，再为正文建立索引，或者在每次查询时重新扫描文件。</p>
+    <p>Windows Search 可以为受支持的文件内容建立索引，但实际结果取决于索引范围、文件类型设置和对应的 IFilter。文件放在未索引目录、文件类型仅选择“索引属性”，或扫描版 PDF 本身没有文本层时，都可能出现“明明写在文件里却搜不到”的情况。</p>
+
+    <h2 id="methods">Windows 搜索文件内容的三种方法</h2>
+
+    <h3>方法一：配置 Windows Search，适合不想安装软件</h3>
+    <ol class="steps">
+      <li>打开“设置 → 隐私和安全性 → 搜索 Windows”，根据需要选择“增强”索引模式，或把常用资料目录加入索引范围。</li>
+      <li>打开“高级索引选项 → 高级 → 文件类型”，确认目标扩展名选择了“索引属性和文件内容”。</li>
+      <li>等待初次索引完成，再从文件资源管理器或任务栏搜索正文关键词。</li>
+    </ol>
+    <p>优点是系统自带、维护成本低；缺点是格式覆盖和结果一致性受 Windows 配置影响。微软的<a href="https://support.microsoft.com/zh-CN/windows/search-indexing-in-windows-da061c83-af6b-095c-0f7a-4dfecda4d15a">搜索索引说明</a>可以用来检查当前模式。</p>
+
+    <h3>方法二：使用 Everything 的 <code>content:</code>，适合偶尔查一次</h3>
+    <p>Everything 的核心优势是极快的文件名索引。需要查正文时，可以使用 <code>content:</code>、<code>utf8content:</code> 等查询语法按需扫描文件：</p>
+    <pre><code>ext:txt content:"项目代号"
+path:D:\notes ext:md utf8content:"rate limiter"</code></pre>
+    <p>这种方式不需要额外维护正文索引，适合范围明确、频率不高的查询；但对大量 PDF、Office 文件或整块磁盘反复搜索时，逐次读取内容会比持久化全文索引慢。</p>
+
+    <h3>方法三：建立持久全文索引，适合经常按内容找文件</h3>
+    <p>如果你频繁搜索大量资料，或者需要中文分词、结果排序、内容预览和截图 OCR，更合适的方式是先为正文建立倒排索引。之后每次查询只访问索引，不必重新打开所有原文件。</p>
+    <div class="callout"><p><strong>Dowse（问渠）</strong>就是这一类工具：为文件名和正文建立 tantivy 索引，用 jieba 处理中文，并调用 Windows 自带 OCR 识别图片文字。整个过程在本机完成。</p></div>
+    <p>安装桌面版后，选择要索引的资料目录；以后按 <code>Alt+`</code> 呼出搜索浮窗。命令行用户也可以这样使用：</p>
+    <pre><code>dowse index D:\notes
+dowse search 分布式 限流器
+dowse search "季度报告" path:reports mtime:&gt;2026-01-01
+dowse search 合同 size:&gt;10mb -草稿</code></pre>
+
+    <h2 id="formats">不同文件格式需要不同处理</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>文件类型</th><th>搜索方式</th><th>常见问题</th></tr></thead>
+      <tbody>
+        <tr><td>TXT、Markdown、代码</td><td>检测编码后直接建立全文索引</td><td>老文件可能是 GBK；只按 UTF-8 读取会乱码或漏索引</td></tr>
+        <tr><td>PDF</td><td>提取现有文本层</td><td>纯扫描 PDF 没有文本层，需要先 OCR；Dowse 当前图片 OCR 不等于扫描 PDF OCR</td></tr>
+        <tr><td>DOCX、XLSX、PPTX</td><td>解析 Office Open XML 中的正文</td><td>旧版 DOC/XLS/PPT 与加密文档需要其他解析器</td></tr>
+        <tr><td>PNG、JPG、WebP、BMP</td><td>Windows.Media.Ocr 离线识别后入索引</td><td>需要系统安装可用的 OCR 语言包</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="choose">Windows 文件内容搜索工具怎么选？</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>你的需求</th><th>优先选择</th><th>原因</th></tr></thead>
+      <tbody>
+        <tr><td>只按文件名找东西</td><td>Everything</td><td>文件名索引速度和成熟度出色</td></tr>
+        <tr><td>偶尔在明确目录查一句话</td><td>Everything content: 或 dnGrep</td><td>无需长期维护正文索引；dnGrep 还适合正则与替换</td></tr>
+        <tr><td>不想安装第三方软件</td><td>Windows Search</td><td>系统内置，配置好索引范围即可使用</td></tr>
+        <tr><td>频繁搜索 PDF、Office、代码和截图</td><td>Dowse 或其他全文索引工具</td><td>一次解析、反复快速查询，并提供正文摘要</td></tr>
+        <tr><td>需要 AI 检索本地文件</td><td>Dowse MCP</td><td>向支持 MCP 的客户端提供只读搜索和预览工具</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="cta">
+      <a class="button" href="https://github.com/ltspace/dowse/releases/latest">下载 Dowse Windows 版</a>
+      <a class="button secondary" href="../">查看功能与隐私说明</a>
+    </div>
+
+    <h2 id="faq">常见问题</h2>
+    <div class="faq">
+      <details><summary>Windows 资源管理器能搜索 Word 和 PDF 内容吗？</summary><p>可以，但前提是目录已纳入索引、文件类型配置为索引内容，并且系统具备对应的内容过滤器。扫描版 PDF 如果没有文字层，还需要 OCR。</p></details>
+      <details><summary>Everything 能搜索文件内容吗？</summary><p>能。Everything 提供 <code>content:</code> 等语法，但它的高速索引主要面向文件名；正文查询通常需要读取匹配范围内的文件，因此应尽量配合路径和扩展名过滤。</p></details>
+      <details><summary>本地全文索引会泄露隐私吗？</summary><p>取决于软件实现。使用 Dowse 时，索引与 OCR 结果保存在本机，没有遥测或云端解析；不过索引本身包含原文信息，仍应像原文件一样保护 Windows 账户与磁盘。</p></details>
+      <details><summary>为什么图片里的文字搜不到？</summary><p>普通全文搜索只处理文本。必须先用 OCR 把像素转换成文字再入索引，并确保 Windows 中安装了适合图片语言的 OCR 语言包。</p></details>
+    </div>
+  </article></main>
+
+  <footer><div class="wrap">
+    <span>Dowse（问渠）· 开源 Windows 本地全文搜索</span>
+    <a href="../">官网</a><a href="../en/" hreflang="en">English</a><a href="https://github.com/ltspace/dowse">源码</a><a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">隐私</a>
+  </div></footer>
+</body>
+</html>

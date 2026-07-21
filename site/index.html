@@ -3,13 +3,113 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>问渠 dowse — Windows 本地全文搜索</title>
-<meta name="description" content="Windows 本地全文搜索:文件名、文档内容、截图 OCR,毫秒级返回,零网络请求。内置只读 MCP server,让 AI 检索你的硬盘。">
-<link rel="icon" href="assets/icon.png">
-<meta property="og:title" content="问渠 dowse — Windows 本地全文搜索">
-<meta property="og:description" content="文件名、文档内容、截图里的文字——快捷键呼出,毫秒级返回。">
-<meta property="og:image" content="https://lter.space/dowse/assets/hero.png">
+<title>Dowse（问渠）— Windows 本地文件内容全文搜索工具</title>
+<meta name="description" content="Dowse 是开源的 Windows 本地文件全文搜索工具，可搜索文件名、PDF 与 Office 文档内容，并用离线 OCR 搜索截图文字；支持中文分词、快捷键浮窗和只读 MCP。">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
+<meta name="author" content="ltspace">
+<meta name="theme-color" content="#0B0C0E">
 <link rel="canonical" href="https://lter.space/dowse/">
+<link rel="alternate" hreflang="zh-CN" href="https://lter.space/dowse/">
+<link rel="alternate" hreflang="en" href="https://lter.space/dowse/en/">
+<link rel="alternate" hreflang="x-default" href="https://lter.space/dowse/en/">
+<link rel="sitemap" type="application/xml" href="https://lter.space/dowse/sitemap.xml">
+<link rel="icon" href="assets/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Dowse（问渠）">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:url" content="https://lter.space/dowse/">
+<meta property="og:title" content="Dowse（问渠）— Windows 本地文件内容全文搜索工具">
+<meta property="og:description" content="搜索文件名、PDF 与 Office 文档内容，以及截图里的文字。开源、全程本地，支持中文分词与只读 MCP。">
+<meta property="og:image" content="https://lter.space/dowse/assets/hero.png">
+<meta property="og:image:width" content="1290">
+<meta property="og:image:height" content="839">
+<meta property="og:image:alt" content="Dowse Windows 本地全文搜索浮窗与文件内容预览">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Dowse — Windows 本地文件内容全文搜索工具">
+<meta name="twitter:description" content="搜索 PDF、Office、代码和截图文字；开源、离线、支持中文与 MCP。">
+<meta name="twitter:image" content="https://lter.space/dowse/assets/hero.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://lter.space/dowse/#software",
+  "name": "Dowse（问渠）",
+  "alternateName": ["dowse", "问渠"],
+  "url": "https://lter.space/dowse/",
+  "downloadUrl": "https://github.com/ltspace/dowse/releases/latest",
+  "codeRepository": "https://github.com/ltspace/dowse",
+  "image": "https://lter.space/dowse/assets/hero.png",
+  "description": "开源的 Windows 本地文件内容全文搜索工具，可搜索文件名、PDF、Office 文档和截图 OCR 文字，并通过只读 MCP 为 AI 提供本地检索。",
+  "applicationCategory": "UtilitiesApplication",
+  "applicationSubCategory": "Desktop search",
+  "operatingSystem": "Windows 10, Windows 11",
+  "isAccessibleForFree": true,
+  "license": "https://github.com/ltspace/dowse/blob/main/LICENSE-MIT",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "featureList": [
+    "文件名与文件内容全文搜索",
+    "PDF、DOCX、XLSX、PPTX 内容索引",
+    "PNG、JPG、WebP、BMP 图片离线 OCR",
+    "jieba 中文分词与 BM25 排序",
+    "Windows 全局快捷键搜索浮窗",
+    "只读 MCP 本地文件搜索"
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Dowse 能搜索哪些文件内容？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Dowse 可以索引文件名、纯文本、Markdown、代码、PDF，以及 DOCX、XLSX、PPTX 等 Office Open XML 文档；在 Windows 上还能离线识别 PNG、JPG、WebP、BMP 图片中的文字。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Dowse 会上传本地文件或索引吗？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "不会。Dowse 的文件解析、全文索引、中文分词、OCR 与搜索均在本机完成，不包含遥测。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Dowse 和 Everything 有什么区别？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Everything 以极快的文件名索引见长，也能按内容扫描文件；Dowse 则为文件正文建立持久全文索引，并加入中文分词、图片 OCR、内容预览和 MCP，更适合频繁按文档内容查找文件。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "使用 Dowse 必须以管理员身份运行吗？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "不需要。普通权限下可以正常建立索引和搜索；在 NTFS 卷并具备管理员权限时，Dowse 可以启用 MFT 与 USN Journal 快速路径。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "AI 可以搜索 Dowse 的本地索引吗？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "可以。dowse mcp 提供 search、preview 和 index_status 三个只读 MCP 工具，让支持 MCP 的 AI 客户端检索已经建立的本地索引。"
+      }
+    }
+  ]
+}
+</script>
 <style>
 :root{
   --bg:#0B0C0E;
@@ -47,6 +147,7 @@ nav{position:sticky;top:0;background:color-mix(in srgb,var(--bg) 88%,transparent
 .brand b{font-weight:600}
 .brand span{color:var(--muted);margin-left:8px;font-size:12px}
 .nav-links{margin-left:auto;display:flex;gap:20px;font-size:12.5px}
+.brand,.nav-links,.nav-links a{flex:0 0 auto}
 .nav-links a{color:var(--muted)}
 .nav-links a:hover{color:var(--amber-hi)}
 
@@ -171,6 +272,23 @@ pre.code .a{color:var(--amber-hi)}
 .way .act button:hover,.way .act a:hover{border-color:var(--amber-dim);color:var(--amber-hi)}
 .note{margin-top:18px;font-size:12.5px;color:var(--faint)}
 
+/* comparison + FAQ:需求型正文,也是搜索引擎理解产品定位的语义锚点 */
+.compare-wrap{overflow-x:auto;border-top:1px solid var(--line)}
+.compare{width:100%;border-collapse:collapse;min-width:680px;font-size:13.5px}
+.compare th,.compare td{padding:16px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+.compare th{font-family:var(--mono);font-size:12px;color:var(--amber);font-weight:500;letter-spacing:.06em}
+.compare td:first-child{color:var(--text);font-weight:600;white-space:nowrap}
+.compare td{color:var(--muted)}
+.compare strong{color:var(--amber-hi);font-weight:500}
+.more-link{display:inline-block;margin-top:22px;font-family:var(--mono);font-size:13px;color:var(--amber-hi);border-bottom:1px solid var(--amber-dim)}
+.faq{border-top:1px solid var(--line)}
+.faq details{border-bottom:1px solid var(--line);padding:20px 0}
+.faq summary{cursor:pointer;font-size:15px;font-weight:600;list-style:none}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::before{content:"+";display:inline-block;width:2em;font-family:var(--mono);color:var(--amber)}
+.faq details[open] summary::before{content:"−"}
+.faq p{margin:12px 0 0 2em;color:var(--muted);font-size:14px;max-width:58em}
+
 /* footer */
 footer{margin-top:110px;border-top:1px solid var(--line);padding:30px 0 64px}
 .foot{display:flex;flex-wrap:wrap;gap:10px 28px;font-size:12.5px;color:var(--faint)}
@@ -179,6 +297,8 @@ footer{margin-top:110px;border-top:1px solid var(--line);padding:30px 0 64px}
 .foot .links a:hover{color:var(--amber-hi)}
 
 @media (max-width:760px){
+  nav{overflow:hidden}
+  .nav-in{width:100%;padding:16px 20px;overflow-x:auto}
   .features{grid-template-columns:1fr}
   .mcp-grid{grid-template-columns:1fr;gap:26px}
   .way{grid-template-columns:1fr;gap:10px}
@@ -194,16 +314,19 @@ footer{margin-top:110px;border-top:1px solid var(--line);padding:30px 0 64px}
   <span class="brand"><b>dowse</b><span>问渠</span></span>
   <div class="nav-links">
     <a href="#features">功能</a>
+    <a href="#compare">对比</a>
     <a href="#mcp">MCP</a>
     <a href="#install">安装</a>
+    <a href="windows-file-content-search/">教程</a>
+    <a href="en/" hreflang="en" lang="en">EN</a>
     <a href="https://github.com/ltspace/dowse">GitHub ↗</a>
   </div>
 </div></nav>
 
 <header class="wrap hero">
   <p class="eyebrow">WINDOWS · 本地 · 开源</p>
-  <h1>文件名、文档内容、截图里的文字,<br><span class="em">快捷键呼出,毫秒级返回。</span></h1>
-  <p class="sub">tantivy 倒排索引 + jieba 中文分词 + Windows OCR。索引住在你的硬盘上,答案也是——零网络请求。</p>
+  <h1>Windows 本地文件全文搜索，<br><span class="em">文件内容与截图文字，毫秒级找到。</span></h1>
+  <p class="sub">Dowse（问渠）是一款开源的 Windows 文件内容搜索工具：tantivy 倒排索引 + jieba 中文分词 + Windows 离线 OCR。索引住在你的硬盘上，答案也是——零网络请求。</p>
   <div class="cta-row">
     <a class="btn" href="https://github.com/ltspace/dowse/releases/latest">下载 Windows 安装包</a>
     <button class="btn ghost" data-copy="cargo install dowse">$ cargo install dowse</button>
@@ -234,9 +357,9 @@ footer{margin-top:110px;border-top:1px solid var(--line);padding:30px 0 64px}
 
 <section id="features" class="wrap">
   <p class="sec-h">Features</p>
-  <h2 class="sec-t">功能</h2>
+  <h2 class="sec-t">搜索文件内容，不只文件名</h2>
   <div class="features">
-    <div class="feat"><h3><span class="tag">«01»</span>全文,不止文件名</h3><p>tantivy 倒排索引,PDF、Office 文档、压缩包里的内容一并可搜——搜的是"里面写了什么"。</p></div>
+    <div class="feat"><h3><span class="tag">«01»</span>全文,不止文件名</h3><p>tantivy 倒排索引，PDF、Word、Excel、PowerPoint 和常见文本内容一并可搜——搜的是“里面写了什么”。</p></div>
     <div class="feat"><h3><span class="tag">«02»</span>中文按词切</h3><p>jieba 分词,按语义命中,不是按单字碰运气;长文档里的一句话也找得回来。</p></div>
     <div class="feat"><h3><span class="tag">«03»</span>截图里的字也能搜</h3><p>Windows 系统自带 OCR。报错截图、聊天截图,输入记忆里的那句话,图就回来了。</p></div>
     <div class="feat"><h3><span class="tag">«04»</span>NTFS 快速层</h3><p>MFT 枚举 + USN Journal 增量更新,文件一变索引就知道,不做全盘重扫。</p></div>
@@ -244,9 +367,26 @@ footer{margin-top:110px;border-top:1px solid var(--line);padding:30px 0 64px}
     <div class="feat"><h3><span class="tag">«06»</span>轻</h3><p>安装包预算 15MB,写进设计文档的约束:"超了就是 bug"。</p></div>
   </div>
   <figure class="shot">
-    <img src="assets/hero.png" alt="dowse 浮窗实际截图:查询 sql,排序结果列表与右侧预览面板" width="1200" height="750" loading="lazy">
+    <img src="assets/hero.png" alt="dowse 浮窗实际截图:查询 sql,排序结果列表与右侧预览面板" width="1290" height="839" loading="lazy">
     <figcaption>实拍:查询 "sql",命中词以 «» 标出,右侧即时预览。</figcaption>
   </figure>
+</section>
+
+<section id="compare" class="wrap">
+  <p class="sec-h">Comparison</p>
+  <h2 class="sec-t">与 Everything、Windows Search、dnGrep 的定位区别</h2>
+  <div class="compare-wrap">
+    <table class="compare">
+      <thead><tr><th>工具</th><th>主要搜索方式</th><th>适合的场景</th><th>关键区别</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Dowse</strong></td><td>文件名 + 持久化正文索引 + 图片 OCR</td><td>经常搜索 PDF、Office、代码、中文资料和截图</td><td>开源、本地、中文分词、快捷键浮窗、只读 MCP</td></tr>
+        <tr><td>Everything</td><td>文件名索引；内容查询时按需扫描</td><td>按名称瞬间定位文件，偶尔搜索少量文件内容</td><td>文件名搜索是标杆；大范围内容扫描不是它的核心索引路径</td></tr>
+        <tr><td>Windows Search</td><td>系统索引与 IFilter</td><td>不安装第三方工具，在系统已索引位置查找</td><td>覆盖范围和格式受 Windows 索引设置、设备与过滤器影响</td></tr>
+        <tr><td>dnGrep</td><td>按需扫描、正则表达式</td><td>对指定目录做精确文本或正则搜索与替换</td><td>适合一次性检索；不是常驻的全盘内容索引浮窗</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <a class="more-link" href="windows-file-content-search/">Windows 搜索文件内容：方法、设置与工具选择 →</a>
 </section>
 
 <section id="mcp" class="wrap">
@@ -305,9 +445,23 @@ footer{margin-top:110px;border-top:1px solid var(--line);padding:30px 0 64px}
   <p class="note">非 Windows 平台可编译安装,核心检索可用;NTFS 快速层与 OCR 自动降级停用。</p>
 </section>
 
+<section id="faq" class="wrap">
+  <p class="sec-h">FAQ</p>
+  <h2 class="sec-t">常见问题</h2>
+  <div class="faq">
+    <details><summary>Dowse 能搜索哪些文件内容？</summary><p>可以索引文件名、纯文本、Markdown、代码、PDF，以及 DOCX、XLSX、PPTX 等 Office Open XML 文档；Windows 上还能离线识别 PNG、JPG、WebP、BMP 图片里的文字。</p></details>
+    <details><summary>文件、索引或搜索词会被上传吗？</summary><p>不会。解析、索引、中文分词、OCR 和查询都在本机完成，没有遥测。隐私承诺与实现边界可以在公开源码和隐私说明中核对。</p></details>
+    <details><summary>Dowse 和 Everything 有什么区别？</summary><p>Everything 的强项是文件名索引，也提供按内容扫描；Dowse 为正文建立持久全文索引，并加入中文分词、图片 OCR、内容预览和 MCP，更适合频繁按“文件里写了什么”来查找。</p></details>
+    <details><summary>必须以管理员身份运行吗？</summary><p>不需要。普通权限下可以正常索引与搜索；NTFS 卷加管理员权限只是启用 MFT/USN 快速路径的可选加速条件。</p></details>
+    <details><summary>能让 Claude、Cursor 等 AI 搜索本地文件吗？</summary><p>可以。运行 <code class="mono">dowse mcp</code> 后，支持 MCP 的客户端可以使用三个只读工具搜索索引、读取命中上下文并查看索引状态。</p></details>
+  </div>
+</section>
+
 <footer><div class="wrap foot">
   <span>英文名取自探水杖,中文名问的是活水:问渠那得清如许,为有源头活水来。</span>
   <span class="links">
+    <a href="windows-file-content-search/">guide</a>
+    <a href="en/" hreflang="en">english</a>
     <a href="https://github.com/ltspace/dowse">github</a>
     <a href="https://crates.io/crates/dowse">crates.io</a>
     <a href="https://docs.rs/dowse">docs.rs</a>

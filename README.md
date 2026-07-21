@@ -7,7 +7,13 @@ English | [简体中文](README.zh-CN.md)
 <h1 align="center">dowse</h1>
 
 <p align="center">
-  Native full-text search for Windows. File names, document contents, and text inside screenshots — one hotkey away.
+  Open-source local file content search for Windows. Find file names, PDF and Office contents, source code, and text inside screenshots — one hotkey away.
+</p>
+
+<p align="center">
+  <a href="https://lter.space/dowse/">Website</a> ·
+  <a href="https://lter.space/dowse/en/">English product page</a> ·
+  <a href="https://lter.space/dowse/windows-file-content-search/">Windows file-content search guide（中文）</a>
 </p>
 
 <p align="center">
@@ -29,8 +35,8 @@ The name comes from a dowsing rod.
 
 No Windows tool satisfies all three of the following at once:
 
-- Search file contents, not just file names (Everything only does the latter)
-- Recognize and index text inside images (macOS Spotlight has this; there is no equivalent on Windows)
+- Keep a persistent index of file contents, not just file names (Everything can scan contents on demand, but its instant index is centered on names and paths)
+- Recognize and index text inside images on ordinary Windows PCs without requiring a Copilot+ device
 - One hotkey to summon, full keyboard operation, no perceptible latency
 
 The closest open-source implementation is sist2, but it targets Linux (on Windows it only runs via Docker), treats Chinese text as trigrams, and the project is no longer maintained. dowse is a Windows-native implementation built around these three points.
@@ -52,8 +58,8 @@ The closest open-source implementation is sist2, but it targets Linux (on Window
 | | dowse | Everything | Windows Search | sist2 |
 |---|:---:|:---:|:---:|:---:|
 | File name search | ✓ | ✓ | ✓ | ✓ |
-| Document content search | ✓ | ✗ | partial, slow | ✓ |
-| Screenshot / image OCR | ✓ | ✗ | ✗ | limited (optional Tesseract) |
+| Document content search | ✓ (persistent index) | on-demand scan | depends on indexed locations and filters | ✓ |
+| Screenshot / image OCR | ✓ | ✗ | device/version dependent | limited (optional Tesseract) |
 | Proper Chinese segmentation | ✓ (jieba) | — | limited | ✗ (trigrams) |
 | Fully local, no network | ✓ | ✓ | ✓ | ✓ |
 | Global hotkey overlay | ✓ | ✓ | ✓ (Win key) | ✗ (web UI) |

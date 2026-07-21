@@ -7,7 +7,13 @@
 <h1 align="center">问渠 dowse</h1>
 
 <p align="center">
-  Windows 本地全文搜索。文件名、文档内容、截图里的文字，快捷键呼出，毫秒级返回。
+  开源的 Windows 本地文件内容全文搜索工具。搜索文件名、PDF 与 Office 正文、代码和截图文字，快捷键呼出。
+</p>
+
+<p align="center">
+  <a href="https://lter.space/dowse/">产品官网</a> ·
+  <a href="https://lter.space/dowse/windows-file-content-search/">Windows 搜索文件内容指南</a> ·
+  <a href="https://lter.space/dowse/en/">English</a>
 </p>
 
 <p align="center">
@@ -29,8 +35,8 @@
 
 Windows 上没有同时满足以下三点的工具：
 
-- 搜索文件内容而不只是文件名（Everything 只做后者）
-- 识别并索引图片中的文字（macOS Spotlight 有，Windows 没有对等实现）
+- 为文件内容建立持久全文索引，而不只索引文件名（Everything 可以按需扫描内容，但即时索引以名称和路径为核心）
+- 在普通 Windows 电脑上识别并索引图片文字，不要求 Copilot+ PC
 - 一个快捷键呼出、键盘完成全部操作、不引入可感知的延迟
 
 最接近的开源实现是 sist2，但它面向 Linux，Windows 下只能通过 Docker 运行，
@@ -53,8 +59,8 @@ Windows 上没有同时满足以下三点的工具：
 | | dowse | Everything | Windows 自带搜索 | sist2 |
 |---|:---:|:---:|:---:|:---:|
 | 文件名搜索 | ✓ | ✓ | ✓ | ✓ |
-| 文档内容搜索 | ✓ | ✗ | 部分支持，较慢 | ✓ |
-| 截图 / 图片 OCR | ✓ | ✗ | ✗ | 有限（可选接 Tesseract） |
+| 文档内容搜索 | ✓（持久索引） | 按需扫描 | 取决于索引范围与过滤器 | ✓ |
+| 截图 / 图片 OCR | ✓ | ✗ | 取决于设备与 Windows 版本 | 有限（可选接 Tesseract） |
 | 中文正确分词 | ✓（jieba） | — | 有限 | ✗（trigram） |
 | 纯本地，不联网 | ✓ | ✓ | ✓ | ✓ |
 | 全局快捷键浮窗 | ✓ | ✓ | ✓（Win 键） | ✗（网页 UI） |

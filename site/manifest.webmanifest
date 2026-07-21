@@ -1,0 +1,18 @@
+{
+  "name": "Dowse（问渠）— Windows 本地全文搜索",
+  "short_name": "Dowse",
+  "description": "开源的 Windows 本地文件内容全文搜索工具，支持 Office、PDF、中文分词、图片 OCR 与只读 MCP。",
+  "lang": "zh-CN",
+  "start_url": "/dowse/",
+  "scope": "/dowse/",
+  "display": "standalone",
+  "background_color": "#0b0c0e",
+  "theme_color": "#0b0c0e",
+  "icons": [
+    {
+      "src": "assets/icon.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    }
+  ]
+}
