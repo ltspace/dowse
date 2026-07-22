@@ -71,6 +71,20 @@ pre {
   font-size: 13px;
   line-height: 1.75;
 }
+.code-label {
+  margin: 24px 0 8px;
+  color: var(--muted);
+  font: 12px var(--mono);
+  letter-spacing: .04em;
+}
+.product-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
 .table-wrap { overflow-x: auto; border-top: 1px solid var(--line); }
 table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 14px; }
 th, td { padding: 14px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
@@ -123,4 +137,5 @@ footer a { color: var(--muted); }
   .site-nav a:not(.brand) { font-size: 11px; }
   header { padding-top: 52px; }
   h2 { margin-top: 48px; }
+  .product-shot { margin-top: 18px; }
 }

@@ -49,6 +49,7 @@
     <a class="brand" href="./">dowse</a>
     <a href="#features">Features</a>
     <a href="#compare">Compare</a>
+    <a href="#mcp">MCP</a>
     <a href="#install">Install</a>
     <a href="../" hreflang="zh-CN">中文</a>
     <a href="https://github.com/ltspace/dowse">GitHub ↗</a>
@@ -71,7 +72,7 @@
 
     <h2>Summon it with a hotkey</h2>
     <p>Press <code>Alt+`</code> to open the acrylic search overlay, type a phrase, use the arrow keys to select a result, and press Enter to open it. Results include highlighted snippets and a live preview pane. Filters cover document, code, and image groups; results can be sorted by relevance, modification time, or size.</p>
-    <img src="../assets/hero.png" alt="Dowse searching the Northstar workspace with ranked results and a live document preview" width="1290" height="840" style="display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:8px" loading="lazy">
+    <img class="product-shot" src="../assets/hero.png" alt="Dowse searching the Northstar workspace with ranked results and a live document preview" width="1290" height="840" loading="lazy">
 
     <h2 id="compare">How Dowse differs from other Windows search tools</h2>
     <div class="table-wrap"><table>
@@ -84,9 +85,19 @@
       </tbody>
     </table></div>
 
-    <h2>Read-only local search for AI agents</h2>
+    <h2 id="mcp">Read-only local search for AI agents</h2>
     <p><code>dowse mcp</code> exposes three read-only Model Context Protocol tools: ranked full-text search, a longer preview around a hit, and index status. Claude, Cursor, and other MCP clients can search the folders you indexed without granting a remote service access to your drive.</p>
+    <div class="code-label">Claude Code · one command</div>
     <pre><code>claude mcp add dowse -- dowse mcp</code></pre>
+    <div class="code-label">Any MCP client · JSON configuration</div>
+    <pre><code>{
+  "mcpServers": {
+    "dowse": {
+      "command": "dowse",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
 
     <h2 id="install">Install Dowse</h2>
     <ol class="steps">
