@@ -34,7 +34,7 @@ dowse status
 dowse watch
 
 # 作为只读 MCP 服务对接 AI 客户端，例：
-#   claude mcp add dowse -- dowse mcp
+#   claude mcp add --scope user dowse -- dowse mcp
 dowse mcp
 ```
 

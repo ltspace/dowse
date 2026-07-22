@@ -88,7 +88,7 @@
     <h2 id="mcp">Read-only local search for AI agents</h2>
     <p><code>dowse mcp</code> exposes three read-only Model Context Protocol tools: ranked full-text search, a longer preview around a hit, and index status. Claude, Cursor, and other MCP clients can search the folders you indexed without granting a remote service access to your drive.</p>
     <div class="code-label">Claude Code · one command</div>
-    <pre><code>claude mcp add dowse -- dowse mcp</code></pre>
+    <pre><code>claude mcp add --scope user dowse -- dowse mcp</code></pre>
     <div class="code-label">Any MCP client · JSON configuration</div>
     <pre><code>{
   "mcpServers": {

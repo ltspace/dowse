@@ -156,7 +156,7 @@ cargo tauri build      # 安装包产出在 target/release/bundle 下
 把本地索引暴露给 AI agent：
 
 ```
-claude mcp add dowse -- dowse mcp
+claude mcp add --scope user dowse -- dowse mcp
 ```
 
 三个工具：`search`（查询词、条数上限、`sort` 排序：相关性/修改时间/体积、逗号分隔的

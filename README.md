@@ -149,7 +149,7 @@ Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Ente
 `dowse mcp` starts a read-only [MCP](https://modelcontextprotocol.io) server over stdio, exposing the local index to AI agents:
 
 ```
-claude mcp add dowse -- dowse mcp
+claude mcp add --scope user dowse -- dowse mcp
 ```
 
 Three tools: `search` (query, limit, `sort` by relevance / mtime / size, comma-separated `ext` filter, `offset` pagination with a `total_hits` count), `preview` (full snippet + metadata for one hit), `index_status` (document count, index health, active index rules). The server never touches the index writer — it only reloads the reader before each call, so it can run alongside the overlay app or a live `dowse watch` session without write contention.

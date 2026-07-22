@@ -66,7 +66,7 @@ enum Command {
     },
     /// 启动只读 MCP server（stdio 传输），把本地索引暴露给 AI agent
     ///
-    /// 例：`claude mcp add dowse -- dowse mcp`
+    /// 例：`claude mcp add --scope user dowse -- dowse mcp`
     Mcp,
 }
 

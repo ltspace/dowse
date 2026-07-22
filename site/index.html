@@ -132,7 +132,7 @@
     <h2 id="mcp">让 AI 只读搜索你的本地资料</h2>
     <p><code>dowse mcp</code> 提供三个只读 MCP 工具：排序后的全文搜索、命中位置附近的长预览，以及索引状态。Claude Code、Cursor 和其他 MCP 客户端可以搜索你已建立索引的文件夹，而不必把硬盘访问权限交给远程服务。</p>
     <div class="code-label">Claude Code · 一行接入</div>
-    <pre><code>claude mcp add dowse -- dowse mcp</code></pre>
+    <pre><code>claude mcp add --scope user dowse -- dowse mcp</code></pre>
     <div class="code-label">任意 MCP 客户端 · JSON 配置</div>
     <pre><code>{
   "mcpServers": {
