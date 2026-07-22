@@ -29,7 +29,7 @@ English | [简体中文](README.zh-CN.md)
 
 The name comes from a dowsing rod.
 
-![dowse overlay mid-search, query "sql" with ranked file results and a live preview pane](docs/screenshots/hero.png)
+![Dowse searching the fictional Northstar workspace, with ranked project files on the left and a live brief preview on the right](docs/screenshots/hero.png)
 
 ## Motivation
 
@@ -140,6 +140,8 @@ cargo tauri build      # produces the installer under target/release/bundle
 
 Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it. `Ctrl+,` opens the settings panel — general (hotkey rebinding, transparency, autostart, interface language) and index rules (excluded directories, extra text extensions, per-file size cap).
 
+![Dowse settings panel in English, with controls for the global shortcut, transparency, startup behavior, and interface language](docs/screenshots/settings.png)
+
 ![Preview pane for an image result: the source image rendered inline next to its OCR-extracted text with the matched terms highlighted](docs/screenshots/ocr-preview.png)
 
 ## MCP server
@@ -151,8 +153,6 @@ claude mcp add dowse -- dowse mcp
 ```
 
 Three tools: `search` (query, limit, `sort` by relevance / mtime / size, comma-separated `ext` filter, `offset` pagination with a `total_hits` count), `preview` (full snippet + metadata for one hit), `index_status` (document count, index health, active index rules). The server never touches the index writer — it only reloads the reader before each call, so it can run alongside the overlay app or a live `dowse watch` session without write contention.
-
-![Idle overlay while a background OCR pass indexes screenshots, with a progress bar at the bottom](docs/screenshots/actions.png)
 
 ## Architecture
 

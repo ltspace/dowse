@@ -29,7 +29,7 @@
 
 英文名取自 dowsing rod（探水杖）；中文名「问渠」，取朱熹《观书有感》"问渠那得清如许，为有源头活水来"——探水杖找水，问渠亦问水：你的文件是源头，dowse 让你随时问得到。
 
-![dowse 浮窗搜索中途，查询词"sql"，下方是排好序的文件结果，右侧是预览区](docs/screenshots/hero.png)
+![dowse 浮窗搜索“北极星”，左侧展示排好序的项目资料，右侧直接预览一页简报](docs/screenshots/hero.zh-CN.png)
 
 ## 动机
 
@@ -146,7 +146,9 @@ cargo tauri build      # 安装包产出在 target/release/bundle 下
 会列出最近搜索（本地保存最近 10 条），`↑↓`/`Enter` 复用，`Delete` 删除单条。
 `Ctrl+,` 打开设置面板——通用（呼出键改键/透明度/开机自启/界面语言）与索引规则（排除目录/追加文本扩展名/单文件体积上限）两区。
 
-![预览区展示一条图片类结果：原图内嵌显示，旁边是 OCR 识别出的文字及命中词高亮](docs/screenshots/ocr-preview.png)
+![dowse 中文设置面板，包含呼出快捷键、透明效果、透明度、开机自启和界面语言](docs/screenshots/settings.zh-CN.png)
+
+![预览区展示“北极星体验看板”图片：原图内嵌显示，下方是 OCR 识别出的文字及命中词高亮](docs/screenshots/ocr-preview.zh-CN.png)
 
 ## MCP 接入
 
@@ -162,8 +164,6 @@ claude mcp add dowse -- dowse mcp
 元信息）、`index_status`（文档总数、索引健康状态、当前索引规则）。这个 server 绝不碰索引写入端——每次
 调用前只做一次 reader reload，所以可以和浮窗应用或正在跑的 `dowse watch` 同时存在，
 不会有写入冲突。
-
-![浮窗空闲态，后台正在对截图做 OCR 索引，底部是进度条](docs/screenshots/actions.png)
 
 ## 架构
 
