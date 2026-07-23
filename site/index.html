@@ -8,7 +8,7 @@
   <meta name="description" content="Dowse 是开源的 Windows 本地文件全文搜索工具，可搜索文件名、PDF 与 Office 文档内容，并用离线 OCR 搜索截图文字；支持中文分词、快捷键浮窗和只读 MCP。">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
   <meta name="author" content="ltspace">
-  <meta name="theme-color" content="#0b0c0e">
+  <meta name="theme-color" content="#fafafa">
   <link rel="canonical" href="https://lter.space/dowse/">
   <link rel="alternate" hreflang="zh-CN" href="https://lter.space/dowse/">
   <link rel="alternate" hreflang="en" href="https://lter.space/dowse/en/">
@@ -18,6 +18,17 @@
   <link rel="apple-touch-icon" href="assets/icon.png">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="assets/content.css">
+  <script>
+    (() => {
+      try {
+        const force = new URLSearchParams(location.search).has("intro");
+        const seen = sessionStorage.getItem("dowse:intro:v1");
+        if ((force || !seen) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          document.documentElement.classList.add("will-intro");
+        }
+      } catch (_) {}
+    })();
+  </script>
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Dowse（问渠）">
   <meta property="og:locale" content="zh_CN">
@@ -90,6 +101,21 @@
   </script>
 </head>
 <body>
+  <div class="intro" data-message="Welcome to dowse." role="button" tabindex="0" aria-label="进入 Dowse 网站">
+    <div class="terminal-shell">
+      <div class="terminal-bar">
+        <span class="traffic-lights"><i></i><i></i><i></i></span>
+        <span class="terminal-title">dowse / local mcp</span>
+      </div>
+      <div class="terminal-body">
+        <div class="terminal-command">
+          <span class="terminal-prompt">$</span>
+          <span class="terminal-typed"></span><span class="terminal-caret"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <nav class="site-nav"><div class="wrap">
     <a class="brand" href="./">dowse</a>
     <a href="#features">功能</a>
@@ -169,5 +195,6 @@
     <span>Dowse（问渠）· 开源的 Windows 本地文件全文搜索</span>
     <a href="en/" hreflang="en">English</a><a href="https://github.com/ltspace/dowse">源码</a><a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">隐私</a>
   </div></footer>
+  <script src="assets/intro.js"></script>
 </body>
 </html>

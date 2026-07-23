@@ -6,7 +6,7 @@
   <title>Dowse — Local Windows File Content Search with OCR and MCP</title>
   <meta name="description" content="Dowse is an open-source Windows file content search app for PDF, Office, code, and images, with offline OCR, Chinese tokenization, and read-only MCP tools.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
-  <meta name="theme-color" content="#0b0c0e">
+  <meta name="theme-color" content="#fafafa">
   <link rel="canonical" href="https://lter.space/dowse/en/">
   <link rel="alternate" hreflang="en" href="https://lter.space/dowse/en/">
   <link rel="alternate" hreflang="zh-CN" href="https://lter.space/dowse/">
@@ -14,6 +14,17 @@
   <link rel="sitemap" type="application/xml" href="https://lter.space/dowse/sitemap.xml">
   <link rel="icon" href="../assets/icon.png" type="image/png">
   <link rel="stylesheet" href="../assets/content.css">
+  <script>
+    (() => {
+      try {
+        const force = new URLSearchParams(location.search).has("intro");
+        const seen = sessionStorage.getItem("dowse:intro:v1");
+        if ((force || !seen) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          document.documentElement.classList.add("will-intro");
+        }
+      } catch (_) {}
+    })();
+  </script>
   <meta property="og:type" content="website">
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://lter.space/dowse/en/">
@@ -45,6 +56,21 @@
   </script>
 </head>
 <body>
+  <div class="intro" data-message="Welcome to dowse." role="button" tabindex="0" aria-label="Enter the Dowse website">
+    <div class="terminal-shell">
+      <div class="terminal-bar">
+        <span class="traffic-lights"><i></i><i></i><i></i></span>
+        <span class="terminal-title">dowse / local mcp</span>
+      </div>
+      <div class="terminal-body">
+        <div class="terminal-command">
+          <span class="terminal-prompt">$</span>
+          <span class="terminal-typed"></span><span class="terminal-caret"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <nav class="site-nav"><div class="wrap">
     <a class="brand" href="./">dowse</a>
     <a href="#features">Features</a>
@@ -124,5 +150,6 @@
     <span>Dowse · Open-source local full-text search for Windows</span>
     <a href="../" hreflang="zh-CN">中文</a><a href="https://github.com/ltspace/dowse">Source</a><a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">Privacy</a>
   </div></footer>
+  <script src="../assets/intro.js"></script>
 </body>
 </html>
