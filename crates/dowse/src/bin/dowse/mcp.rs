@@ -13,7 +13,7 @@ use dowse::{
 };
 use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::{CallToolResult, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResponse, CallToolResult, ServerCapabilities, ServerInfo};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -215,13 +215,31 @@ fn index_unavailable_result(err: &anyhow::Error) -> CallToolResult {
 /// 常驻一个 Searcher 会读到过期数据（见 docs/DESIGN-M5-MCP.md 第二节的并发约束）。
 ///
 /// 返回 `Err(CallToolResult)` 而不是 `Err(McpError)`：索引不可用是工具级错误，
-/// 调用方直接 `return Ok(e)` 短路成功分支即可，见上面 index_unavailable_result 的说明。
+/// 调用方直接 `return Ok(e)` 短路成功分支即可，
+/// 见上面 index_unavailable_result 的说明。
 fn open_and_reload(index_dir: &std::path::Path) -> Result<Searcher, CallToolResult> {
     let searcher = Searcher::open(index_dir).map_err(|e| index_unavailable_result(&e))?;
     searcher
         .reload()
         .map_err(|e| index_unavailable_result(&e))?;
     Ok(searcher)
+}
+
+/// rmcp 3 为 MRTR 引入了 `CallToolResponse`，`Json<T>` 的转换结果也因此
+/// 从 `CallToolResult` 变成了 `CallToolResponse`。这里的三个工具都是同步完成的
+/// 只读工具，因此只接受 `Complete` 分支，并保持工具路由的返回类型为
+/// `CallToolResult`。
+fn json_tool_result<T>(value: T) -> Result<CallToolResult, McpError>
+where
+    T: Serialize + JsonSchema + 'static,
+{
+    match Json(value).into_call_tool_result()? {
+        CallToolResponse::Complete(result) => Ok(result),
+        _ => Err(McpError::internal_error(
+            "JSON 工具结果不应产生 MRTR 中间响应",
+            None,
+        )),
+    }
 }
 
 #[derive(Clone)]
@@ -289,7 +307,7 @@ impl DowseMcpServer {
 
         // 只有相关性排序下 BM25 分数才有意义；mtime/size 排序时不带 score。
         let include_score = sort_mode == SortMode::Relevance;
-        Json(SearchOutput {
+        json_tool_result(SearchOutput {
             hits: page
                 .hits
                 .into_iter()
@@ -298,7 +316,6 @@ impl DowseMcpServer {
             total_hits: page.total,
             total_docs: searcher.num_docs(),
         })
-        .into_call_tool_result()
     }
 
     #[tool(
@@ -325,7 +342,7 @@ impl DowseMcpServer {
             .map_err(|e| McpError::invalid_params(format!("查询语法有问题：{e}"), None))?;
 
         match hit {
-            Some(hit) => Json(to_preview_output(hit)).into_call_tool_result(),
+            Some(hit) => json_tool_result(to_preview_output(hit)),
             // 路径本身没问题（不是参数错误），是索引里当下就是找不到这篇——
             // 文件可能已被删除、或改名后索引还没重新收录。跟"索引不可用"一样，
             // 是运行时状态问题，agent 应该看得到，所以也是工具级错误。
@@ -343,7 +360,7 @@ impl DowseMcpServer {
     )]
     async fn index_status(&self) -> Result<CallToolResult, McpError> {
         match core_index_status(&self.index_dir) {
-            Ok(status) => Json(to_index_status_output(status)).into_call_tool_result(),
+            Ok(status) => json_tool_result(to_index_status_output(status)),
             Err(e) => Ok(index_unavailable_result(&e)),
         }
     }
