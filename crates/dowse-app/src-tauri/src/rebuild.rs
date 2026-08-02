@@ -15,6 +15,16 @@ use crate::indexing_status::IndexingStatus;
 use crate::state::SearchState;
 use crate::watcher::WatchController;
 
+/// 文本阶段的终态快照事件。重建进度和 Tauri command 返回值分属两条 IPC
+/// 通道，最后一条 progress 可能晚于 invoke 返回抵达前端；终态必须再走一次
+/// 与 progress 相同的事件通道，保证它排在本轮全部 progress 之后。
+pub const INDEXING_SETTLED_EVENT: &str = "dowse://indexing-settled";
+
+fn emit_indexing_settled(app: &AppHandle) {
+    let snapshot = app.state::<IndexingStatus>().snapshot();
+    let _ = app.emit(INDEXING_SETTLED_EVENT, snapshot);
+}
+
 /// 防止"重建索引"/"更改索引文件夹"/浮窗按钮三个入口并发触发重建——全量重建
 /// 期间旧索引目录会被删掉重建，重叠执行会互相踩踏（Windows 删目录、tantivy
 /// 写入端都不是可重入的）。
@@ -118,6 +128,7 @@ pub fn perform_rebuild(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDto
         Ok(stats) => stats,
         Err(err) => {
             app.state::<IndexingStatus>().reset_idle();
+            emit_indexing_settled(app);
             crate::tray::set_busy(app, false);
             crate::tray::refresh_tooltip(app);
             return Err(err.to_string());
@@ -132,6 +143,7 @@ pub fn perform_rebuild(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDto
         Ok(searcher) => searcher,
         Err(err) => {
             app.state::<IndexingStatus>().reset_idle();
+            emit_indexing_settled(app);
             crate::tray::set_busy(app, false);
             crate::tray::refresh_tooltip(app);
             return Err(err.to_string());
@@ -145,6 +157,7 @@ pub fn perform_rebuild(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDto
         .start(app.clone(), index_dir, vec![target]);
 
     app.state::<IndexingStatus>().begin_ocr(ocr_pending);
+    emit_indexing_settled(app);
     crate::tray::set_busy(app, false);
     crate::tray::refresh_menu(app);
     crate::tray::refresh_tooltip(app);
@@ -176,6 +189,7 @@ fn restart_watch_after_root_op(app: &AppHandle, index_dir: &Path) {
 
 fn fail_root_op<T>(app: &AppHandle, index_dir: &Path, err: String) -> Result<T, String> {
     app.state::<IndexingStatus>().reset_idle();
+    emit_indexing_settled(app);
     crate::tray::set_busy(app, false);
     crate::tray::refresh_tooltip(app);
     restart_watch_after_root_op(app, index_dir);
@@ -257,6 +271,7 @@ pub fn perform_add_root(app: &AppHandle, target: PathBuf) -> Result<IndexStatsDt
     restart_watch_after_root_op(app, &index_dir);
 
     app.state::<IndexingStatus>().begin_ocr(ocr_pending);
+    emit_indexing_settled(app);
     crate::tray::set_busy(app, false);
     crate::tray::refresh_menu(app);
     crate::tray::refresh_tooltip(app);
@@ -359,6 +374,7 @@ pub fn perform_rebuild_root(app: &AppHandle, root: PathBuf) -> Result<IndexStats
     restart_watch_after_root_op(app, &index_dir);
 
     app.state::<IndexingStatus>().begin_ocr(ocr_pending);
+    emit_indexing_settled(app);
     crate::tray::set_busy(app, false);
     crate::tray::refresh_menu(app);
     crate::tray::refresh_tooltip(app);

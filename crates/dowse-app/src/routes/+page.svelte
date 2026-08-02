@@ -10,6 +10,7 @@
 		ExtGroup,
 		GlassAlpha,
 		IndexingPhase,
+		IndexingSnapshot,
 		IndexProgress,
 		SearchHit,
 		SortOption,
@@ -28,6 +29,7 @@
 	import { formatHotkey } from '$lib/hotkey';
 	import { t, LANG_OVERRIDE_KEY } from '$lib/i18n';
 	import { loadHistory, recordHistory, removeHistoryEntry, clearHistory } from '$lib/searchHistory';
+	import { reduceIndexingView } from '$lib/indexingState';
 
 	// 类型筛选 / 排序器两个幽灵态下拉的选项表——顺序即菜单里的显示顺序，
 	// 第一项永远是"默认值"（对应 GhostDropdown 的 defaultValue）。文案跟随系统语言。
@@ -73,6 +75,28 @@
 	let indexingPhase = $state<IndexingPhase>('idle');
 	let indexingOcrProcessed = $state(0);
 	let indexingOcrTotal = $state(0);
+
+	function applyIndexingEvent(
+		event:
+			| { type: 'text-progress'; progress: IndexProgress }
+			| { type: 'snapshot'; snapshot: IndexingSnapshot }
+	) {
+		const next = reduceIndexingView(
+			{
+				phase: indexingPhase,
+				textProcessed: indexingProcessed,
+				textCurrentFile: indexingCurrentFile,
+				ocrProcessed: indexingOcrProcessed,
+				ocrTotal: indexingOcrTotal
+			},
+			event
+		);
+		indexingPhase = next.phase;
+		indexingProcessed = next.textProcessed;
+		indexingCurrentFile = next.textCurrentFile;
+		indexingOcrProcessed = next.ocrProcessed;
+		indexingOcrTotal = next.ocrTotal;
+	}
 
 	// 本次搜索耗时（发起请求到结果上屏），页脚小字用；null 表示还没有可展示
 	// 的一次搜索（空查询/首次挂载）。刻意不做滚动动画——每次搜索都变，
@@ -162,14 +186,7 @@
 	async function refreshIndexingStatus() {
 		try {
 			const snap = await api.indexingStatus();
-			indexingPhase = snap.phase;
-			if (snap.phase === 'text') {
-				indexingProcessed = snap.text_processed;
-				indexingCurrentFile = snap.text_current_file;
-			} else if (snap.phase === 'ocr') {
-				indexingOcrTotal = snap.ocr_total;
-				indexingOcrProcessed = snap.ocr_processed;
-			}
+			applyIndexingEvent({ type: 'snapshot', snapshot: snap });
 		} catch {
 			// 拉取失败（比如 Tauri IPC 一次性抖动）保留上一次已知状态，
 			// 不主动清空——清空反而会让活着的进度视图短暂"消失"一下。
@@ -747,10 +764,15 @@
 		// 建索引"实时直播"：全程监听，不只在 rebuildState === 'rebuilding' 时才挂——
 		// 事件只在 rebuild_index 命令执行期间才会发出，不重建时这个监听器闲置无害。
 		const unlistenRebuildProgress = listen<IndexProgress>('dowse://rebuild-progress', (evt) => {
-			indexingPhase = 'text';
-			indexingProcessed = evt.payload.processed;
-			indexingCurrentFile = evt.payload.path;
+			applyIndexingEvent({ type: 'text-progress', progress: evt.payload });
 		});
+		// 终态跟 progress 走同一条 Tauri 事件通道，必定排在本轮最后一条进度之后。
+		// 这层兜底覆盖 invoke 已返回、迟到 progress 又把界面写回 text 的竞争，
+		// 避免完成报告永久遮住后台已经拿到的搜索结果（Issue #28）。
+		const unlistenIndexingSettled = listen<IndexingSnapshot>(
+			'dowse://indexing-settled',
+			(evt) => applyIndexingEvent({ type: 'snapshot', snapshot: evt.payload })
+		);
 		// OCR 队列消化进度：payload 是这一刻队列里还剩多少张待处理——
 		// 症状 3 的修复核心，v0.6.1 之前这行字是重建完成那一刻的静态快照，
 		// 从不刷新；现在跟着 OCR worker 每个 flush 批次持续推送、持续下降。
@@ -767,6 +789,7 @@
 			unlistenRebuildError.then((f) => f());
 			unlistenRootRemoved.then((f) => f());
 			unlistenRebuildProgress.then((f) => f());
+			unlistenIndexingSettled.then((f) => f());
 			unlistenOcrProgress.then((f) => f());
 		};
 	});
