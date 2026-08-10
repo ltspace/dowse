@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { listen } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { animate } from 'motion';
 
@@ -30,6 +31,14 @@
 	import { t, LANG_OVERRIDE_KEY } from '$lib/i18n';
 	import { loadHistory, recordHistory, removeHistoryEntry, clearHistory } from '$lib/searchHistory';
 	import { reduceIndexingView } from '$lib/indexingState';
+	import {
+		DEFAULT_SPLIT_RATIO,
+		SPLIT_DIVIDER_WIDTH,
+		clampSplitWidth,
+		normalizeSplitRatio,
+		splitRatioFromWidth,
+		splitWidthFromRatio
+	} from '$lib/splitPane.js';
 
 	// 类型筛选 / 排序器两个幽灵态下拉的选项表——顺序即菜单里的显示顺序，
 	// 第一项永远是"默认值"（对应 GhostDropdown 的 defaultValue）。文案跟随系统语言。
@@ -133,6 +142,11 @@
 	let panelEl: HTMLDivElement | undefined = $state();
 	let caretFlourishEl: HTMLSpanElement | undefined = $state();
 	let controlsEl: HTMLDivElement | undefined = $state();
+	let bodyEl: HTMLDivElement | undefined = $state();
+	let splitRatio = $state(DEFAULT_SPLIT_RATIO);
+	let resultsWidth = $state(0);
+	let splitResizing = $state(false);
+	const SPLIT_RATIO_KEY = 'dowse:results-preview-split';
 
 	let selectedHit = $derived(hits[selectedIndex] ?? null);
 
@@ -693,7 +707,88 @@
 		closeMenus();
 	}
 
+	// 无边框窗口没有系统标题栏。搜索行的空白处充当拖动区域，但输入框、按钮
+	// 和菜单保留原本的点击行为，避免用户选文字或点筛选器时把窗口拖走。
+	function handleWindowDrag(e: MouseEvent) {
+		if (e.button !== 0 || e.detail > 1) return;
+		const target = e.target;
+		if (!(target instanceof Element)) return;
+		if (target.closest('input, button, [role="button"], [role="menu"], [data-no-window-drag]')) return;
+		getCurrentWindow()
+			.startDragging()
+			.catch((err) => console.error('startDragging failed', err));
+	}
+
+	function syncResultsWidth() {
+		if (!bodyEl) return;
+		resultsWidth = splitWidthFromRatio(bodyEl.clientWidth, splitRatio);
+	}
+
+	function updateSplitFromPointer(clientX: number) {
+		if (!bodyEl) return;
+		const rect = bodyEl.getBoundingClientRect();
+		const desired = clientX - rect.left - SPLIT_DIVIDER_WIDTH / 2;
+		resultsWidth = clampSplitWidth(rect.width, desired);
+		splitRatio = splitRatioFromWidth(rect.width, resultsWidth);
+	}
+
+	function persistSplitRatio() {
+		try {
+			localStorage.setItem(SPLIT_RATIO_KEY, String(splitRatio));
+		} catch {
+			// localStorage 不可用时只保留本次会话宽度，拖动本身仍然可用。
+		}
+	}
+
+	function handleDividerPointerDown(e: PointerEvent) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		const divider = e.currentTarget as HTMLInputElement;
+		divider.setPointerCapture(e.pointerId);
+		splitResizing = true;
+		document.body.classList.add('split-resizing');
+		updateSplitFromPointer(e.clientX);
+	}
+
+	function handleDividerPointerMove(e: PointerEvent) {
+		if (!splitResizing) return;
+		updateSplitFromPointer(e.clientX);
+	}
+
+	function finishDividerResize(e: PointerEvent) {
+		if (!splitResizing) return;
+		const divider = e.currentTarget as HTMLInputElement;
+		if (divider.hasPointerCapture(e.pointerId)) divider.releasePointerCapture(e.pointerId);
+		splitResizing = false;
+		document.body.classList.remove('split-resizing');
+		persistSplitRatio();
+	}
+
+	function handleDividerKeydown(e: KeyboardEvent) {
+		if (!bodyEl) return;
+		let nextWidth = resultsWidth;
+		if (e.key === 'ArrowLeft') nextWidth -= 20;
+		else if (e.key === 'ArrowRight') nextWidth += 20;
+		else if (e.key === 'Home') nextWidth = 0;
+		else if (e.key === 'End') nextWidth = bodyEl.clientWidth;
+		else return;
+
+		e.preventDefault();
+		resultsWidth = clampSplitWidth(bodyEl.clientWidth, nextWidth);
+		splitRatio = splitRatioFromWidth(bodyEl.clientWidth, resultsWidth);
+		persistSplitRatio();
+	}
+
 	onMount(() => {
+		try {
+			splitRatio = normalizeSplitRatio(localStorage.getItem(SPLIT_RATIO_KEY));
+		} catch {
+			splitRatio = DEFAULT_SPLIT_RATIO;
+		}
+		syncResultsWidth();
+		const splitResizeObserver = new ResizeObserver(syncResultsWidth);
+		if (bodyEl) splitResizeObserver.observe(bodyEl);
+
 		history = loadHistory();
 		refreshIndexStatus();
 		// 窗口挂载时也拉一次进度快照——覆盖"托盘触发的建索引正在跑，浮窗这时
@@ -781,6 +876,8 @@
 		});
 
 		return () => {
+			splitResizeObserver.disconnect();
+			document.body.classList.remove('split-resizing');
 			document.removeEventListener('click', handleDocumentClick);
 			unlistenShown.then((f) => f());
 			unlistenEffect.then((f) => f());
@@ -796,7 +893,8 @@
 </script>
 
 <div class="panel" bind:this={panelEl}>
-	<div class="search-row">
+	<!-- svelte-ignore a11y_no_static_element_interactions: the blank title area maps to the native OS window-drag gesture; interactive descendants are excluded in handleWindowDrag -->
+	<div class="search-row" onmousedown={handleWindowDrag}>
 		<svg class="search-icon" width="20" height="20" viewBox="0 0 18 18" fill="none" aria-hidden="true">
 			<circle cx="8" cy="8" r="5.4" stroke="currentColor" stroke-width="1.4" />
 			<path d="M12.2 12.2 16 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
@@ -845,7 +943,12 @@
 		</div>
 	</div>
 
-	<div class="body">
+	<div
+		class="body"
+		class:has-results={!showGuidance}
+		bind:this={bodyEl}
+		style={`--results-width: ${resultsWidth > 0 ? `${resultsWidth}px` : '58%'}`}
+	>
 		{#if showGuidance}
 			<EmptyState
 				kind={guidanceKind}
@@ -883,7 +986,21 @@
 					oncontextmenu={showContextMenu}
 				/>
 			</div>
-			<div class="divider-v"></div>
+			<input
+				type="range"
+				class="divider-v"
+				class:resizing={splitResizing}
+				aria-label={t.resizePreviewPane}
+				aria-orientation="vertical"
+				min="0"
+				max="100"
+				value={Math.round(splitRatio * 100)}
+				onpointerdown={handleDividerPointerDown}
+				onpointermove={handleDividerPointerMove}
+				onpointerup={finishDividerResize}
+				onpointercancel={finishDividerResize}
+				onkeydown={handleDividerKeydown}
+			/>
 			<div class="preview-col">
 				<PreviewPane hit={selectedHit} segments={previewSegments} loading={previewLoading} />
 			</div>
@@ -1009,9 +1126,13 @@
 		min-height: 0;
 	}
 
+	.body.has-results {
+		display: grid;
+		grid-template-columns: var(--results-width) 9px minmax(240px, 1fr);
+	}
+
 	.results {
-		flex: 0 0 58%;
-		min-width: 0;
+		min-width: 280px;
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -1042,9 +1163,49 @@
 	}
 
 	.divider-v {
-		width: 1px;
-		background: var(--divider);
-		flex-shrink: 0;
+		appearance: none;
+		position: relative;
+		width: 9px;
+		min-width: 9px;
+		height: 100%;
+		padding: 0;
+		border: 0;
+		background: linear-gradient(
+			to right,
+			transparent 4px,
+			var(--divider) 4px,
+			var(--divider) 5px,
+			transparent 5px
+		);
+		cursor: col-resize;
+		touch-action: none;
+		outline: none;
+	}
+
+	.divider-v::-webkit-slider-thumb {
+		appearance: none;
+		width: 9px;
+		height: 100%;
+		background: transparent;
+		cursor: col-resize;
+	}
+
+	.divider-v:hover,
+	.divider-v:focus-visible,
+	.divider-v.resizing {
+		background: linear-gradient(
+			to right,
+			transparent 3px,
+			color-mix(in srgb, var(--accent-strong) 18%, transparent) 3px,
+			color-mix(in srgb, var(--accent-strong) 18%, transparent) 6px,
+			transparent 6px
+		);
+	}
+
+	:global(body.split-resizing),
+	:global(body.split-resizing *) {
+		cursor: col-resize !important;
+		user-select: none !important;
 	}
 
 	.preview-col {

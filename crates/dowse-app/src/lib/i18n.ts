@@ -65,6 +65,7 @@ interface Strings {
 	ocrEmpty: string;
 	previewLoading: string;
 	previewEmpty: string;
+	resizePreviewPane: string;
 	// 结果列表 aria
 	resultListLabel: string;
 	// 图钉
@@ -192,6 +193,7 @@ const zh: Strings = {
 	ocrEmpty: '没有识别到文字，或者还在后台排队处理。',
 	previewLoading: '加载中…',
 	previewEmpty: '没有可预览的文本内容。',
+	resizePreviewPane: '调整结果与预览区域宽度',
 	resultListLabel: '搜索结果',
 	pinUnpin: '取消固定（恢复失焦自动隐藏）',
 	pin: '固定（失焦不再自动隐藏）',
@@ -304,6 +306,7 @@ const en: Strings = {
 	ocrEmpty: 'No text recognized, or still queued in the background.',
 	previewLoading: 'Loading…',
 	previewEmpty: 'No previewable text content.',
+	resizePreviewPane: 'Resize results and preview panes',
 	resultListLabel: 'Search results',
 	pinUnpin: 'Unpin (resume auto-hide on blur)',
 	pin: 'Pin (stop auto-hide on blur)',
