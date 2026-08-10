@@ -487,10 +487,12 @@ impl Searcher {
         let parsed = query::parse(query_str)?;
         if !parsed.has_operators {
             if let Some(tokens) = plain_typeahead_tokens(query_str) {
-                return Ok(self.build_typeahead_queries(
-                    &tokens,
-                    !query_str.chars().last().is_some_and(char::is_whitespace),
-                ));
+                let prefix_last = !query_str.chars().last().is_some_and(char::is_whitespace);
+                let raw_prefix = (prefix_last
+                    && tokens.len() > 1
+                    && query_str.trim().chars().all(char::is_alphanumeric))
+                .then(|| query_str.trim());
+                return Ok(self.build_typeahead_queries(&tokens, prefix_last, raw_prefix));
             }
             return Ok((
                 self.parser.parse_query(query_str)?,
@@ -507,6 +509,7 @@ impl Searcher {
         &self,
         tokens: &[String],
         prefix_last: bool,
+        raw_prefix: Option<&str>,
     ) -> (Box<dyn Query>, Box<dyn Query>) {
         let last = tokens.len() - 1;
         let mut retrieval = Vec::with_capacity(tokens.len());
@@ -548,10 +551,35 @@ impl Searcher {
             snippet.push((Occur::Must, snippet_query));
         }
 
-        (
-            Box::new(BooleanQuery::new(retrieval)),
-            Box::new(BooleanQuery::new(snippet)),
-        )
+        let tokenized_retrieval: Box<dyn Query> = Box::new(BooleanQuery::new(retrieval));
+        let tokenized_snippet: Box<dyn Query> = Box::new(BooleanQuery::new(snippet));
+        if let Some(raw_prefix) = raw_prefix {
+            // jieba 会随输入变长重排边界，例如“周会纪”可能切成“周会 + 纪”，
+            // 索引里的完整“周会纪要”却是一个词项。分词路径会漏掉它；并入原始
+            // 连续串前缀路径，且只用于纯字母数字输入，避免吞掉查询语法。
+            let normalized = raw_prefix.to_lowercase();
+            let retrieval = Box::new(BooleanQuery::new(vec![
+                (Occur::Should, tokenized_retrieval),
+                (
+                    Occur::Should,
+                    term_prefix_query(self.fields.name, &normalized),
+                ),
+                (
+                    Occur::Should,
+                    term_prefix_query(self.fields.content, &normalized),
+                ),
+            ])) as Box<dyn Query>;
+            let snippet = Box::new(BooleanQuery::new(vec![
+                (Occur::Should, tokenized_snippet),
+                (
+                    Occur::Should,
+                    term_prefix_query(self.fields.content, &normalized),
+                ),
+            ])) as Box<dyn Query>;
+            (retrieval, snippet)
+        } else {
+            (tokenized_retrieval, tokenized_snippet)
+        }
     }
 
     /// 把结构化的 [`query::Parsed`] 拼成（检索查询, 纯内容高亮查询）。
@@ -1121,11 +1149,11 @@ mod tests {
         for (name, content) in [
             (
                 "brief.md",
-                "北极星计划的检索质量用户访谈，搜索体验 northstar，版本 2026",
+                "北极星计划的检索质量用户访谈和周会纪要，搜索体验 northstar，版本 2026",
             ),
             (
                 "meeting.md",
-                "北极星计划检索质量复盘和用户访谈，搜索体验 northstar，目标 2026",
+                "北极星计划检索质量复盘、用户访谈和周会纪要，搜索体验 northstar，目标 2026",
             ),
             ("north-cn.md", "北方项目检查记录"),
             ("north-en.md", "northbound migration notes"),
@@ -1146,6 +1174,7 @@ mod tests {
             &["n", "no", "nor", "north", "norths", "northstar"][..],
             &["2", "20", "202", "2026"][..],
             &["搜索 体", "搜索 体验"][..],
+            &["周", "周会", "周会纪", "周会纪要"][..],
         ] {
             let mut previous: Option<std::collections::BTreeSet<String>> = None;
             for query in prefixes {
