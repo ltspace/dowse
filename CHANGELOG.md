@@ -11,7 +11,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - The frameless overlay can now be moved by dragging blank space in the search
-  header.
+  header, and resized from any edge or corner down to a readable minimum size.
 - The results/preview divider can be dragged to resize both panes. The chosen
   ratio is remembered, clamped to readable minimum widths, and can also be
   adjusted from the keyboard.

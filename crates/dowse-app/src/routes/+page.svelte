@@ -719,6 +719,27 @@
 			.catch((err) => console.error('startDragging failed', err));
 	}
 
+	type ResizeDirection =
+		| 'North'
+		| 'NorthEast'
+		| 'East'
+		| 'SouthEast'
+		| 'South'
+		| 'SouthWest'
+		| 'West'
+		| 'NorthWest';
+
+	// 无边框窗口也没有系统边框命中区。四边和四角各放一个透明热区，交给
+	// Tauri 启动原生窗口缩放；这样鼠标离开 WebView 后仍由 Windows 接管拖动。
+	function handleWindowResize(e: MouseEvent, direction: ResizeDirection) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		e.stopPropagation();
+		getCurrentWindow()
+			.startResizeDragging(direction)
+			.catch((err) => console.error('startResizeDragging failed', err));
+	}
+
 	function syncResultsWidth() {
 		if (!bodyEl) return;
 		resultsWidth = splitWidthFromRatio(bodyEl.clientWidth, splitRatio);
@@ -893,6 +914,23 @@
 </script>
 
 <div class="panel" bind:this={panelEl}>
+	{#each [
+		['North', 'n'],
+		['NorthEast', 'ne'],
+		['East', 'e'],
+		['SouthEast', 'se'],
+		['South', 's'],
+		['SouthWest', 'sw'],
+		['West', 'w'],
+		['NorthWest', 'nw']
+	] as resizeHandle}
+		<!-- svelte-ignore a11y_no_static_element_interactions: these transparent edges expose the native OS resize gesture for a frameless window -->
+		<div
+			class="window-resize-handle window-resize-{resizeHandle[1]}"
+			onmousedown={(e) => handleWindowResize(e, resizeHandle[0] as ResizeDirection)}
+			aria-hidden="true"
+		></div>
+	{/each}
 	<!-- svelte-ignore a11y_no_static_element_interactions: the blank title area maps to the native OS window-drag gesture; interactive descendants are excluded in handleWindowDrag -->
 	<div class="search-row" onmousedown={handleWindowDrag}>
 		<svg class="search-icon" width="20" height="20" viewBox="0 0 18 18" fill="none" aria-hidden="true">
@@ -1058,6 +1096,44 @@
 		border-radius: var(--radius-window);
 		border: 1px solid var(--panel-border);
 		overflow: hidden;
+	}
+
+	/* 无边框窗口的原生缩放热区。边 6px、角 12px，角层级更高，既容易命中
+	   又只覆盖最外圈；Windows 接管后可持续拖出 WebView 边界。 */
+	.window-resize-handle {
+		position: absolute;
+		z-index: 1000;
+	}
+
+	.window-resize-n,
+	.window-resize-s {
+		left: 12px;
+		right: 12px;
+		height: 6px;
+	}
+
+	.window-resize-e,
+	.window-resize-w {
+		top: 12px;
+		bottom: 12px;
+		width: 6px;
+	}
+
+	.window-resize-n { top: 0; cursor: n-resize; }
+	.window-resize-ne { top: 0; right: 0; cursor: ne-resize; }
+	.window-resize-e { right: 0; cursor: e-resize; }
+	.window-resize-se { right: 0; bottom: 0; cursor: se-resize; }
+	.window-resize-s { bottom: 0; cursor: s-resize; }
+	.window-resize-sw { bottom: 0; left: 0; cursor: sw-resize; }
+	.window-resize-w { left: 0; cursor: w-resize; }
+	.window-resize-nw { top: 0; left: 0; cursor: nw-resize; }
+
+	.window-resize-ne,
+	.window-resize-se,
+	.window-resize-sw,
+	.window-resize-nw {
+		width: 12px;
+		height: 12px;
 	}
 
 	/* 输入区刻意不做"框"——没有边框、没有底色块，大字号裸排；下面这条
