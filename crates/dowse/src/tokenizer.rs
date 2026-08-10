@@ -138,6 +138,34 @@ pub(crate) struct VecTokenStream {
     index: usize,
 }
 
+/// 中文输入即搜专用分词器：每个 CJK 字符各自成为一个连续位置的 token，
+/// 非汉字忽略。它只挂在独立的 name_chars/content_chars 辅助字段上，不改变
+/// 主 jieba 字段的相关性和短语语义。
+#[derive(Clone, Default)]
+pub(crate) struct CjkCharTokenizer;
+
+impl Tokenizer for CjkCharTokenizer {
+    type TokenStream<'a> = VecTokenStream;
+
+    fn token_stream(&mut self, text: &str) -> VecTokenStream {
+        let mut tokens = Vec::new();
+        for (position, (offset_from, ch)) in text
+            .char_indices()
+            .filter(|(_, ch)| is_cjk(*ch))
+            .enumerate()
+        {
+            tokens.push(Token {
+                offset_from,
+                offset_to: offset_from + ch.len_utf8(),
+                position,
+                text: ch.to_string(),
+                position_length: 1,
+            });
+        }
+        VecTokenStream { tokens, index: 0 }
+    }
+}
+
 impl TokenStream for VecTokenStream {
     fn advance(&mut self) -> bool {
         if self.index < self.tokens.len() {
@@ -254,6 +282,28 @@ mod tests {
         assert_eq!(texts, vec!["1234567890"]);
         assert_eq!(tokens[0].offset_from, 0);
         assert_eq!(tokens[0].offset_to, "1234567890".len());
+    }
+
+    #[test]
+    fn cjk_char_tokenizer_emits_stable_character_positions() {
+        let text = "North北极-星2026";
+        let mut tokenizer = CjkCharTokenizer;
+        let mut stream = tokenizer.token_stream(text);
+        let mut tokens = Vec::new();
+        while stream.advance() {
+            tokens.push(stream.token().clone());
+        }
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["北", "极", "星"]
+        );
+        for (position, token) in tokens.iter().enumerate() {
+            assert_eq!(token.position, position);
+            assert_eq!(&text[token.offset_from..token.offset_to], token.text);
+        }
     }
 
     #[test]

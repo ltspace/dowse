@@ -260,14 +260,16 @@ pub(crate) fn add_file_document(
     let path_str = path.to_string_lossy().into_owned();
     writer.add_document(doc!(
         fields.path => path_str.clone(),
-        fields.name => name,
+        fields.name => name.clone(),
         fields.ext => ext,
-        fields.content => content,
+        fields.content => content.clone(),
         fields.mtime => mtime,
         fields.size => size,
         // 文本抽取管线产出 "text"；图片走 add_image_document_with_content，写 "image"。
         fields.kind => "text",
         fields.path_text => path_str,
+        fields.name_chars => name,
+        fields.content_chars => content,
     ))?;
     Ok(AddOutcome::Indexed)
 }
@@ -328,13 +330,15 @@ pub(crate) fn add_image_document_with_content(
     let path_str = path.to_string_lossy().into_owned();
     writer.add_document(doc!(
         fields.path => path_str.clone(),
-        fields.name => name,
+        fields.name => name.clone(),
         fields.ext => ext,
         fields.kind => "image",
         fields.content => content.to_string(),
         fields.mtime => mtime,
         fields.size => size,
         fields.path_text => path_str,
+        fields.name_chars => name,
+        fields.content_chars => content.to_string(),
     ))?;
     Ok(())
 }

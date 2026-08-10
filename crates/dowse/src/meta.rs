@@ -21,9 +21,11 @@ use crate::cursor::{UsnCursor, VolumeKey};
 /// 空转，所以也算不兼容变更，从 v4 升到 v5。（mtime:/size: 的范围过滤没有另立字段：
 /// mtime/size 从 v3 起就是 FAST，tantivy 0.26 的 RangeQuery 直接走 fast field 扫描，
 /// 无需额外索引属性。）
+/// v6 新增 name_chars/content_chars 中文逐字位置字段，让连续中文输入按字符短语
+/// 检索，不再受 jieba 动态分词边界影响；旧索引没有这些字段，必须重建。
 /// 打开索引时版本对不上就要求重建，不做静默迁移、不做自动升级——旧字段布局
 /// 搜出来的结果不可靠，宁可让用户重建一次。
-pub(crate) const SCHEMA_VERSION: u32 = 5;
+pub(crate) const SCHEMA_VERSION: u32 = 6;
 
 /// 索引目录旁的元数据：schema 版本号 + 已注册的索引根目录列表 + 每个卷的
 /// USN 游标（里程碑 6）。
@@ -339,7 +341,7 @@ mod tests {
         Ok(())
     }
 
-    /// 查询语法升级把 schema 升到 v5（新增 path_text 字段）。用上一版 v4 建的旧索引
+    /// 中文输入即搜把 schema 升到 v6（新增逐字位置字段）。用上一版 v5 建的旧索引
     /// 打开时必须报错、并明确引导重建，不能拿缺字段的旧布局硬搜出不可靠结果。
     #[test]
     fn opening_previous_schema_version_index_errors_with_rebuild_hint() -> Result<()> {

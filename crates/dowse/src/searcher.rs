@@ -41,9 +41,21 @@ fn plain_typeahead_tokens(query: &str) -> Option<Vec<String>> {
     (!tokens.is_empty()).then_some(tokens)
 }
 
+fn continuous_cjk_chars(query: &str) -> Option<Vec<String>> {
+    let chars: Vec<String> = query
+        .trim()
+        .chars()
+        .map(|ch| matches!(ch as u32, 0x4E00..=0x9FFF | 0x3400..=0x4DBF).then(|| ch.to_string()))
+        .collect::<Option<_>>()?;
+    (!chars.is_empty()).then_some(chars)
+}
+
 fn typeahead_prefix_token(query: &str) -> Option<String> {
     if query.chars().last().is_some_and(char::is_whitespace) {
         return None;
+    }
+    if continuous_cjk_chars(query).is_some() {
+        return Some(query.trim().to_owned());
     }
     plain_typeahead_tokens(query)?.pop()
 }
@@ -486,13 +498,12 @@ impl Searcher {
     fn build_queries(&self, query_str: &str) -> Result<(Box<dyn Query>, Box<dyn Query>)> {
         let parsed = query::parse(query_str)?;
         if !parsed.has_operators {
+            if let Some(chars) = continuous_cjk_chars(query_str) {
+                return Ok(self.build_cjk_typeahead_queries(&chars));
+            }
             if let Some(tokens) = plain_typeahead_tokens(query_str) {
                 let prefix_last = !query_str.chars().last().is_some_and(char::is_whitespace);
-                let raw_prefix = (prefix_last
-                    && tokens.len() > 1
-                    && query_str.trim().chars().all(char::is_alphanumeric))
-                .then(|| query_str.trim());
-                return Ok(self.build_typeahead_queries(&tokens, prefix_last, raw_prefix));
+                return Ok(self.build_typeahead_queries(&tokens, prefix_last));
             }
             return Ok((
                 self.parser.parse_query(query_str)?,
@@ -502,6 +513,33 @@ impl Searcher {
         self.build_from_parsed(&parsed)
     }
 
+    /// 连续中文走独立逐字字段上的字符短语，不再依赖 jieba 会随上下文变化的
+    /// 分词边界。输入每多一个字，短语只会更严格，命中集合天然只能收窄。
+    fn build_cjk_typeahead_queries(&self, chars: &[String]) -> (Box<dyn Query>, Box<dyn Query>) {
+        let build = |field: Field| -> Box<dyn Query> {
+            let terms: Vec<Term> = chars
+                .iter()
+                .map(|ch| Term::from_field_text(field, ch))
+                .collect();
+            if terms.len() == 1 {
+                Box::new(TermQuery::new(
+                    terms[0].clone(),
+                    IndexRecordOption::WithFreqs,
+                ))
+            } else {
+                Box::new(PhraseQuery::new(terms))
+            }
+        };
+
+        (
+            Box::new(BooleanQuery::new(vec![
+                (Occur::Should, build(self.fields.name_chars)),
+                (Occur::Should, build(self.fields.content_chars)),
+            ])),
+            build(self.fields.content_chars),
+        )
+    }
+
     /// 普通输入按“前面的 token 已完成、最后一个 token 仍在输入”解释：前面的
     /// token 精确 AND，最后一个 token 做前缀匹配。每个 token 都可落在文件名或正文，
     /// 跟原 QueryParser 的默认双字段语义一致。输入以空白结尾时最后一词也视为完成。
@@ -509,7 +547,6 @@ impl Searcher {
         &self,
         tokens: &[String],
         prefix_last: bool,
-        raw_prefix: Option<&str>,
     ) -> (Box<dyn Query>, Box<dyn Query>) {
         let last = tokens.len() - 1;
         let mut retrieval = Vec::with_capacity(tokens.len());
@@ -551,35 +588,10 @@ impl Searcher {
             snippet.push((Occur::Must, snippet_query));
         }
 
-        let tokenized_retrieval: Box<dyn Query> = Box::new(BooleanQuery::new(retrieval));
-        let tokenized_snippet: Box<dyn Query> = Box::new(BooleanQuery::new(snippet));
-        if let Some(raw_prefix) = raw_prefix {
-            // jieba 会随输入变长重排边界，例如“周会纪”可能切成“周会 + 纪”，
-            // 索引里的完整“周会纪要”却是一个词项。分词路径会漏掉它；并入原始
-            // 连续串前缀路径，且只用于纯字母数字输入，避免吞掉查询语法。
-            let normalized = raw_prefix.to_lowercase();
-            let retrieval = Box::new(BooleanQuery::new(vec![
-                (Occur::Should, tokenized_retrieval),
-                (
-                    Occur::Should,
-                    term_prefix_query(self.fields.name, &normalized),
-                ),
-                (
-                    Occur::Should,
-                    term_prefix_query(self.fields.content, &normalized),
-                ),
-            ])) as Box<dyn Query>;
-            let snippet = Box::new(BooleanQuery::new(vec![
-                (Occur::Should, tokenized_snippet),
-                (
-                    Occur::Should,
-                    term_prefix_query(self.fields.content, &normalized),
-                ),
-            ])) as Box<dyn Query>;
-            (retrieval, snippet)
-        } else {
-            (tokenized_retrieval, tokenized_snippet)
-        }
+        (
+            Box::new(BooleanQuery::new(retrieval)),
+            Box::new(BooleanQuery::new(snippet)),
+        )
     }
 
     /// 把结构化的 [`query::Parsed`] 拼成（检索查询, 纯内容高亮查询）。
