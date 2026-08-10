@@ -41,6 +41,13 @@ fn plain_typeahead_tokens(query: &str) -> Option<Vec<String>> {
     (!tokens.is_empty()).then_some(tokens)
 }
 
+fn typeahead_prefix_token(query: &str) -> Option<String> {
+    if query.chars().last().is_some_and(char::is_whitespace) {
+        return None;
+    }
+    plain_typeahead_tokens(query)?.pop()
+}
+
 /// PhrasePrefixQuery 的默认 50 个展开对单字中文和短英文前缀太小，会让召回取决于
 /// 词典顺序。桌面本地索引把上限放宽到 2048，同时仍保持有界，避免常见单字查询
 /// 无限制枚举整个词典。
@@ -335,6 +342,7 @@ impl Searcher {
         // 认内容词那份，path:/mtime:/size: 这些操作符不进高亮（它们的 term 落在别的
         // 字段上，SnippetGenerator 绑定在 content 字段，本就不会拿它们去标原文，这里
         // 再用纯内容查询喂它是双保险，也让意图更清楚）。
+        let typeahead_prefix = typeahead_prefix_token(query_str);
         let (retrieval_query, snippet_query) = self.build_queries(query_str)?;
         let query: Box<dyn Query> = match ext_group {
             Some(exts) if !exts.is_empty() => {
@@ -451,8 +459,12 @@ impl Searcher {
                 .unwrap_or_default()
                 .to_owned();
 
-            let (snippet, highlighted) =
-                snippet_with_fallback(&snippet_gen, content, SNIPPET_MAX_CHARS);
+            let (snippet, highlighted) = match typeahead_prefix.as_deref() {
+                Some(prefix) => {
+                    snippet_for_typeahead_prefix(&snippet_gen, content, prefix, SNIPPET_MAX_CHARS)
+                }
+                None => snippet_with_fallback(&snippet_gen, content, SNIPPET_MAX_CHARS),
+            };
             hits.push(SearchHit {
                 path,
                 score,
@@ -520,12 +532,20 @@ impl Searcher {
                 ])) as Box<dyn Query>,
             ));
 
-            let snippet_query = if prefix {
-                term_prefix_query(self.fields.content, token)
+            let snippet_query: Box<dyn Query> = if prefix {
+                // PhrasePrefixQuery 不把最后的 prefix 暴露给 query_terms()，而
+                // SnippetGenerator 正是靠 query_terms() 收集高亮词。并入一个
+                // 精确 TermQuery：完整词仍能正常高亮，前缀分支继续负责召回。
+                Box::new(BooleanQuery::new(vec![
+                    (Occur::Should, term_query(self.fields.content, token)),
+                    (Occur::Should, term_prefix_query(self.fields.content, token)),
+                ]))
             } else {
                 term_query(self.fields.content, token)
             };
-            snippet.push((Occur::Should, snippet_query));
+            // preview() 会把这份内容查询作为 Must：多个词仍必须全部出现在
+            // 选中文档里，不能因为某个常见词碰巧相同就制造假的高亮预览。
+            snippet.push((Occur::Must, snippet_query));
         }
 
         (
@@ -743,6 +763,7 @@ impl Searcher {
     /// ```
     pub fn preview(&self, path: &str, query_str: &str) -> Result<Option<PreviewHit>> {
         let searcher = self.reader.searcher();
+        let typeahead_prefix = typeahead_prefix_token(query_str);
         let path_term = Term::from_field_text(self.fields.path, path);
         let path_query = TermQuery::new(path_term, IndexRecordOption::Basic);
 
@@ -768,8 +789,12 @@ impl Searcher {
                 .get_first(self.fields.content)
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            let (snippet, highlighted) =
-                snippet_with_fallback(&snippet_gen, content, PREVIEW_MAX_CHARS);
+            let (snippet, highlighted) = match typeahead_prefix.as_deref() {
+                Some(prefix) => {
+                    snippet_for_typeahead_prefix(&snippet_gen, content, prefix, PREVIEW_MAX_CHARS)
+                }
+                None => snippet_with_fallback(&snippet_gen, content, PREVIEW_MAX_CHARS),
+            };
             let (size, mtime, ext) = self.doc_meta(&doc);
             return Ok(Some(PreviewHit {
                 snippet,
@@ -858,6 +883,53 @@ fn truncate_scan_window(content: &str) -> &str {
         end -= 1;
     }
     &content[..end]
+}
+
+/// 在 UTF-8 字符边界上查找用户仍在输入的最后一段。中文按原字面匹配，ASCII
+/// 忽略大小写；返回的仍是原文 byte range，可直接交给前端切片。
+fn literal_prefix_ranges(text: &str, prefix: &str) -> Vec<Range<usize>> {
+    if prefix.is_empty() || prefix.len() > text.len() {
+        return Vec::new();
+    }
+
+    text.char_indices()
+        .filter_map(|(start, _)| {
+            let end = start + prefix.len();
+            (end <= text.len()
+                && text.is_char_boundary(end)
+                && text[start..end].eq_ignore_ascii_case(prefix))
+            .then_some(start..end)
+        })
+        .collect()
+}
+
+/// PhrasePrefixQuery 能召回 `北`→`北极星`、`north`→`northstar`，但 tantivy 的
+/// SnippetGenerator 不会展开 prefix 来计算高亮。若扫描窗口里有字面前缀，主动
+/// 取它周围的窗口并只高亮用户已经输入的部分；命中只在文件名或超长正文后段时，
+/// 仍复用原来的安全兜底，保持截断边界不变。
+fn snippet_for_typeahead_prefix(
+    snippet_gen: &SnippetGenerator,
+    content: &str,
+    prefix: &str,
+    max_chars: usize,
+) -> (String, Vec<Range<usize>>) {
+    let scan_window = truncate_scan_window(content);
+    let Some(first) = literal_prefix_ranges(scan_window, prefix)
+        .into_iter()
+        .next()
+    else {
+        return snippet_with_fallback(snippet_gen, content, max_chars);
+    };
+
+    let hit_char = scan_window[..first.start].chars().count();
+    let start_char = hit_char.saturating_sub(max_chars / 3);
+    let start_byte = scan_window
+        .char_indices()
+        .nth(start_char)
+        .map_or(scan_window.len(), |(index, _)| index);
+    let fragment: String = scan_window[start_byte..].chars().take(max_chars).collect();
+    let highlighted = normalize_ranges(literal_prefix_ranges(&fragment, prefix));
+    (fragment, highlighted)
 }
 
 /// 在截断后的扫描窗口内生成摘要；如果窗口内一个命中区间都没有（比如命中词
