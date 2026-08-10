@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevent a late indexing-progress event from leaving the full-screen indexing
+  view on top of valid search results after a rebuild finishes. The backend now
+  emits an authoritative settled snapshot on the same event channel, and the
+  frontend reduces progress and snapshots through one tested state transition.
+
 ## [0.10.0] - 2026-07-21
 
 ### Added
