@@ -10,8 +10,8 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{
-    AllQuery, BooleanQuery, Occur, PhrasePrefixQuery, PhraseQuery, Query, QueryParser, RangeQuery,
-    TermQuery,
+    AllQuery, BooleanQuery, BoostQuery, Occur, PhraseQuery, Query, QueryParser, RangeQuery,
+    RegexQuery, TermQuery,
 };
 use tantivy::schema::{Field, IndexRecordOption, Value};
 use tantivy::snippet::SnippetGenerator;
@@ -23,7 +23,16 @@ use crate::{Fields, build_schema, register_tokenizers};
 
 /// 输入即搜的普通查询只接受不会触发 tantivy 查询语法的字符。引号、字段冒号、
 /// 通配符等一律留给 QueryParser，避免为了前缀体验破坏既有高级语法。
-fn plain_typeahead_tokens(query: &str) -> Option<Vec<String>> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TypeaheadPart {
+    Cjk(Vec<String>),
+    Word(String),
+}
+
+/// 把“普通输入”编译成确定性的 autocomplete 片段，不调用 jieba。CJK 连续段按字
+/// 组成短语，其他字母数字连续段组成词；空白、点、横线和下划线只是分隔符。
+/// 这份结构只定义召回集合，jieba 稍后只能作为 Should 加分，不能新增命中。
+fn plain_typeahead_parts(query: &str) -> Option<Vec<TypeaheadPart>> {
     if query.trim().is_empty()
         || !query
             .chars()
@@ -32,41 +41,58 @@ fn plain_typeahead_tokens(query: &str) -> Option<Vec<String>> {
         return None;
     }
 
-    let mut tokenizer = crate::tokenizer::MixedTokenizer::new();
-    let mut stream = tokenizer.token_stream(query);
-    let mut tokens = Vec::new();
-    while stream.advance() {
-        tokens.push(stream.token().text.clone());
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Kind {
+        Cjk,
+        Word,
     }
-    (!tokens.is_empty()).then_some(tokens)
-}
 
-fn continuous_cjk_chars(query: &str) -> Option<Vec<String>> {
-    let chars: Vec<String> = query
-        .trim()
-        .chars()
-        .map(|ch| matches!(ch as u32, 0x4E00..=0x9FFF | 0x3400..=0x4DBF).then(|| ch.to_string()))
-        .collect::<Option<_>>()?;
-    (!chars.is_empty()).then_some(chars)
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut kind: Option<Kind> = None;
+    let flush = |parts: &mut Vec<TypeaheadPart>, current: &mut String, kind: &mut Option<Kind>| {
+        if current.is_empty() {
+            *kind = None;
+            return;
+        }
+        let value = std::mem::take(current);
+        match kind.take() {
+            Some(Kind::Cjk) => parts.push(TypeaheadPart::Cjk(
+                value.chars().map(String::from).collect(),
+            )),
+            Some(Kind::Word) => parts.push(TypeaheadPart::Word(value.to_lowercase())),
+            None => {}
+        }
+    };
+
+    for ch in query.trim().chars() {
+        let next = if crate::tokenizer::is_cjk(ch) {
+            Some(Kind::Cjk)
+        } else if ch.is_alphanumeric() {
+            Some(Kind::Word)
+        } else {
+            None
+        };
+        if next != kind {
+            flush(&mut parts, &mut current, &mut kind);
+        }
+        if let Some(next) = next {
+            kind = Some(next);
+            current.push(ch);
+        }
+    }
+    flush(&mut parts, &mut current, &mut kind);
+    (!parts.is_empty()).then_some(parts)
 }
 
 fn typeahead_prefix_token(query: &str) -> Option<String> {
     if query.chars().last().is_some_and(char::is_whitespace) {
         return None;
     }
-    if continuous_cjk_chars(query).is_some() {
-        return Some(query.trim().to_owned());
+    match plain_typeahead_parts(query)?.pop()? {
+        TypeaheadPart::Cjk(chars) => Some(chars.concat()),
+        TypeaheadPart::Word(word) => Some(word),
     }
-    plain_typeahead_tokens(query)?.pop()
-}
-
-/// PhrasePrefixQuery 的默认 50 个展开对单字中文和短英文前缀太小，会让召回取决于
-/// 词典顺序。桌面本地索引把上限放宽到 2048，同时仍保持有界，避免常见单字查询
-/// 无限制枚举整个词典。
-fn term_prefix_query(field: Field, text: &str) -> Box<dyn Query> {
-    let mut query = PhrasePrefixQuery::new(vec![Term::from_field_text(field, text)]);
-    query.set_max_expansions(2048);
-    Box::new(query)
 }
 
 fn term_query(field: Field, text: &str) -> Box<dyn Query> {
@@ -74,6 +100,30 @@ fn term_query(field: Field, text: &str) -> Box<dyn Query> {
         Term::from_field_text(field, text),
         IndexRecordOption::WithFreqs,
     ))
+}
+
+fn cjk_phrase_query(field: Field, chars: &[String]) -> Box<dyn Query> {
+    let terms: Vec<Term> = chars
+        .iter()
+        .map(|ch| Term::from_field_text(field, ch))
+        .collect();
+    if terms.len() == 1 {
+        term_query(field, &chars[0])
+    } else {
+        Box::new(PhraseQuery::new(terms))
+    }
+}
+
+/// 常见前缀直接查索引期 edge-ngram 的精确 term；超过索引上限的极端长词改走
+/// Tantivy 的正则自动机。后者没有“最多展开 N 个词项”的截断，因此仍保持集合单调。
+fn word_prefix_query(prefix_field: Field, word_field: Field, text: &str) -> Result<Box<dyn Query>> {
+    if text.chars().count() <= crate::tokenizer::AUTOCOMPLETE_MAX_PREFIX_CHARS {
+        return Ok(term_query(prefix_field, text));
+    }
+    Ok(Box::new(RegexQuery::from_pattern(
+        &format!("{text}.*"),
+        word_field,
+    )?))
 }
 
 /// 结果排序方式。相关性是默认值——不传排序参数、或者从前端传来的字符串
@@ -349,8 +399,8 @@ impl Searcher {
         ext_group: Option<&[&str]>,
         sort: SortMode,
     ) -> Result<SearchPage> {
-        // 把查询串解析成（检索用查询, 只含内容词的高亮查询）：无操作符时两者都退回
-        // 老的整串 parse_query，逐字节向后兼容；有操作符时按结构化规则拼。摘要高亮只
+        // 把查询串解析成（检索用查询, 只含内容词的高亮查询）：普通输入走稳定的
+        // autocomplete 召回；查询语法和结构化操作符仍按原 QueryParser/规则拼。摘要只
         // 认内容词那份，path:/mtime:/size: 这些操作符不进高亮（它们的 term 落在别的
         // 字段上，SnippetGenerator 绑定在 content 字段，本就不会拿它们去标原文，这里
         // 再用纯内容查询喂它是双保险，也让意图更清楚）。
@@ -491,19 +541,15 @@ impl Searcher {
     /// 把查询串翻成两份 tantivy 查询：`.0` 用于检索（含全部操作符条件），`.1` 只含
     /// 内容词、供摘要/预览高亮用。
     ///
-    /// 向后兼容的关键分叉在这里：一旦 [`query::parse`] 判定整串**没有**任何操作符，
-    /// 就把原始查询串原样交回老的 `QueryParser`（两份都是），跟从前逐字节一致——
-    /// 短语、`ext:`、多词 AND 等既有行为一个字节都不动。只有确实出现 `path:` /
-    /// `mtime:` / `size:` / `OR` / `NOT` / `-` 时才走下面的结构化拼装。
+    /// 分叉在这里：没有操作符且只含普通输入字符时走 autocomplete 查询计划；引号等
+    /// QueryParser 语法仍交回原解析器；`path:` / `mtime:` / `size:` / `OR` / `NOT`
+    /// 等结构化操作符走下面的显式拼装。
     fn build_queries(&self, query_str: &str) -> Result<(Box<dyn Query>, Box<dyn Query>)> {
         let parsed = query::parse(query_str)?;
         if !parsed.has_operators {
-            if let Some(chars) = continuous_cjk_chars(query_str) {
-                return Ok(self.build_cjk_typeahead_queries(&chars));
-            }
-            if let Some(tokens) = plain_typeahead_tokens(query_str) {
+            if let Some(parts) = plain_typeahead_parts(query_str) {
                 let prefix_last = !query_str.chars().last().is_some_and(char::is_whitespace);
-                return Ok(self.build_typeahead_queries(&tokens, prefix_last));
+                return self.build_typeahead_queries(query_str, &parts, prefix_last);
             }
             return Ok((
                 self.parser.parse_query(query_str)?,
@@ -513,85 +559,56 @@ impl Searcher {
         self.build_from_parsed(&parsed)
     }
 
-    /// 连续中文走独立逐字字段上的字符短语，不再依赖 jieba 会随上下文变化的
-    /// 分词边界。输入每多一个字，短语只会更严格，命中集合天然只能收窄。
-    fn build_cjk_typeahead_queries(&self, chars: &[String]) -> (Box<dyn Query>, Box<dyn Query>) {
-        let build = |field: Field| -> Box<dyn Query> {
-            let terms: Vec<Term> = chars
-                .iter()
-                .map(|ch| Term::from_field_text(field, ch))
-                .collect();
-            if terms.len() == 1 {
-                Box::new(TermQuery::new(
-                    terms[0].clone(),
-                    IndexRecordOption::WithFreqs,
-                ))
-            } else {
-                Box::new(PhraseQuery::new(terms))
-            }
-        };
-
-        (
-            Box::new(BooleanQuery::new(vec![
-                (Occur::Should, build(self.fields.name_chars)),
-                (Occur::Should, build(self.fields.content_chars)),
-            ])),
-            build(self.fields.content_chars),
-        )
-    }
-
-    /// 普通输入按“前面的 token 已完成、最后一个 token 仍在输入”解释：前面的
-    /// token 精确 AND，最后一个 token 做前缀匹配。每个 token 都可落在文件名或正文，
-    /// 跟原 QueryParser 的默认双字段语义一致。输入以空白结尾时最后一词也视为完成。
+    /// 普通输入走独立 autocomplete 召回通道：每个 CJK 连续段是逐字短语，普通词的
+    /// 最后一段查索引期前缀，之前的段精确 AND。主 jieba 查询只是 Should 加分，
+    /// 所以分词边界无论怎样变化，都只能改变排序，不能让更长查询凭空新增文档。
     fn build_typeahead_queries(
         &self,
-        tokens: &[String],
+        query_str: &str,
+        parts: &[TypeaheadPart],
         prefix_last: bool,
-    ) -> (Box<dyn Query>, Box<dyn Query>) {
-        let last = tokens.len() - 1;
-        let mut retrieval = Vec::with_capacity(tokens.len());
-        let mut snippet = Vec::with_capacity(tokens.len());
+    ) -> Result<(Box<dyn Query>, Box<dyn Query>)> {
+        let last = parts.len() - 1;
+        let mut recall = Vec::with_capacity(parts.len());
+        let mut snippet = Vec::with_capacity(parts.len());
 
-        for (index, token) in tokens.iter().enumerate() {
-            let prefix = prefix_last && index == last;
-            let name_query = if prefix {
-                term_prefix_query(self.fields.name, token)
-            } else {
-                term_query(self.fields.name, token)
+        for (index, part) in parts.iter().enumerate() {
+            let (name_query, content_query, snippet_query) = match part {
+                TypeaheadPart::Cjk(chars) => (
+                    cjk_phrase_query(self.fields.name_chars, chars),
+                    cjk_phrase_query(self.fields.content_chars, chars),
+                    cjk_phrase_query(self.fields.content_chars, chars),
+                ),
+                TypeaheadPart::Word(word) if prefix_last && index == last => (
+                    word_prefix_query(self.fields.name_prefixes, self.fields.name, word)?,
+                    word_prefix_query(self.fields.content_prefixes, self.fields.content, word)?,
+                    word_prefix_query(self.fields.content_prefixes, self.fields.content, word)?,
+                ),
+                TypeaheadPart::Word(word) => (
+                    term_query(self.fields.name, word),
+                    term_query(self.fields.content, word),
+                    term_query(self.fields.content, word),
+                ),
             };
-            let content_query = if prefix {
-                term_prefix_query(self.fields.content, token)
-            } else {
-                term_query(self.fields.content, token)
-            };
-            retrieval.push((
+            recall.push((
                 Occur::Must,
                 Box::new(BooleanQuery::new(vec![
                     (Occur::Should, name_query),
                     (Occur::Should, content_query),
                 ])) as Box<dyn Query>,
             ));
-
-            let snippet_query: Box<dyn Query> = if prefix {
-                // PhrasePrefixQuery 不把最后的 prefix 暴露给 query_terms()，而
-                // SnippetGenerator 正是靠 query_terms() 收集高亮词。并入一个
-                // 精确 TermQuery：完整词仍能正常高亮，前缀分支继续负责召回。
-                Box::new(BooleanQuery::new(vec![
-                    (Occur::Should, term_query(self.fields.content, token)),
-                    (Occur::Should, term_prefix_query(self.fields.content, token)),
-                ]))
-            } else {
-                term_query(self.fields.content, token)
-            };
-            // preview() 会把这份内容查询作为 Must：多个词仍必须全部出现在
-            // 选中文档里，不能因为某个常见词碰巧相同就制造假的高亮预览。
             snippet.push((Occur::Must, snippet_query));
         }
 
-        (
-            Box::new(BooleanQuery::new(retrieval)),
+        let stable_recall = Box::new(BooleanQuery::new(recall)) as Box<dyn Query>;
+        let relevance_boost = BoostQuery::new(self.parser.parse_query(query_str)?, 2.0);
+        Ok((
+            Box::new(BooleanQuery::new(vec![
+                (Occur::Must, stable_recall),
+                (Occur::Should, Box::new(relevance_boost)),
+            ])),
             Box::new(BooleanQuery::new(snippet)),
-        )
+        ))
     }
 
     /// 把结构化的 [`query::Parsed`] 拼成（检索查询, 纯内容高亮查询）。
@@ -810,8 +827,8 @@ impl Searcher {
         // path 精确匹配 AND 用户查询词的**内容词部分**：既锁定这一篇文档，又让
         // SnippetGenerator 拿到内容词去定位高亮位置。用内容词那份而不是整串，是为了
         // 让预览查询词里若带了 path:/mtime:/size: 等操作符时不会把预览搞挂——操作符
-        // 交给搜索层过滤即可，预览只关心"高亮哪些词"。纯词查询下这份就等于老的整串
-        // parse_query，行为不变。
+        // 交给搜索层过滤即可，预览只关心"高亮哪些词"。普通输入下这份对应正文侧的
+        // autocomplete 召回条件。
         let (_retrieval, content_query) = self.build_queries(query_str)?;
         let combined = BooleanQuery::new(vec![
             (Occur::Must, Box::new(path_query.clone()) as Box<dyn Query>),
@@ -943,8 +960,8 @@ fn literal_prefix_ranges(text: &str, prefix: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
-/// PhrasePrefixQuery 能召回 `北`→`北极星`、`north`→`northstar`，但 tantivy 的
-/// SnippetGenerator 不会展开 prefix 来计算高亮。若扫描窗口里有字面前缀，主动
+/// autocomplete 辅助字段不属于正文原字段，SnippetGenerator 不会据此计算高亮。
+/// 若扫描窗口里有字面前缀，主动
 /// 取它周围的窗口并只高亮用户已经输入的部分；命中只在文件名或超长正文后段时，
 /// 仍复用原来的安全兜底，保持截断边界不变。
 fn snippet_for_typeahead_prefix(
@@ -997,6 +1014,19 @@ fn snippet_with_fallback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_typeahead_plan_is_deterministic_across_scripts() {
+        assert_eq!(
+            plain_typeahead_parts("北极 north-star_2026"),
+            Some(vec![
+                TypeaheadPart::Cjk(vec!["北".into(), "极".into()]),
+                TypeaheadPart::Word("north".into()),
+                TypeaheadPart::Word("star".into()),
+                TypeaheadPart::Word("2026".into()),
+            ])
+        );
+    }
 
     #[test]
     fn normalize_ranges_empty() {
@@ -1206,6 +1236,95 @@ mod tests {
                 }
                 previous = Some(paths);
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cjk_typeahead_requires_real_adjacency() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("joined.md"), "北极项目")?;
+        std::fs::write(target_dir.path().join("separated.md"), "北-A-极项目")?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+        let hits = searcher.search("北极", 10)?;
+        assert!(hits.iter().any(|hit| hit.path.ends_with("joined.md")));
+        assert!(
+            !hits.iter().any(|hit| hit.path.ends_with("separated.md")),
+            "非 CJK 间隔不能被逐字字段吞掉"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typeahead_prefix_recall_is_not_capped_by_term_expansion() -> Result<()> {
+        let (schema, fields) = build_schema();
+        let index = Index::create_in_ram(schema);
+        register_tokenizers(&index);
+        let mut writer = index.writer(50_000_000)?;
+
+        for id in 0..2_500 {
+            let path = format!("doc-{id:04}.md");
+            let content = format!("n{id:04}marker");
+            writer.add_document(tantivy::doc!(
+                fields.path => path.clone(),
+                fields.name => path.clone(),
+                fields.ext => "md",
+                fields.content => content.clone(),
+                fields.mtime => 0i64,
+                fields.size => 0u64,
+                fields.kind => "text",
+                fields.path_text => path,
+                fields.name_chars => "",
+                fields.content_chars => "",
+                fields.name_prefixes => content.clone(),
+                fields.content_prefixes => content,
+            ))?;
+        }
+        writer.commit()?;
+
+        let mut parser = QueryParser::for_index(&index, vec![fields.name, fields.content]);
+        parser.set_conjunction_by_default();
+        let searcher = Searcher {
+            reader: index.reader()?,
+            parser,
+            fields,
+        };
+
+        let totals = ["n", "n2", "n24"]
+            .into_iter()
+            .map(|query| {
+                searcher
+                    .search_paged(query, 10, 0, None, SortMode::Relevance)
+                    .map(|page| page.total)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        assert_eq!(totals, vec![2_500, 500, 100]);
+        assert!(
+            totals.windows(2).all(|pair| pair[1] <= pair[0]),
+            "前缀词典再大也只能收窄召回"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn very_long_word_prefixes_fall_back_without_breaking_monotonicity() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        let word = format!("{}z", "a".repeat(70));
+        std::fs::write(target_dir.path().join("long.md"), &word)?;
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+        for length in [64, 65, 70, 71] {
+            let query: String = word.chars().take(length).collect();
+            assert_eq!(
+                searcher.search(&query, 10)?.len(),
+                1,
+                "长度 {length} 的前缀仍应命中"
+            );
         }
         Ok(())
     }

@@ -143,9 +143,9 @@ use tantivy::schema::{
 /// 同款 jieba 分词、但**不落 STORED**（检索用，取回展示仍读 `path`）的镜像字段，
 /// 让路径按与正文一致的词/子词粒度可搜。加字段是不兼容变更，schema 从 v4 升到 v5。
 ///
-/// `name_chars` / `content_chars` 是 schema v6 的中文逐字位置镜像，只服务连续
-/// 中文的输入即搜。它把召回从 jieba 的动态边界中解耦，保证查询逐字变长时命中
-/// 集合只会收窄；两个字段都只 INDEXED，不重复存原文。
+/// schema v6 把输入即搜拆成四个辅助字段：`name_chars` / `content_chars` 保存
+/// CJK 逐字位置，`name_prefixes` / `content_prefixes` 保存普通字母数字词的索引期
+/// 前缀。它们共同定义稳定召回，主 jieba 字段只负责相关性，不再决定“搜不搜得到”。
 pub(crate) struct Fields {
     pub path: tantivy::schema::Field,
     pub name: tantivy::schema::Field,
@@ -160,6 +160,9 @@ pub(crate) struct Fields {
     /// 中文输入即搜辅助字段：分别存文件名/正文的逐字位置索引，不落 STORED。
     pub name_chars: tantivy::schema::Field,
     pub content_chars: tantivy::schema::Field,
+    /// 非 CJK 输入即搜辅助字段：存索引期 edge-ngram 前缀，不落 STORED。
+    pub name_prefixes: tantivy::schema::Field,
+    pub content_prefixes: tantivy::schema::Field,
 }
 
 /// 定义 schema：path/ext/kind 原样存（不分词），name/content 走 jieba 分词，
@@ -168,7 +171,7 @@ pub(crate) struct Fields {
 /// content 必须 STORED，否则搜索命中后没有原文可做摘要高亮。
 /// path_text 是 path 的 jieba 分词镜像，只 INDEXED 不 STORED——它只服务
 /// `path:` 查询的路径子串匹配，取回展示照旧读 STORED 的 path，没必要再存一份。
-/// name_chars/content_chars 同样只 INDEXED，分别保存中文逐字位置。
+/// 四个 autocomplete 镜像字段同样只 INDEXED，不重复存一份原文。
 pub(crate) fn build_schema() -> (Schema, Fields) {
     let mut builder: SchemaBuilder = Schema::builder();
 
@@ -185,6 +188,11 @@ pub(crate) fn build_schema() -> (Schema, Fields) {
         .set_tokenizer("cjk_chars")
         .set_index_option(IndexRecordOption::WithFreqsAndPositions);
     let cjk_chars_indexed_only = TextOptions::default().set_indexing_options(cjk_chars_indexing);
+    let autocomplete_prefix_indexing = TextFieldIndexing::default()
+        .set_tokenizer("autocomplete_prefix")
+        .set_index_option(IndexRecordOption::WithFreqs);
+    let autocomplete_prefix_indexed_only =
+        TextOptions::default().set_indexing_options(autocomplete_prefix_indexing);
 
     let fields = Fields {
         path: builder.add_text_field("path", STRING | STORED),
@@ -197,6 +205,10 @@ pub(crate) fn build_schema() -> (Schema, Fields) {
         path_text: builder.add_text_field("path_text", jieba_indexed_only),
         name_chars: builder.add_text_field("name_chars", cjk_chars_indexed_only.clone()),
         content_chars: builder.add_text_field("content_chars", cjk_chars_indexed_only),
+        name_prefixes: builder
+            .add_text_field("name_prefixes", autocomplete_prefix_indexed_only.clone()),
+        content_prefixes: builder
+            .add_text_field("content_prefixes", autocomplete_prefix_indexed_only),
     };
     (builder.build(), fields)
 }
@@ -210,6 +222,10 @@ pub(crate) fn register_tokenizers(index: &tantivy::Index) {
     index
         .tokenizers()
         .register("cjk_chars", tokenizer::CjkCharTokenizer);
+    index.tokenizers().register(
+        "autocomplete_prefix",
+        tokenizer::AutocompletePrefixTokenizer,
+    );
 }
 
 /// 剥掉 Windows 扩展长度路径语法（`\\?\`/`\\?\UNC\`）的前缀，只给**展示层**用。

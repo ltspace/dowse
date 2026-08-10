@@ -268,8 +268,10 @@ pub(crate) fn add_file_document(
         // 文本抽取管线产出 "text"；图片走 add_image_document_with_content，写 "image"。
         fields.kind => "text",
         fields.path_text => path_str,
-        fields.name_chars => name,
-        fields.content_chars => content,
+        fields.name_chars => name.clone(),
+        fields.content_chars => content.clone(),
+        fields.name_prefixes => name,
+        fields.content_prefixes => content,
     ))?;
     Ok(AddOutcome::Indexed)
 }
@@ -337,8 +339,10 @@ pub(crate) fn add_image_document_with_content(
         fields.mtime => mtime,
         fields.size => size,
         fields.path_text => path_str,
-        fields.name_chars => name,
+        fields.name_chars => name.clone(),
         fields.content_chars => content.to_string(),
+        fields.name_prefixes => name,
+        fields.content_prefixes => content.to_string(),
     ))?;
     Ok(())
 }

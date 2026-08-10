@@ -15,13 +15,24 @@
 //! 段内 offset 加回该段在原串里的字节基址。
 
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+use unicode_script::{Script, UnicodeScript};
 
-/// 判断一个字符是否属于要交给 jieba 的汉字区间：
-/// CJK 统一表意文字（U+4E00–9FFF）和扩展 A（U+3400–4DBF）。
-/// CJK 标点（U+3000–303F）、全角形（U+FF00–FFEF）等**不**算汉字，
-/// 落进非汉字段，跟拉丁/数字/标点一样处理。
-fn is_cjk(ch: char) -> bool {
-    matches!(ch as u32, 0x4E00..=0x9FFF | 0x3400..=0x4DBF)
+/// 索引期为普通字母数字词生成的最长前缀。更长的极端输入在查询侧改走
+/// Tantivy 的正则自动机，不让超长 URL/哈希制造二次方级别的索引膨胀。
+pub(crate) const AUTOCOMPLETE_MAX_PREFIX_CHARS: usize = 64;
+
+/// autocomplete 使用的 CJK script 判定，对齐 Lucene CJKBigramFilter 覆盖的
+/// Han / Hiragana / Katakana / Hangul，而不是手写几个迟早漏掉的码点区间。
+pub(crate) fn is_cjk(ch: char) -> bool {
+    matches!(
+        ch.script(),
+        Script::Han | Script::Hiragana | Script::Katakana | Script::Hangul
+    )
+}
+
+/// 主相关性字段仍只有 Han 交给 jieba；日文假名和韩文不改变原有分词路径。
+fn is_jieba_han(ch: char) -> bool {
+    ch.script() == Script::Han
 }
 
 /// 混合分词器：汉字段走 jieba，非汉字段按字母数字切，全部小写归一。
@@ -102,7 +113,7 @@ impl Tokenizer for MixedTokenizer {
         let mut run_start = 0usize;
         let mut run_is_cjk: Option<bool> = None;
         for (idx, ch) in text.char_indices() {
-            let cjk = is_cjk(ch);
+            let cjk = is_jieba_han(ch);
             match run_is_cjk {
                 None => run_is_cjk = Some(cjk),
                 Some(prev) if prev != cjk => {
@@ -138,9 +149,8 @@ pub(crate) struct VecTokenStream {
     index: usize,
 }
 
-/// 中文输入即搜专用分词器：每个 CJK 字符各自成为一个连续位置的 token，
-/// 非汉字忽略。它只挂在独立的 name_chars/content_chars 辅助字段上，不改变
-/// 主 jieba 字段的相关性和短语语义。
+/// CJK 输入即搜专用分词器：每个 CJK 字符成为一个带原文位置的 token，非 CJK
+/// 字符不产 token 但仍占位置，因此 `北-A-极` 不会被误认成连续的 `北极`。
 #[derive(Clone, Default)]
 pub(crate) struct CjkCharTokenizer;
 
@@ -149,11 +159,10 @@ impl Tokenizer for CjkCharTokenizer {
 
     fn token_stream(&mut self, text: &str) -> VecTokenStream {
         let mut tokens = Vec::new();
-        for (position, (offset_from, ch)) in text
-            .char_indices()
-            .filter(|(_, ch)| is_cjk(*ch))
-            .enumerate()
-        {
+        for (position, (offset_from, ch)) in text.char_indices().enumerate() {
+            if !is_cjk(ch) {
+                continue;
+            }
             tokens.push(Token {
                 offset_from,
                 offset_to: offset_from + ch.len_utf8(),
@@ -162,6 +171,61 @@ impl Tokenizer for CjkCharTokenizer {
                 position_length: 1,
             });
         }
+        VecTokenStream { tokens, index: 0 }
+    }
+}
+
+/// autocomplete 的非 CJK edge-ngram 分词器。每个连续字母数字词在同一 position
+/// 发出从 1 到 64 字符的前缀，等价于成熟搜索引擎的索引期 edge-ngram；CJK 由上面
+/// 的逐字位置字段单独负责。
+#[derive(Clone, Default)]
+pub(crate) struct AutocompletePrefixTokenizer;
+
+impl AutocompletePrefixTokenizer {
+    fn emit_prefixes(
+        text: &str,
+        offset_from: usize,
+        offset_to: usize,
+        position: usize,
+        tokens: &mut Vec<Token>,
+    ) {
+        let word = &text[offset_from..offset_to];
+        for (index, (relative, ch)) in word.char_indices().enumerate() {
+            if index >= AUTOCOMPLETE_MAX_PREFIX_CHARS {
+                break;
+            }
+            let prefix_to = relative + ch.len_utf8();
+            tokens.push(Token {
+                offset_from,
+                offset_to: offset_from + prefix_to,
+                position,
+                text: word[..prefix_to].to_lowercase(),
+                position_length: 1,
+            });
+        }
+    }
+}
+
+impl Tokenizer for AutocompletePrefixTokenizer {
+    type TokenStream<'a> = VecTokenStream;
+
+    fn token_stream(&mut self, text: &str) -> VecTokenStream {
+        let mut tokens = Vec::new();
+        let mut start: Option<usize> = None;
+        let mut position = 0usize;
+
+        for (offset, ch) in text.char_indices() {
+            if ch.is_alphanumeric() && !is_cjk(ch) {
+                start.get_or_insert(offset);
+            } else if let Some(offset_from) = start.take() {
+                Self::emit_prefixes(text, offset_from, offset, position, &mut tokens);
+                position += 1;
+            }
+        }
+        if let Some(offset_from) = start {
+            Self::emit_prefixes(text, offset_from, text.len(), position, &mut tokens);
+        }
+
         VecTokenStream { tokens, index: 0 }
     }
 }
@@ -300,10 +364,60 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["北", "极", "星"]
         );
-        for (position, token) in tokens.iter().enumerate() {
-            assert_eq!(token.position, position);
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.position)
+                .collect::<Vec<_>>(),
+            vec![5, 6, 8],
+            "非 CJK 字符必须留下位置间隔，不能把不连续文本拼成假短语"
+        );
+        for token in &tokens {
             assert_eq!(&text[token.offset_from..token.offset_to], token.text);
         }
+    }
+
+    #[test]
+    fn cjk_detection_uses_unicode_scripts_instead_of_partial_ranges() {
+        assert!(is_cjk('北'));
+        assert!(is_cjk('𠀀'), "CJK 扩展 B 也属于 Han script");
+        assert!(is_cjk('あ'));
+        assert!(is_cjk('한'));
+        assert!(!is_cjk('A'));
+        assert!(!is_cjk('。'));
+    }
+
+    #[test]
+    fn autocomplete_prefix_tokenizer_ignores_cjk_and_normalizes_words() {
+        let mut tokenizer = AutocompletePrefixTokenizer;
+        let mut stream = tokenizer.token_stream("北极 NorthStar-2026 搜索");
+        let mut tokens = Vec::new();
+        while stream.advance() {
+            tokens.push(stream.token().clone());
+        }
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "n",
+                "no",
+                "nor",
+                "nort",
+                "north",
+                "norths",
+                "northst",
+                "northsta",
+                "northstar",
+                "2",
+                "20",
+                "202",
+                "2026"
+            ]
+        );
+        assert!(tokens[..9].iter().all(|token| token.position == 0));
+        assert!(tokens[9..].iter().all(|token| token.position == 1));
     }
 
     #[test]

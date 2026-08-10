@@ -18,10 +18,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Make plain searches typeahead-aware: completed terms remain exact while the
-  last in-progress term matches indexed term prefixes. Continuous Chinese uses
-  a dedicated character-position index, so recall stays monotonic even when
-  jieba changes token boundaries while typing (`北极星计`, `周会纪`, etc.).
+- Separate typeahead recall from relevance analysis. CJK runs use a dedicated
+  Unicode character-position index, while Latin/numeric words use index-time
+  edge prefixes; jieba is now only a ranking boost and cannot add results when
+  its token boundaries change (`北极星计`, `周会纪`, etc.).
 - Prevent a late indexing-progress event from leaving the full-screen indexing
   view on top of valid search results after a rebuild finishes. The backend now
   emits an authoritative settled snapshot on the same event channel, and the
@@ -32,7 +32,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Upgraded the desktop frontend to Vite 8.2 and Motion 13, and the MCP server
   stack to rmcp 3.1.1.
 - The index schema is now version 6; existing indexes must be rebuilt once to
-  populate the Chinese typeahead fields.
+  populate the CJK-position and word-prefix autocomplete fields.
 - CI now verifies frontend state tests, Svelte diagnostics, production builds,
   and high-severity npm advisories. The release workflow can also build a
   seven-day Windows candidate artifact for pre-release installation testing.
