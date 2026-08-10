@@ -15,12 +15,37 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# npm/Tauri frontend build is intentionally not part of CI yet: npm install for
-# the dowse-app frontend is slow in CI and its output is a UI that needs eyes
-# on it to validate, not something a green checkmark can confirm. Revisit once
-# there's a headless visual check worth running.
+# Svelte 的静态构建、类型检查和纯状态测试放在独立 Linux job；真实 Tauri 窗口、
+# Windows 材质和动画仍需人工看，但这些可自动判定的前端回归不应等到发版才发现。
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/dowse-app
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/dowse-app/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Test frontend state
+        run: npm run test:unit
+
+      - name: Check Svelte and TypeScript
+        run: npm run check
+
+      - name: Build frontend
+        run: npm run build
+
   test:
     runs-on: windows-latest
     steps:

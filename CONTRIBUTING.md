@@ -14,7 +14,7 @@ cargo build --workspace
 
 ## Before you open a PR
 
-All three must pass:
+Rust checks:
 
 ```powershell
 cargo test --workspace
@@ -22,7 +22,20 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-CI runs the same three commands on `windows-latest`; a failing one blocks merge.
+Frontend checks:
+
+```powershell
+cd crates/dowse-app
+npm ci
+npm run test:unit
+npm run check
+npm run build
+```
+
+CI runs the Rust commands on `windows-latest` and the frontend commands in a
+separate Linux job. The automated frontend build cannot verify Windows Acrylic,
+window behavior, or animation quality, so UI changes still need a manual Windows
+smoke test before merge.
 
 ## Commit style
 
@@ -32,7 +45,7 @@ CI runs the same three commands on `windows-latest`; a failing one blocks merge.
 
 1. Fork and branch off `main`.
 2. Keep the diff focused — one logical change per PR.
-3. Make sure `cargo test`, `cargo clippy`, and `cargo fmt --check` all pass locally before pushing.
+3. Make sure the Rust and frontend checks above pass locally before pushing.
 4. Describe what changed and why in the PR description; link any related issue.
 5. One maintainer review is required before merge.
 
