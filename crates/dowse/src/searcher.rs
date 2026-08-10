@@ -10,15 +10,52 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{
-    AllQuery, BooleanQuery, Occur, PhraseQuery, Query, QueryParser, RangeQuery, TermQuery,
+    AllQuery, BooleanQuery, Occur, PhrasePrefixQuery, PhraseQuery, Query, QueryParser, RangeQuery,
+    TermQuery,
 };
-use tantivy::schema::{IndexRecordOption, Value};
+use tantivy::schema::{Field, IndexRecordOption, Value};
 use tantivy::snippet::SnippetGenerator;
 use tantivy::tokenizer::{TokenStream, Tokenizer};
 use tantivy::{DocAddress, Index, IndexReader, Order, TantivyDocument, Term};
 
 use crate::query::{self, Cmp};
 use crate::{Fields, build_schema, register_tokenizers};
+
+/// 输入即搜的普通查询只接受不会触发 tantivy 查询语法的字符。引号、字段冒号、
+/// 通配符等一律留给 QueryParser，避免为了前缀体验破坏既有高级语法。
+fn plain_typeahead_tokens(query: &str) -> Option<Vec<String>> {
+    if query.trim().is_empty()
+        || !query
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || ch.is_whitespace() || matches!(ch, '-' | '_' | '.'))
+    {
+        return None;
+    }
+
+    let mut tokenizer = crate::tokenizer::MixedTokenizer::new();
+    let mut stream = tokenizer.token_stream(query);
+    let mut tokens = Vec::new();
+    while stream.advance() {
+        tokens.push(stream.token().text.clone());
+    }
+    (!tokens.is_empty()).then_some(tokens)
+}
+
+/// PhrasePrefixQuery 的默认 50 个展开对单字中文和短英文前缀太小，会让召回取决于
+/// 词典顺序。桌面本地索引把上限放宽到 2048，同时仍保持有界，避免常见单字查询
+/// 无限制枚举整个词典。
+fn term_prefix_query(field: Field, text: &str) -> Box<dyn Query> {
+    let mut query = PhrasePrefixQuery::new(vec![Term::from_field_text(field, text)]);
+    query.set_max_expansions(2048);
+    Box::new(query)
+}
+
+fn term_query(field: Field, text: &str) -> Box<dyn Query> {
+    Box::new(TermQuery::new(
+        Term::from_field_text(field, text),
+        IndexRecordOption::WithFreqs,
+    ))
+}
 
 /// 结果排序方式。相关性是默认值——不传排序参数、或者从前端传来的字符串
 /// 没解析出已知档位时都落回这里。其余三档对应浮窗"排序器"下拉的三个非默认项，
@@ -437,12 +474,64 @@ impl Searcher {
     fn build_queries(&self, query_str: &str) -> Result<(Box<dyn Query>, Box<dyn Query>)> {
         let parsed = query::parse(query_str)?;
         if !parsed.has_operators {
+            if let Some(tokens) = plain_typeahead_tokens(query_str) {
+                return Ok(self.build_typeahead_queries(
+                    &tokens,
+                    !query_str.chars().last().is_some_and(char::is_whitespace),
+                ));
+            }
             return Ok((
                 self.parser.parse_query(query_str)?,
                 self.parser.parse_query(query_str)?,
             ));
         }
         self.build_from_parsed(&parsed)
+    }
+
+    /// 普通输入按“前面的 token 已完成、最后一个 token 仍在输入”解释：前面的
+    /// token 精确 AND，最后一个 token 做前缀匹配。每个 token 都可落在文件名或正文，
+    /// 跟原 QueryParser 的默认双字段语义一致。输入以空白结尾时最后一词也视为完成。
+    fn build_typeahead_queries(
+        &self,
+        tokens: &[String],
+        prefix_last: bool,
+    ) -> (Box<dyn Query>, Box<dyn Query>) {
+        let last = tokens.len() - 1;
+        let mut retrieval = Vec::with_capacity(tokens.len());
+        let mut snippet = Vec::with_capacity(tokens.len());
+
+        for (index, token) in tokens.iter().enumerate() {
+            let prefix = prefix_last && index == last;
+            let name_query = if prefix {
+                term_prefix_query(self.fields.name, token)
+            } else {
+                term_query(self.fields.name, token)
+            };
+            let content_query = if prefix {
+                term_prefix_query(self.fields.content, token)
+            } else {
+                term_query(self.fields.content, token)
+            };
+            retrieval.push((
+                Occur::Must,
+                Box::new(BooleanQuery::new(vec![
+                    (Occur::Should, name_query),
+                    (Occur::Should, content_query),
+                ])) as Box<dyn Query>,
+            ));
+
+            let snippet_query = if prefix {
+                term_prefix_query(self.fields.content, token)
+            } else {
+                term_query(self.fields.content, token)
+            };
+            snippet.push((Occur::Should, snippet_query));
+        }
+
+        (
+            Box::new(BooleanQuery::new(retrieval)),
+            Box::new(BooleanQuery::new(snippet)),
+        )
     }
 
     /// 把结构化的 [`query::Parsed`] 拼成（检索查询, 纯内容高亮查询）。
@@ -948,6 +1037,62 @@ mod tests {
                 "混合文档查询 {query:?} 应命中 mixed.md，实际 {:?}",
                 hits.iter().map(|h| &h.path).collect::<Vec<_>>()
             );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn typeahead_prefixes_keep_recall_stable_across_scripts() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+
+        for (name, content) in [
+            (
+                "brief.md",
+                "北极星计划的检索质量用户访谈，搜索体验 northstar，版本 2026",
+            ),
+            (
+                "meeting.md",
+                "北极星计划检索质量复盘和用户访谈，搜索体验 northstar，目标 2026",
+            ),
+            ("north-cn.md", "北方项目检查记录"),
+            ("north-en.md", "northbound migration notes"),
+            ("number.md", "2048 capacity plan"),
+            ("system.md", "搜索体系说明"),
+            ("south.md", "南方项目复盘"),
+        ] {
+            std::fs::write(target_dir.path().join(name), content)?;
+        }
+
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+        let searcher = Searcher::open(index_dir.path())?;
+
+        for prefixes in [
+            &["北", "北极", "北极星", "北极星计", "北极星计划"][..],
+            &["检", "检索", "检索质", "检索质量"][..],
+            &["用户", "用户访", "用户访谈"][..],
+            &["n", "no", "nor", "north", "norths", "northstar"][..],
+            &["2", "20", "202", "2026"][..],
+            &["搜索 体", "搜索 体验"][..],
+        ] {
+            let mut previous: Option<std::collections::BTreeSet<String>> = None;
+            for query in prefixes {
+                let hits = searcher.search(query, 10)?;
+                let paths: std::collections::BTreeSet<String> =
+                    hits.iter().map(|hit| hit.path.clone()).collect();
+                assert!(
+                    paths.iter().any(|path| path.ends_with("brief.md"))
+                        && paths.iter().any(|path| path.ends_with("meeting.md")),
+                    "逐字输入 {query:?} 时不能丢失目标文档，实际 {paths:?}"
+                );
+                if let Some(previous) = &previous {
+                    assert!(
+                        paths.is_subset(previous),
+                        "查询前缀变长时命中集合只能收窄，不能新增：{query:?} 得到 {paths:?}，上一步是 {previous:?}"
+                    );
+                }
+                previous = Some(paths);
+            }
         }
         Ok(())
     }
