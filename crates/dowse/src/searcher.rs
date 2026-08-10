@@ -1014,6 +1014,7 @@ fn snippet_with_fallback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tantivy::doc;
 
     #[test]
     fn plain_typeahead_plan_is_deterministic_across_scripts() {
@@ -1268,7 +1269,7 @@ mod tests {
         for id in 0..2_500 {
             let path = format!("doc-{id:04}.md");
             let content = format!("n{id:04}marker");
-            writer.add_document(tantivy::doc!(
+            writer.add_document(doc!(
                 fields.path => path.clone(),
                 fields.name => path.clone(),
                 fields.ext => "md",
