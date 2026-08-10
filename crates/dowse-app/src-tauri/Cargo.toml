@@ -1,6 +1,6 @@
 [package]
 name = "dowse-app"
-version = "0.10.0"
+version = "1.0.0"
 description = "dowse desktop overlay: glass search palette for Windows"
 authors.workspace = true
 edition = "2024"
@@ -34,4 +34,3 @@ directories = "6.0.0"
 dowse = { path = "../../dowse", default-features = false }
 windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_Globalization"] }
 png = "0.18.1"
-

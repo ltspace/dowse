@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -66,7 +67,22 @@ jobs:
             "$hash  $($installer.Name)" | Out-File -FilePath $checksums -Append -Encoding ascii
           }
 
+      # 手动触发先产出与正式发布相同的 Windows 安装包，供实机安装/升级冒烟。
+      # 只有 tag 触发才创建 GitHub Release，避免测试包被误当成正式版本。
+      - name: Upload release candidate
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: dowse-windows-${{ github.sha }}
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/msi/*.msi
+            checksums.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

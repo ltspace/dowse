@@ -6,12 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-10
+
+### Added
+
+- The frameless overlay can now be moved by dragging blank space in the search
+  header.
+- The results/preview divider can be dragged to resize both panes. The chosen
+  ratio is remembered, clamped to readable minimum widths, and can also be
+  adjusted from the keyboard.
+
 ### Fixed
 
 - Prevent a late indexing-progress event from leaving the full-screen indexing
   view on top of valid search results after a rebuild finishes. The backend now
   emits an authoritative settled snapshot on the same event channel, and the
   frontend reduces progress and snapshots through one tested state transition.
+
+### Changed
+
+- Upgraded the desktop frontend to Vite 8.2 and Motion 13, and the MCP server
+  stack to rmcp 3.1.1.
+- CI now verifies frontend state tests, Svelte diagnostics, production builds,
+  and high-severity npm advisories. The release workflow can also build a
+  seven-day Windows candidate artifact for pre-release installation testing.
 
 ## [0.10.0] - 2026-07-21
 
@@ -373,7 +391,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
 - The index root directory is no longer skipped by exclusion rules.
 
-[Unreleased]: https://github.com/ltspace/dowse/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/ltspace/dowse/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ltspace/dowse/compare/v0.10.0...v1.0.0
 [0.10.0]: https://github.com/ltspace/dowse/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/ltspace/dowse/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/ltspace/dowse/compare/v0.8.2...v0.8.3
