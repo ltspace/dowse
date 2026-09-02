@@ -13,6 +13,11 @@ updates:
       semver-major-days: 30
       semver-minor-days: 14
       semver-patch-days: 7
+    ignore:
+      # quick-xml 0.42 requires Rust 1.86; Dowse continues to support Rust 1.85.
+      - dependency-name: "quick-xml"
+        versions:
+          - ">= 0.42.0, < 0.43.0"
     groups:
       cargo-minor-and-patch:
         patterns:
