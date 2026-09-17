@@ -6,16 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-17
+
 ### Added
 
 - Paginated overlay search results with a compact page control, total-result
   count, and keyboard navigation across page boundaries.
 - Japanese, Korean, Spanish, and Italian README translations.
+- A language-aware Help & Feedback tray menu with links to the user guide and
+  GitHub's bug/feature request chooser.
 
 ### Changed
 
 - Refreshed the README screenshots at higher resolution with transparent
   corners and added a deterministic screenshot-capture script.
+- New installations now start with the window transparency effect disabled;
+  existing saved preferences remain unchanged.
+- Rebalanced the overlay header typography and search icon so its search,
+  filter, and utility controls share a more cohesive visual scale.
+- Reworked the GitHub Pages site around the current desktop workflow, with
+  updated screenshots, settings and pagination details, and practical Chinese
+  and English user guides.
+
+### Fixed
+
+- Settings can now be opened with `Ctrl+,` from anywhere in the overlay, from
+  the new top-right settings button, or from the tray menu.
 
 ## [1.0.0] - 2026-08-10
 
@@ -408,7 +424,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
 - The index root directory is no longer skipped by exclusion rules.
 
-[Unreleased]: https://github.com/ltspace/dowse/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ltspace/dowse/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ltspace/dowse/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ltspace/dowse/compare/v0.10.0...v1.0.0
 [0.10.0]: https://github.com/ltspace/dowse/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/ltspace/dowse/compare/v0.8.3...v0.9.0

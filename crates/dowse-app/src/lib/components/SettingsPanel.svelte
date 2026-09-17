@@ -49,7 +49,7 @@
 
 	// ── 通用区状态（初值从 get_config 拉一次） ──────────────────────────────
 	let hotkeyLabel = $state(''); // 展示用（formatHotkey 之后）
-	let transparencyEnabled = $state(true);
+	let transparencyEnabled = $state(false);
 	let tier = $state<TransparencyTier>('mid');
 	let autostartEnabled = $state(false);
 	let lang = $state<LangOption>('auto');

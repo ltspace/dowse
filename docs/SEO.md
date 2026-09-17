@@ -1,6 +1,6 @@
 # Dowse SEO 执行手册
 
-最后更新：2026-07-21
+最后更新：2026-09-17
 
 ## 当前判断
 
@@ -15,6 +15,7 @@ Dowse 已经能通过品牌词被找到，docs.rs 也已收录 crate 描述；�
 | `/dowse/` | 找产品、下载软件 | Windows 本地文件全文搜索工具 | 搜索文件内容、中文全文搜索、图片 OCR 搜索、Everything 替代 |
 | `/dowse/windows-file-content-search/` | 解决“怎么搜内容” | Windows 搜索文件内容 | PDF 全文搜索、Word 内容搜索、Everything content、Windows 内容索引 |
 | `/dowse/en/` | 英文产品发现 | Windows file content search | local full-text search, OCR file search, desktop search, MCP file search |
+| `/dowse/guide/`、`/dowse/en/guide/` | 已安装用户完成具体操作 | Dowse 使用指南 | 首次索引、搜索语法、快捷键、故障排查 |
 | GitHub README | 技术评估、开源可信度 | open-source Windows file content search | Rust, tantivy, jieba, OCR, MCP |
 | docs.rs / crates.io | Rust 与 CLI 用户 | Windows full-text search crate | tantivy, Chinese tokenization, MCP server |
 
@@ -25,7 +26,7 @@ Dowse 已经能通过品牌词被找到，docs.rs 也已收录 crate 描述；�
 - 主页标题、描述、H1 与正文对齐产品主关键词。
 - Open Graph、Twitter Card、canonical、hreflang 与大图预览。
 - `SoftwareApplication`、`FAQPage`、`TechArticle`、`BreadcrumbList` 结构化数据。
-- 中文需求型指南与英文产品页。
+- 中文需求型文章、中英文产品页和中英文使用指南。
 - `sitemap.xml`、`robots.txt`、PWA manifest、`llms.txt`。
 - README、Cargo、MCPB 和 MCP Registry 元数据反向链接官网。
 - Pages 部署前运行 `.github/scripts/check_site.py`，检查 canonical、描述、H1、JSON-LD、内部链接和 sitemap。
@@ -36,7 +37,7 @@ Dowse 已经能通过品牌词被找到，docs.rs 也已收录 crate 描述；�
 这些操作涉及站点或第三方账户，不能仅靠提交仓库文件完成。
 
 1. 在 GitHub 仓库右侧 About 中把 Website 设置为 `https://lter.space/dowse/`。
-2. 推送并确认 GitHub Pages 上三个 URL 均返回 200。
+2. 推送并确认 GitHub Pages 上 sitemap 中的五个 URL 均返回 200。
 3. 在 Google Search Console、Bing Webmaster Tools 提交 `https://lter.space/dowse/sitemap.xml`。
 4. 如果维护 `lter.space` 根站，在域名根目录的 `/robots.txt` 中也声明该 sitemap。搜索引擎只把主机根目录的 robots 文件视为正式规则；项目子路径里的副本主要用于人和诊断工具发现。
 5. 在百度搜索资源平台验证 `lter.space` 并提交三个页面。页面正文已经使用简体中文和明确的 Windows 需求词，不需要再堆词。
@@ -70,7 +71,7 @@ Dowse 已经能通过品牌词被找到，docs.rs 也已收录 crate 描述；�
 
 - 非品牌查询曝光：包含 `Windows` + `文件内容/全文搜索/OCR` 的查询数。
 - 品牌查询：`dowse`、`问渠 dowse` 的展示与点击。
-- 三个页面的已收录状态、canonical 选择和抓取错误。
+- sitemap 中各页面的收录状态、canonical 选择和抓取错误。
 - 官网到 GitHub Release 的点击，以及 Release 下载量。
 - 外部引用域名数量；只计真实软件目录、文章和社区讨论，不购买垃圾链接。
 

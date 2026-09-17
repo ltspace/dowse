@@ -23,6 +23,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import GhostDropdown from '$lib/components/GhostDropdown.svelte';
 	import PinButton from '$lib/components/PinButton.svelte';
+	import SettingsButton from '$lib/components/SettingsButton.svelte';
 	import AnimatedNumber from '$lib/components/AnimatedNumber.svelte';
 	import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
 	import IndexingStrip from '$lib/components/IndexingStrip.svelte';
@@ -412,6 +413,7 @@
 	function openSettingsPanel() {
 		typeMenuOpen = false;
 		sortMenuOpen = false;
+		shortcutOverlayOpen = false;
 		settingsPanelOpen = true;
 	}
 
@@ -421,6 +423,18 @@
 		// （见 SettingsPanel 组件顶部注释），关闭动作不该让用户还要再点
 		// 一下才能继续打字，跟呼出浮窗时 focusAndSelectAll 是同一个诉求。
 		inputEl?.focus();
+	}
+
+	/**
+	 * Settings is a window-level action, not a search-input action. Keeping this
+	 * handler above the focused control means Ctrl+, still works after the user
+	 * clicks a result, the preview pane, the divider, or any other blank area.
+	 * `code` also covers keyboard layouts/IMEs whose localized `key` is not `,`.
+	 */
+	function handleWindowKeydown(e: KeyboardEvent) {
+		if (!e.ctrlKey || (e.key !== ',' && e.code !== 'Comma')) return;
+		e.preventDefault();
+		openSettingsPanel();
 	}
 
 	/// 空态"添加文件夹"链接：多根索引场景下追加一个根，不动现有内容——跟
@@ -591,13 +605,6 @@
 			togglePinned();
 			return;
 		}
-		if (e.ctrlKey && e.key === ',') {
-			e.preventDefault();
-			closeMenus();
-			openSettingsPanel();
-			return;
-		}
-
 		// 菜单打开时，↑↓/Enter/Esc 转去控制菜单本身，不透传给下面的结果列表
 		// 导航——避免同一次按键既翻结果又翻菜单项。
 		if (typeMenuOpen || sortMenuOpen) {
@@ -909,6 +916,7 @@
 			closeMenus();
 			reportShownPerf();
 		});
+		const unlistenOpenSettings = listen('dowse://open-settings', openSettingsPanel);
 		const unlistenEffect = listen<EffectLevel>('dowse://effect-level', (evt) => {
 			document.documentElement.dataset.effect = evt.payload;
 		});
@@ -958,6 +966,7 @@
 			document.body.classList.remove('split-resizing');
 			document.removeEventListener('click', handleDocumentClick);
 			unlistenShown.then((f) => f());
+			unlistenOpenSettings.then((f) => f());
 			unlistenEffect.then((f) => f());
 			unlistenGlassAlpha.then((f) => f());
 			unlistenRebuildDone.then((f) => f());
@@ -969,6 +978,8 @@
 		};
 	});
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <div class="panel" bind:this={panelEl}>
 	{#each [
@@ -990,7 +1001,7 @@
 	{/each}
 	<!-- svelte-ignore a11y_no_static_element_interactions: the blank title area maps to the native OS window-drag gesture; interactive descendants are excluded in handleWindowDrag -->
 	<div class="search-row" onmousedown={handleWindowDrag}>
-		<svg class="search-icon" width="20" height="20" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+		<svg class="search-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
 			<circle cx="8" cy="8" r="5.4" stroke="currentColor" stroke-width="1.4" />
 			<path d="M12.2 12.2 16 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
 		</svg>
@@ -1035,6 +1046,7 @@
 				ontoggle={openSortMenu}
 			/>
 			<PinButton {pinned} onclick={togglePinned} />
+			<SettingsButton onclick={openSettingsPanel} />
 		</div>
 	</div>
 
@@ -1223,8 +1235,8 @@
 	.search-row {
 		display: flex;
 		align-items: center;
-		gap: 12px;
-		padding: 16px 24px;
+		gap: 10px;
+		padding: 15px 24px;
 		border-bottom: 1px solid var(--divider);
 		flex-shrink: 0;
 	}
@@ -1246,7 +1258,7 @@
 		border: none;
 		outline: none;
 		background: transparent;
-		font-size: 22px;
+		font-size: 18px;
 		font-weight: 400;
 		caret-color: var(--accent-caret);
 	}

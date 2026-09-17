@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dowse（问渠）使用指南</title>
+  <meta name="description" content="Dowse（问渠）Windows 桌面版使用指南：添加索引文件夹、搜索文件内容、使用筛选与快捷键、调整索引规则，以及排查常见问题。">
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+  <meta name="theme-color" content="#f7f7f5">
+  <link rel="canonical" href="https://lter.space/dowse/guide/">
+  <link rel="alternate" hreflang="zh-CN" href="https://lter.space/dowse/guide/">
+  <link rel="alternate" hreflang="en" href="https://lter.space/dowse/en/guide/">
+  <link rel="alternate" hreflang="x-default" href="https://lter.space/dowse/en/guide/">
+  <link rel="icon" href="../assets/icon.png" type="image/png">
+  <link rel="stylesheet" href="../assets/content.css">
+</head>
+<body>
+  <nav class="site-nav"><div class="wrap">
+    <a class="brand" href="../">dowse</a>
+    <a href="#start">开始使用</a>
+    <a href="#search">搜索</a>
+    <a href="#shortcuts">快捷键</a>
+    <a href="#troubleshooting">常见问题</a>
+    <a href="../en/guide/" hreflang="en">English</a>
+  </div></nav>
+
+  <header><div class="wrap">
+    <div class="eyebrow">Dowse 桌面版 · 使用指南</div>
+    <h1>使用 Dowse 搜索本地文件</h1>
+    <p class="lead">这份指南面向 Windows 桌面版。你不需要了解搜索引擎：选好文件夹，等第一次索引完成，之后按快捷键输入你记得的文件名或正文即可。</p>
+    <p class="meta">适用于当前发布版 · 界面语言：中文 / English</p>
+  </div></header>
+
+  <main class="wrap"><article>
+    <div class="toc">
+      <b>本页内容</b>
+      <ol>
+        <li><a href="#start">安装与第一次索引</a></li>
+        <li><a href="#search">日常搜索和结果操作</a></li>
+        <li><a href="#syntax">搜索语法</a></li>
+        <li><a href="#shortcuts">键盘快捷键</a></li>
+        <li><a href="#settings">设置与索引规则</a></li>
+        <li><a href="#maintenance">维护索引</a></li>
+        <li><a href="#ocr-privacy">OCR 与隐私</a></li>
+        <li><a href="#troubleshooting">常见问题</a></li>
+      </ol>
+    </div>
+
+    <h2 id="start">安装与第一次索引</h2>
+    <ol class="steps">
+      <li><strong>安装 Dowse。</strong>从 <a href="https://github.com/ltspace/dowse/releases/latest">GitHub Releases</a> 下载名称以 <code>setup.exe</code> 结尾的安装包。当前安装包没有代码签名；如果 SmartScreen 拦截，确认文件来自本项目发布页后，点“更多信息”再点“仍要运行”。</li>
+      <li><strong>呼出搜索窗口。</strong>启动后，Dowse 会常驻系统托盘。按 <code>Alt+`</code>（数字 1 左边的反引号键）打开窗口；也可以左键点托盘图标。</li>
+      <li><strong>选择第一个文件夹。</strong>第一次打开时，点“选择目录并建索引”，选择一个经常需要搜索的位置，例如“文档”或工作资料目录。Dowse 只会搜索你主动加入的文件夹。</li>
+      <li><strong>等文字索引完成。</strong>窗口会显示当前处理数量和文件名。文字阶段完成后就可以搜索；图片较多时，OCR 会继续在后台处理，底部进度条会显示剩余进度。</li>
+    </ol>
+
+    <div class="callout"><p><strong>建议从小范围开始。</strong>先加入真正存放资料的文件夹，而不是整个系统盘。结果更干净，第一次索引也更快。以后可在托盘菜单的“索引文件夹”中继续添加。</p></div>
+
+    <h3>添加更多文件夹</h3>
+    <p>右键单击托盘图标，打开“索引文件夹” → “添加文件夹…”。新增目录会并入现有索引，不会替换已经加入的目录。菜单会在每个索引目录后显示当前文档数。</p>
+
+    <h2 id="search">日常搜索和结果操作</h2>
+    <p>按 <code>Alt+`</code> 呼出 Dowse 后直接输入。你可以输入文件名的一部分，也可以输入 PDF、Office 文档、代码或文本文件中的词句。多个词默认要求同时出现；如果记得原句，用双引号包起来会更准确。</p>
+    <p>结果左侧显示文件名、路径和命中片段，右侧是预览。拖动中间分隔线可以调整两边宽度。搜索超过 50 条时，结果标题右侧会出现页码；在本页最后一条继续按 <code>↓</code>，也会自动进入下一页。</p>
+
+    <h3>筛选和排序</h3>
+    <p>搜索框右侧有“全部类型”和“相关性”两个轻量菜单。类型可切换为文档、代码或图片；排序可选相关性、最新优先、最旧优先或最大优先。非默认选择会保留在界面上，方便确认当前条件。</p>
+
+    <h3>打开、定位和复制</h3>
+    <ul>
+      <li>双击结果或选中后按 <code>Enter</code>：用系统默认程序打开文件。</li>
+      <li>按 <code>Ctrl+Enter</code>：在文件资源管理器中定位文件。</li>
+      <li>按 <code>Ctrl+C</code>：复制完整路径。</li>
+      <li>右键结果：可打开文件、定位所在文件夹、复制路径或只复制文件名。</li>
+    </ul>
+    <p>窗口右上角的图钉会让 Dowse 在失去焦点后继续留在桌面上，适合一边查资料一边整理。固定状态只对本次运行有效。</p>
+
+    <h3>最近搜索</h3>
+    <p>清空搜索框后，Dowse 会列出最近 10 条搜索记录。用方向键选择，按 <code>Enter</code> 再次搜索；按 <code>Delete</code> 删除当前一条。记录只保存在本机。</p>
+
+    <h2 id="syntax">搜索语法</h2>
+    <p>大多数时候直接输入几个词就够了。需要缩小范围时，可以把下面的写法放在同一条查询里。</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>写法</th><th>作用</th><th>示例</th></tr></thead>
+      <tbody>
+        <tr><td>空格</td><td>多个条件同时满足（AND）</td><td><code>季度 预算</code></td></tr>
+        <tr><td>双引号</td><td>匹配完整短语</td><td><code>"release checklist"</code></td></tr>
+        <tr><td><code>path:</code></td><td>按文件名或所在路径缩小范围；有空格时加引号</td><td><code>预算 path:报告</code><br><code>path:"My Docs"</code></td></tr>
+        <tr><td><code>ext:</code></td><td>只看某种扩展名</td><td><code>部署 ext:md</code></td></tr>
+        <tr><td><code>mtime:</code></td><td>按修改日期过滤，支持 <code>&gt;</code>、<code>&gt;=</code>、<code>&lt;</code>、<code>&lt;=</code></td><td><code>合同 mtime:&gt;=2026-01</code></td></tr>
+        <tr><td><code>size:</code></td><td>按文件大小过滤；单位支持 B、KB、MB、GB</td><td><code>日志 size:&gt;10mb</code></td></tr>
+        <tr><td><code>-词</code> 或 <code>NOT 词</code></td><td>排除包含该词的结果</td><td><code>方案 -废弃</code></td></tr>
+        <tr><td><code>OR</code></td><td>匹配两组条件中的任意一组；必须大写</td><td><code>报价 OR 预算</code></td></tr>
+      </tbody>
+    </table></div>
+    <p><code>mtime:</code> 可写 <code>YYYY-MM-DD</code> 或 <code>YYYY-MM</code>。同一组内的条件先按 AND 组合，再用大写 <code>OR</code> 分组。例如 <code>path:客户 合同 OR path:内部 模板</code>。</p>
+
+    <h2 id="shortcuts">键盘快捷键</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>快捷键</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td><code>Alt+`</code></td><td>呼出或隐藏 Dowse；可在设置中改键</td></tr>
+        <tr><td><code>↑</code> / <code>↓</code></td><td>选择结果；到达列表边缘时跨页</td></tr>
+        <tr><td><code>Enter</code></td><td>打开选中的文件</td></tr>
+        <tr><td><code>Ctrl+Enter</code></td><td>在文件资源管理器中定位</td></tr>
+        <tr><td><code>Ctrl+C</code></td><td>复制所选文件的完整路径</td></tr>
+        <tr><td><code>Ctrl+P</code></td><td>打开文件类型筛选</td></tr>
+        <tr><td><code>Ctrl+S</code></td><td>打开排序菜单</td></tr>
+        <tr><td><code>Ctrl+D</code></td><td>固定或取消固定窗口</td></tr>
+        <tr><td><code>Ctrl+/</code></td><td>显示应用内快捷键速查</td></tr>
+        <tr><td><code>Ctrl+,</code></td><td>从窗口任意位置打开设置</td></tr>
+        <tr><td><code>Esc</code></td><td>关闭菜单、面板或隐藏搜索窗口</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="settings">设置与索引规则</h2>
+    <p>点击窗口右上角的小齿轮、按 <code>Ctrl+,</code>，或右键托盘图标选择“设置…”，都能打开设置面板。</p>
+
+    <h3>通用</h3>
+    <ul>
+      <li><strong>呼出快捷键：</strong>点“改键”后按下新组合，再确认。组合必须包含 Ctrl、Alt、Shift 或 Win 中至少一个修饰键。如果被别的软件占用，Dowse 会保留旧快捷键。</li>
+      <li><strong>透明效果：</strong>可以完整关闭；开启后可在低、中、高三档之间调整透明度。</li>
+      <li><strong>开机自启：</strong>控制登录 Windows 后是否自动启动 Dowse。</li>
+      <li><strong>界面语言：</strong>可跟随系统，也可固定为中文或 English。更改语言后需要重启应用。</li>
+    </ul>
+
+    <h3>索引规则</h3>
+    <ul>
+      <li><strong>排除目录：</strong>填写不需要索引的目录名，以逗号或换行分隔。默认排除 <code>node_modules</code>、<code>target</code>、<code>.git</code>、<code>.venv</code> 和 <code>__pycache__</code>；所有以点开头的目录始终排除。</li>
+      <li><strong>追加文本扩展名：</strong>用于项目自己的纯文本格式，例如 <code>rst, adoc</code>。这里是追加内建列表，不会覆盖它；扩展名不必带点。</li>
+      <li><strong>单文件体积上限：</strong>默认 20 MB。超过上限的文件会跳过，避免异常大的文件拖慢索引。</li>
+    </ul>
+    <p>规则保存后，新发生的文件变更会使用新规则；要让已有索引完全一致，请重建索引。只有一个索引目录时，可以在面板里“立即重建”。有多个目录时，请从托盘菜单逐个重建。</p>
+
+    <h2 id="maintenance">维护索引文件夹</h2>
+    <p>Dowse 运行时会监听文件新增、修改、移动和删除；下次启动时也会根据修改时间和文件大小补上关机期间的变化。正常使用不需要定期手动重建。</p>
+    <p>需要重建或移除目录时，右键托盘图标，进入“索引文件夹”，再展开对应路径：</p>
+    <ul>
+      <li><strong>重建：</strong>重新扫描该目录。适合调整索引规则后使用，或在结果明显与磁盘内容不一致时排查。</li>
+      <li><strong>移除：</strong>取消这个目录并从搜索索引中删除其记录，不会删除磁盘上的原文件。</li>
+      <li><strong>添加文件夹…：</strong>把另一个目录加入同一份索引。</li>
+    </ul>
+    <p>索引或 OCR 进行时仍可隐藏窗口。托盘图标的提示文字和再次打开后的进度会反映当前状态。</p>
+
+    <h2 id="ocr-privacy">OCR 与隐私</h2>
+    <p>Dowse 使用 Windows 自带的 <code>Windows.Media.Ocr</code> 识别 PNG、JPG、WebP 和 BMP 图片中的文字。识别在本机完成，图片不会发送给云端。中文系统的简体中文语言包也可处理常见的中英文混排截图。</p>
+    <div class="callout"><p><strong>扫描版 PDF 是一个例外。</strong>Dowse 会读取 PDF 自带的文字层，但当前不会逐页 OCR 只有图片、没有文字层的扫描 PDF。需要搜索这类资料时，请先用其他工具给 PDF 添加可搜索文字层。</p></div>
+    <p>文件解析、索引、搜索和最近搜索记录都留在本机。索引和配置位于 <code>%LOCALAPPDATA%\dowse\data</code>；索引包含从文件中提取的正文，应像原文件一样受到保护。Dowse 不包含遥测，也不会上传搜索词。完整说明见<a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">隐私政策</a>。</p>
+
+    <h2 id="troubleshooting">常见问题</h2>
+    <div class="faq">
+      <details><summary>按快捷键没有出现窗口</summary><p>先查看系统托盘里是否有 Dowse 图标；单击图标可以直接显示窗口。如果另一个应用占用了快捷键，右键托盘图标打开“设置…”，换一个组合。窗口可能已经固定在别的屏幕上，也可以先从托盘选择“显示 Dowse”。</p></details>
+      <details><summary>明明有这个文件，为什么搜不到？</summary><p>先确认文件位于托盘“索引文件夹”列出的路径下。再检查扩展名、排除目录和单文件体积上限；图片还要等 OCR 阶段完成。刚改过索引规则时，请重建对应目录。旧式 <code>.doc</code>、<code>.xls</code>、<code>.ppt</code> 以及加密或密码保护的文档目前不会抽取正文。</p></details>
+      <details><summary>能搜到文件名，但搜不到 PDF 或 Office 正文</summary><p>PDF 必须带文字层；图片扫描 PDF 不会自动 OCR。Office 正文支持 DOCX、XLSX 和 PPTX。损坏、加密或密码保护的文件会被跳过。可以先用原应用打开文件，确认正文可正常读取。</p></details>
+      <details><summary>修改或删除文件后，结果没有马上变化</summary><p>保持 Dowse 在托盘中运行，文件监听会增量更新。若文件由特殊同步工具批量替换，重启 Dowse 会进行一次对账；仍不一致时，从托盘重建该索引目录。</p></details>
+      <details><summary>必须以管理员身份运行吗？</summary><p>不必。普通索引、文件监听、OCR 和搜索都可在标准用户权限下工作。管理员权限只用于条件允许时启用更快的 NTFS 路径。</p></details>
+      <details><summary>索引会不会占用很多空间？</summary><p>索引保存了可搜索文本，大小取决于目录中文档的数量与内容。若范围太大，可移除不常搜索的根目录、排除构建产物，并合理设置单文件体积上限。</p></details>
+    </div>
+
+    <h2 id="feedback">报告问题或提出建议</h2>
+    <p>右键托盘图标，打开“帮助与反馈”，可以回到本指南或前往问题反馈页。也可以直接在 GitHub 上<a href="https://github.com/ltspace/dowse/issues/new/choose">报告问题或提出建议</a>。</p>
+    <p>报告问题时，请写明 Dowse 版本、Windows 版本、复现步骤，以及预期和实际结果。崩溃或索引异常时，日志位于 <code>%LOCALAPPDATA%\dowse\data\logs\dowse.log</code>；上传前请检查其中是否含有不希望公开的本地路径。</p>
+    <div class="cta">
+      <a class="button" href="https://github.com/ltspace/dowse/issues/new/choose">前往反馈</a>
+      <a class="button secondary" href="../">返回 Dowse 主页</a>
+    </div>
+  </article></main>
+
+  <footer><div class="wrap">
+    <span>Dowse（问渠）使用指南</span>
+    <a href="../en/guide/" hreflang="en">English</a>
+    <a href="../">产品主页</a>
+    <a href="https://github.com/ltspace/dowse">GitHub</a>
+    <a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">隐私</a>
+  </div></footer>
+</body>
+</html>

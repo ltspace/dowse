@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="google-site-verification" content="28luLoxjmcz0AErxtCkcg29vQvdXBDUd9kYwXpqd3Xo">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Dowse（问渠）— Windows 本地文件内容全文搜索工具</title>
-  <meta name="description" content="Dowse 是开源的 Windows 本地文件全文搜索工具，可搜索文件名、PDF 与 Office 文档内容，并用离线 OCR 搜索截图文字；支持中文分词、快捷键浮窗和只读 MCP。">
+  <title>Dowse（问渠）— Windows 本地文件全文搜索</title>
+  <meta name="description" content="Dowse 是开源的 Windows 本地文件全文搜索工具，可搜索文件名、PDF、Office、代码和图片中的文字；支持离线 OCR、中文分词、快捷键浮窗与只读 MCP。">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
   <meta name="author" content="ltspace">
-  <meta name="theme-color" content="#fafafa">
+  <meta name="theme-color" content="#f7f7f5">
   <link rel="canonical" href="https://lter.space/dowse/">
   <link rel="alternate" hreflang="zh-CN" href="https://lter.space/dowse/">
   <link rel="alternate" hreflang="en" href="https://lter.space/dowse/en/">
@@ -21,9 +21,11 @@
   <script>
     (() => {
       try {
-        const force = new URLSearchParams(location.search).has("intro");
+        const introMode = new URLSearchParams(location.search).get("intro");
+        const force = introMode === "1";
+        const skip = introMode === "0";
         const seen = sessionStorage.getItem("dowse:intro:v1");
-        if ((force || !seen) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        if (!skip && (force || !seen) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
           document.documentElement.classList.add("will-intro");
         }
       } catch (_) {}
@@ -33,15 +35,15 @@
   <meta property="og:site_name" content="Dowse（问渠）">
   <meta property="og:locale" content="zh_CN">
   <meta property="og:url" content="https://lter.space/dowse/">
-  <meta property="og:title" content="Dowse（问渠）— Windows 本地文件内容全文搜索工具">
-  <meta property="og:description" content="搜索文件名、PDF 与 Office 文档内容，以及截图里的文字。开源、全程本地，支持中文分词与只读 MCP。">
+  <meta property="og:title" content="Dowse（问渠）— Windows 本地文件全文搜索">
+  <meta property="og:description" content="搜索文件名、PDF、Office、代码和图片中的文字。开源、本地运行，支持中文分词与只读 MCP。">
   <meta property="og:image" content="https://lter.space/dowse/assets/hero.zh-CN.png">
   <meta property="og:image:width" content="1290">
   <meta property="og:image:height" content="840">
-  <meta property="og:image:alt" content="Dowse 搜索北极星项目资料并实时预览文档内容">
+  <meta property="og:image:alt" content="Dowse 中文桌面版搜索窗口，左侧显示结果，右侧显示文档预览">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Dowse — Windows 本地文件内容全文搜索工具">
-  <meta name="twitter:description" content="搜索 PDF、Office、代码和截图文字；开源、离线、支持中文与 MCP。">
+  <meta name="twitter:title" content="Dowse — Windows 本地文件全文搜索">
+  <meta name="twitter:description" content="搜索 PDF、Office、代码和图片中的文字；开源、离线、支持中文与 MCP。">
   <meta name="twitter:image" content="https://lter.space/dowse/assets/hero.zh-CN.png">
   <script type="application/ld+json">
   {
@@ -54,7 +56,7 @@
     "downloadUrl": "https://github.com/ltspace/dowse/releases/latest",
     "codeRepository": "https://github.com/ltspace/dowse",
     "image": "https://lter.space/dowse/assets/hero.zh-CN.png",
-    "description": "开源的 Windows 本地文件内容全文搜索工具，可搜索文件名、PDF、Office 文档和截图 OCR 文字，并通过只读 MCP 为 AI 提供本地检索。",
+    "description": "开源的 Windows 本地文件全文搜索工具，可搜索文件名、PDF、Office、代码和图片 OCR 文字，并通过只读 MCP 提供本地检索。",
     "applicationCategory": "UtilitiesApplication",
     "applicationSubCategory": "Desktop search",
     "operatingSystem": "Windows 10, Windows 11",
@@ -84,23 +86,18 @@
       {
         "@type": "Question",
         "name": "Dowse 能搜索扫描版 PDF 吗？",
-        "acceptedAnswer": {"@type": "Answer", "text": "Dowse 会提取 PDF 已有的文本层；当前 OCR 管线面向图片文件，尚不会把纯图片扫描 PDF 的每一页转换成可搜索文字。"}
+        "acceptedAnswer": {"@type": "Answer", "text": "Dowse 会提取 PDF 已有的文本层；当前 OCR 管线面向图片文件，尚不会处理纯图片扫描 PDF 的每一页。"}
       },
       {
         "@type": "Question",
         "name": "Dowse 必须用管理员权限运行吗？",
-        "acceptedAnswer": {"@type": "Answer", "text": "不需要。普通索引和搜索可在标准用户权限下运行；管理员权限只用于条件允许时启用更快的 NTFS MFT 与 USN Journal 路径。"}
-      },
-      {
-        "@type": "Question",
-        "name": "Dowse 是开源软件吗？",
-        "acceptedAnswer": {"@type": "Answer", "text": "是。桌面端、CLI、搜索库与 MCP server 均以 MIT 或 Apache-2.0 双许可证开源。"}
+        "acceptedAnswer": {"@type": "Answer", "text": "不需要。普通索引和搜索可在标准用户权限下运行；管理员权限只用于条件允许时启用更快的 NTFS 路径。"}
       }
     ]
   }
   </script>
 </head>
-<body>
+<body class="home-page">
   <div class="intro" data-message="Welcome to dowse." role="button" tabindex="0" aria-label="进入 Dowse 网站">
     <div class="terminal-shell">
       <div class="terminal-bar">
@@ -118,50 +115,115 @@
 
   <nav class="site-nav"><div class="wrap">
     <a class="brand" href="./">dowse</a>
-    <a href="#features">功能</a>
-    <a href="#compare">对比</a>
-    <a href="#mcp">MCP</a>
-    <a href="#install">安装</a>
+    <a class="nav-detail" href="#features">功能</a>
+    <a class="nav-detail" href="#desktop">桌面版</a>
+    <a class="nav-detail" href="#mcp">MCP</a>
+    <a href="guide/">使用指南</a>
     <a href="en/" hreflang="en">English</a>
     <a href="https://github.com/ltspace/dowse">GitHub ↗</a>
   </div></nav>
 
-  <header><div class="wrap">
-    <div class="eyebrow">Windows · 本地 · 开源</div>
-    <h1>按文件里的内容，找到 Windows 上的任何资料。</h1>
-    <p class="lead">Dowse（问渠）是一款本地全文搜索工具。用一个快捷键搜索文件名、PDF 与 Office 正文、源代码，以及截图里的文字。</p>
+  <header class="home-hero"><div class="wrap">
+    <p class="kicker">Dowse（问渠）for Windows</p>
+    <h1>Windows 本地文件<span class="nowrap">全文搜索</span></h1>
+    <p class="lead">为你选择的文件夹建立本地索引。按 <code>Alt+`</code>，搜索文件名、PDF 与 Office 正文、代码，以及图片中的文字。</p>
     <div class="cta">
-      <a class="button" href="https://github.com/ltspace/dowse/releases/latest">下载 Windows 版</a>
-      <a class="button secondary" href="https://github.com/ltspace/dowse">查看源码</a>
+      <a class="button" href="https://github.com/ltspace/dowse/releases/latest">下载 Windows 安装包</a>
+      <a class="button secondary" href="guide/">查看使用指南</a>
     </div>
+    <p class="hero-note">开源 · 无遥测 · 索引和 OCR 结果保存在本机</p>
+    <figure class="hero-figure">
+      <img class="product-shot" src="assets/hero.zh-CN.png" alt="Dowse 中文桌面版搜索窗口，左侧显示搜索结果，右侧显示文档预览" width="1290" height="840">
+      <figcaption>搜索结果支持正文片段、实时预览、类型筛选和多种排序方式。</figcaption>
+    </figure>
+    <ul class="quick-facts" aria-label="Dowse 基本信息">
+      <li>Windows 10 / 11</li>
+      <li>文件名与正文</li>
+      <li>图片离线 OCR</li>
+      <li>MIT / Apache-2.0</li>
+    </ul>
   </div></header>
 
   <main class="wrap"><article>
-    <h2 id="features">搜索文件内容，不只搜索文件名</h2>
-    <p>Dowse 会提取并索引纯文本、Markdown、源代码、PDF、DOCX、XLSX 和 PPTX 的正文。在 Windows 上，它还使用系统自带的 Windows.Media.Ocr，让 PNG、JPG、WebP 与 BMP 图片中的文字也可以被搜索。</p>
-    <p>搜索基于 tantivy 的持久倒排索引与 BM25 排序。中文使用 jieba 分词，不会被粗暴拆成任意字串；旧的 GBK 文本也会在索引前自动识别。解析、索引、OCR 和查询全部在本机完成，没有云端解析器，也没有遥测。</p>
+    <section class="home-section" id="features">
+      <div class="section-heading">
+        <h2>目前支持什么</h2>
+        <p>Dowse 的桌面版、CLI 和 MCP server 使用同一套本地索引。它适合资料长期放在固定目录、需要反复按正文查找的场景。</p>
+      </div>
+      <dl class="capability-list">
+        <div><dt>文件内容</dt><dd>纯文本、Markdown、源代码、PDF、DOCX、XLSX 和 PPTX。旧的 GBK 文本也会在索引前自动识别。</dd></div>
+        <div><dt>图片文字</dt><dd>调用 Windows.Media.Ocr 离线识别 PNG、JPG、WebP 和 BMP，不需要上传图片。</dd></div>
+        <div><dt>中文搜索</dt><dd>jieba 分词配合 BM25 排序；多词默认同时出现，也支持短语、路径、时间、大小和扩展名筛选。</dd></div>
+        <div><dt>索引更新</dt><dd>运行期间监听文件变化，启动时补查离线期间的修改；新增目录不需要重建已有索引。</dd></div>
+        <div><dt>结果操作</dt><dd>键盘选择并打开文件，也可以在右键菜单中打开、定位到文件夹、复制路径或文件名。</dd></div>
+        <div><dt>大量结果</dt><dd>结果每页 50 条；只有超过一页时才显示紧凑页码，也可以继续按方向键跨页。</dd></div>
+      </dl>
+    </section>
 
-    <h2>一个快捷键，回到资料的上下文</h2>
-    <p>按 <code>Alt+`</code> 呼出搜索浮窗，输入记得的一句话，用方向键选择结果，再按 Enter 打开。结果会展示命中片段与实时预览；还可以按文档、代码、图片筛选，并按相关性、修改时间或文件大小排序。</p>
-    <img class="product-shot" src="assets/hero.zh-CN.png" alt="Dowse 搜索北极星项目资料，左侧显示排序结果，右侧实时预览一页简报" width="1290" height="840" loading="lazy">
+    <section class="home-section" id="desktop">
+      <div class="feature-media">
+        <div>
+          <h2>设置入口不再藏在托盘里</h2>
+          <p>点击窗口右上角的齿轮，或者在窗口内按 <code>Ctrl+,</code>，都可以打开设置。首次运行默认使用纯色背景；喜欢透明效果时再手动打开。</p>
+          <ul class="plain-list">
+            <li>修改全局快捷键</li>
+            <li>开关透明效果并选择透明度</li>
+            <li>设置开机自启和界面语言</li>
+            <li>调整排除目录、额外文本扩展名和单文件大小上限</li>
+          </ul>
+          <p>托盘右键菜单仍然保留这些常用入口，并新增使用指南和问题反馈。</p>
+        </div>
+        <figure class="product-figure">
+          <img class="product-shot" src="assets/settings.zh-CN.png" alt="Dowse 中文设置页，包含快捷键、透明效果、开机自启和界面语言" width="1290" height="840" loading="lazy">
+          <figcaption>设置页分为常规设置和索引规则。</figcaption>
+        </figure>
+      </div>
+    </section>
 
-    <h2 id="compare">Dowse 与其他 Windows 搜索工具有什么不同</h2>
-    <div class="table-wrap"><table>
-      <thead><tr><th>工具</th><th>主要方式</th><th>适合场景</th></tr></thead>
-      <tbody>
-        <tr><td>Dowse</td><td>持久索引文件名与正文，并加入图片 OCR</td><td>频繁搜索文档、代码、中文资料和截图文字</td></tr>
-        <tr><td>Everything</td><td>文件名索引极快；内容查询通常按需扫描文件</td><td>即时查找文件名，偶尔在限定范围内搜索内容</td></tr>
-        <tr><td>Windows Search</td><td>系统内置索引，依赖位置配置与内容筛选器</td><td>不安装第三方工具，搜索标准 Windows 文档目录</td></tr>
-        <tr><td>dnGrep</td><td>按需扫描文本，支持正则表达式</td><td>针对特定目录做正则搜索与批量替换</td></tr>
-      </tbody>
-    </table></div>
+    <section class="home-section">
+      <div class="feature-media reverse">
+        <figure class="product-figure">
+          <img class="product-shot" src="assets/ocr-preview.zh-CN.png" alt="Dowse 预览图片并显示离线 OCR 提取出的文字" width="1290" height="840" loading="lazy">
+          <figcaption>图片预览旁会显示 OCR 文本和命中位置。</figcaption>
+        </figure>
+        <div>
+          <h2>搜索窗口的日常操作</h2>
+          <p>输入时即时搜索；方向键切换结果，Enter 打开，<code>Ctrl+Enter</code> 在资源管理器中定位，<code>Ctrl+C</code> 复制路径。</p>
+          <ul class="plain-list">
+            <li>空输入时显示最近 10 条搜索，可复用或删除</li>
+            <li>按文档、代码和图片筛选结果</li>
+            <li>按相关性、修改时间或文件大小排序</li>
+            <li>固定窗口后，失去焦点时不会自动隐藏</li>
+          </ul>
+        </div>
+      </div>
+    </section>
 
-    <h2 id="mcp">让 AI 只读搜索你的本地资料</h2>
-    <p><code>dowse mcp</code> 提供三个只读 MCP 工具：排序后的全文搜索、命中位置附近的长预览，以及索引状态。Claude Code、Cursor 和其他 MCP 客户端可以搜索你已建立索引的文件夹，而不必把硬盘访问权限交给远程服务。</p>
-    <div class="code-label">Claude Code · 一行接入</div>
-    <pre><code>claude mcp add --scope user dowse -- dowse mcp</code></pre>
-    <div class="code-label">任意 MCP 客户端 · JSON 配置</div>
-    <pre><code>{
+    <section class="home-section">
+      <div class="section-heading">
+        <h2>支持的格式</h2>
+        <p>桌面版只会索引你主动添加的目录。默认规则会跳过常见依赖、构建产物和版本控制目录，也可以在设置中修改。</p>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>类别</th><th>格式</th><th>处理方式</th></tr></thead>
+        <tbody>
+          <tr><td>文本与代码</td><td>TXT、Markdown、常见源代码和配置文件</td><td>检测编码后直接提取文本</td></tr>
+          <tr><td>PDF</td><td>带文本层的 PDF</td><td>提取已有文本层；纯扫描 PDF 暂不做逐页 OCR</td></tr>
+          <tr><td>Office</td><td>DOCX、XLSX、PPTX</td><td>解析 Office Open XML 正文</td></tr>
+          <tr><td>图片</td><td>PNG、JPG、WebP、BMP</td><td>使用系统 OCR 语言包在本机识别</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="home-section" id="mcp">
+      <div class="section-heading">
+        <h2>只读 MCP server</h2>
+        <p><code>dowse mcp</code> 提供搜索、长预览和索引状态三个工具。它只读取现有索引，可以和桌面版同时运行，不会替 AI 修改或删除文件。</p>
+      </div>
+      <div class="code-label">Claude Code</div>
+      <pre><code>claude mcp add --scope user dowse -- dowse mcp</code></pre>
+      <div class="code-label">其他 MCP 客户端</div>
+      <pre><code>{
   "mcpServers": {
     "dowse": {
       "command": "dowse",
@@ -169,31 +231,39 @@
     }
   }
 }</code></pre>
+    </section>
 
-    <h2 id="install">安装 Dowse</h2>
-    <ol class="steps">
-      <li>从 GitHub Releases 下载最新的 Windows 安装包。</li>
-      <li>选择需要建立索引的文件夹。管理员权限不是必需条件，只会在可用时解锁 NTFS MFT / USN 快速路径。</li>
-      <li>按 <code>Alt+`</code>，输入文档正文或截图里记得的一句话。</li>
-    </ol>
-    <p>安装了 Rust 1.85 或更高版本的 CLI 用户，也可以运行 <code>cargo install dowse</code>。</p>
-    <div class="cta">
-      <a class="button" href="https://github.com/ltspace/dowse/releases/latest">获取最新版本</a>
-      <a class="button secondary" href="https://docs.rs/dowse">Rust API 文档</a>
-    </div>
+    <section class="home-section" id="install">
+      <div class="section-heading">
+        <h2>安装和第一次索引</h2>
+        <p>桌面版不要求管理员权限。当前安装包尚未签名，第一次运行时 Windows SmartScreen 可能会要求你确认来源。</p>
+      </div>
+      <ol class="steps">
+        <li>从 GitHub Releases 下载文件名以 <code>setup.exe</code> 结尾的安装包。</li>
+        <li>启动 Dowse，先添加一个经常需要搜索的资料目录，等待第一次文本索引完成。</li>
+        <li>按 <code>Alt+`</code> 打开窗口并开始搜索；图片较多时，OCR 会继续在后台处理。</li>
+      </ol>
+      <div class="cta">
+        <a class="button" href="https://github.com/ltspace/dowse/releases/latest">获取最新版本</a>
+        <a class="button secondary" href="guide/">阅读完整使用指南</a>
+      </div>
 
-    <h2>常见问题</h2>
-    <div class="faq">
-      <details><summary>Dowse 会上传我的文件或搜索词吗？</summary><p>不会。文件解析、索引、OCR 与查询都在本机完成，应用不包含遥测。本地索引含有提取出的文本，仍应像源文件一样受到保护。</p></details>
-      <details><summary>Dowse 能搜索扫描版 PDF 吗？</summary><p>Dowse 会提取 PDF 已有的文本层。当前 OCR 管线用于图片文件，尚不会把纯图片扫描 PDF 的每一页转换成可搜索文字。</p></details>
-      <details><summary>Dowse 必须用管理员权限运行吗？</summary><p>不需要。普通索引和搜索可在标准用户权限下运行；管理员权限只用于条件允许时启用更快的 NTFS MFT 与 USN Journal 路径。</p></details>
-      <details><summary>Dowse 是开源软件吗？</summary><p>是。桌面端、CLI、搜索库与 MCP server 均以 MIT 或 Apache-2.0 双许可证开源。</p></details>
-    </div>
+      <h2>常见问题</h2>
+      <div class="faq">
+        <details><summary>Dowse 会上传我的文件或搜索词吗？</summary><p>不会。解析、索引、OCR 和查询都在本机完成，应用不包含遥测。本地索引中保存了提取出的文本，因此仍应像源文件一样保护。</p></details>
+        <details><summary>能搜索扫描版 PDF 吗？</summary><p>目前会提取 PDF 已有的文本层。图片 OCR 面向单独的图片文件，尚不会把纯图片扫描 PDF 的每一页转换成可搜索文字。</p></details>
+        <details><summary>必须用管理员权限运行吗？</summary><p>不需要。普通索引和搜索可以在标准用户权限下运行；管理员权限只会在条件允许时启用更快的 NTFS MFT / USN 路径。</p></details>
+      </div>
+    </section>
   </article></main>
 
   <footer><div class="wrap">
-    <span>Dowse（问渠）· 开源的 Windows 本地文件全文搜索</span>
-    <a href="en/" hreflang="en">English</a><a href="https://github.com/ltspace/dowse">源码</a><a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">隐私</a>
+    <span>Dowse（问渠）· Windows 本地文件全文搜索</span>
+    <a href="guide/">使用指南</a>
+    <a href="windows-file-content-search/">Windows 搜索方法</a>
+    <a href="https://github.com/ltspace/dowse">源码</a>
+    <a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">隐私</a>
+    <span class="footer-languages">README：<a href="https://github.com/ltspace/dowse/blob/main/README.md">English</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.zh-CN.md">简体中文</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.ja.md">日本語</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.ko.md">한국어</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.es.md">Español</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.it.md">Italiano</a></span>
   </div></footer>
   <script src="assets/intro.js"></script>
 </body>

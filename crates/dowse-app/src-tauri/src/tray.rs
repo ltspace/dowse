@@ -9,6 +9,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::config::ConfigState;
 use crate::indexing_status::{IndexingPhase, IndexingStatus};
@@ -95,13 +96,20 @@ fn decode_rgba_png(bytes: &[u8]) -> (Vec<u8>, u32, u32) {
 }
 
 const MENU_SHOW: &str = "show";
+const MENU_SETTINGS: &str = "settings";
 const MENU_FOLDERS_ADD: &str = "folders_add";
 const MENU_AUTOSTART: &str = "autostart";
 const MENU_TRANSPARENCY: &str = "transparency";
 const MENU_TRANSPARENCY_LOW: &str = "transparency_low";
 const MENU_TRANSPARENCY_MID: &str = "transparency_mid";
 const MENU_TRANSPARENCY_HIGH: &str = "transparency_high";
+const MENU_HELP_GUIDE: &str = "help_guide";
+const MENU_HELP_FEEDBACK: &str = "help_feedback";
 const MENU_QUIT: &str = "quit";
+
+const GUIDE_ZH_URL: &str = "https://lter.space/dowse/guide/";
+const GUIDE_EN_URL: &str = "https://lter.space/dowse/en/guide/";
+const FEEDBACK_URL: &str = "https://github.com/ltspace/dowse/issues/new/choose";
 /// 每根一个动态子菜单，"重建"/"移除"两个动作项的 id 按 `{前缀}{根在
 /// registered_roots() 里的下标}` 拼——菜单每次状态变化都整个重建（见
 /// `refresh_menu`），下标只在"这次构建出来的菜单还没被下一次重建替换掉"
@@ -137,8 +145,8 @@ impl TrayBusy {
     }
 }
 
-/// 托盘图标 + 右键菜单：呼出 / "索引文件夹"子菜单（每根一项 + 添加文件夹…）
-/// / 开机自启开关 / 透明效果开关 / 透明度三档子菜单 / 退出。进程常驻，浮窗
+/// 托盘图标 + 右键菜单：呼出 / 设置 / "索引文件夹"子菜单（每根一项 + 添加文件夹…）
+/// / 开机自启开关 / 透明效果开关 / 透明度三档子菜单 / 帮助与反馈 / 退出。进程常驻，浮窗
 /// 只是 show/hide——托盘是用户确认"它还活着"、看一眼索引状态、做少数配置的
 /// 入口。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
@@ -196,6 +204,7 @@ fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let s = crate::i18n::strings();
 
     let show_item = MenuItemBuilder::with_id(MENU_SHOW, s.menu_show).build(app)?;
+    let settings_item = MenuItemBuilder::with_id(MENU_SETTINGS, s.menu_settings).build(app)?;
     let folders_submenu = build_folders_submenu(app, busy)?;
 
     let autostart_item = CheckMenuItemBuilder::with_id(MENU_AUTOSTART, s.menu_autostart)
@@ -223,17 +232,25 @@ fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
         &[&tier_low, &tier_mid, &tier_high],
     )?;
 
+    let guide_item = MenuItemBuilder::with_id(MENU_HELP_GUIDE, s.help_guide).build(app)?;
+    let feedback_item = MenuItemBuilder::with_id(MENU_HELP_FEEDBACK, s.help_feedback).build(app)?;
+    let help_submenu =
+        Submenu::with_items(app, s.help_submenu, true, &[&guide_item, &feedback_item])?;
+
     let quit_item = MenuItemBuilder::with_id(MENU_QUIT, s.menu_quit).build(app)?;
 
     Menu::with_items(
         app,
         &[
             &show_item,
+            &settings_item,
             &folders_submenu,
             &PredefinedMenuItem::separator(app)?,
             &autostart_item,
             &transparency_item,
             &tier_submenu,
+            &PredefinedMenuItem::separator(app)?,
+            &help_submenu,
             &PredefinedMenuItem::separator(app)?,
             &quit_item,
         ],
@@ -401,6 +418,12 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
                 window_fx::show_window(&window);
             }
         }
+        MENU_SETTINGS => {
+            if let Some(window) = app.get_webview_window("main") {
+                window_fx::show_window(&window);
+                let _ = window.emit("dowse://open-settings", ());
+            }
+        }
         MENU_FOLDERS_ADD => add_folder(app),
         MENU_AUTOSTART => {
             // 托盘是 toggle 语义：读当前态、取反，交给共用实现落地。
@@ -418,6 +441,20 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
                 _ => TransparencyTier::High,
             };
             apply_transparency_tier(app, tier);
+        }
+        MENU_HELP_GUIDE => {
+            let url = match crate::i18n::lang() {
+                crate::i18n::Lang::Zh => GUIDE_ZH_URL,
+                crate::i18n::Lang::En => GUIDE_EN_URL,
+            };
+            if let Err(err) = app.opener().open_url(url, None::<&str>) {
+                eprintln!("打开使用指南失败: {err}");
+            }
+        }
+        MENU_HELP_FEEDBACK => {
+            if let Err(err) = app.opener().open_url(FEEDBACK_URL, None::<&str>) {
+                eprintln!("打开反馈页面失败: {err}");
+            }
         }
         MENU_QUIT => app.exit(0),
         _ if id.starts_with(FOLDER_REBUILD_PREFIX) => {

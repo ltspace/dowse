@@ -75,7 +75,7 @@
 		padding: 4px 6px;
 		border-radius: var(--radius-chip);
 		font: inherit;
-		font-size: 11.5px;
+		font-size: 12px;
 		color: var(--fg-tertiary);
 		cursor: default;
 		transition:
