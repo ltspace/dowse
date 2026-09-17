@@ -6,8 +6,8 @@ body:
     id: version
     attributes:
       label: dowse version
-      description: Output of `cargo run -p dowse -- --version`, or the release/commit you built from
-      placeholder: v0.2.1 / commit abc1234
+      description: The installed release version, or the commit if you built dowse yourself
+      placeholder: v1.0.0 / commit abc1234
     validations:
       required: true
 
@@ -26,9 +26,17 @@ body:
       label: Steps to reproduce
       description: What did you do, and what happened instead of what you expected?
       placeholder: |
-        1. cargo run -p dowse -- index D:\docs
-        2. cargo run -p dowse -- search 限流
+        1. Open dowse with the global shortcut
+        2. Search for ...
         3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect dowse to do?
     validations:
       required: true
 
@@ -36,6 +44,6 @@ body:
     id: extra
     attributes:
       label: Logs / screenshots (optional)
-      description: Any relevant error output or screenshots
+      description: Attach screenshots or the relevant part of `%LOCALAPPDATA%\dowse\data\logs\dowse.log`. Please remove private file names and paths first.
     validations:
       required: false

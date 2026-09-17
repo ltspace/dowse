@@ -1,6 +1,6 @@
 [package]
 name = "dowse-app"
-version = "1.0.0"
+version = "1.1.0"
 description = "dowse desktop overlay: glass search palette for Windows"
 authors.workspace = true
 edition = "2024"

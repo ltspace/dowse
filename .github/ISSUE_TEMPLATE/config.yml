@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: User guide / 使用指南
+    url: https://lter.space/dowse/guide/
+    about: Setup, search syntax, keyboard shortcuts, indexing, and troubleshooting.

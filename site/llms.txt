@@ -4,8 +4,10 @@
 
 ## Primary pages
 
-- [Chinese product page](https://lter.space/dowse/): Features, privacy model, comparison, installation, MCP setup, and FAQ.
-- [English product page](https://lter.space/dowse/en/): English overview of local Windows file-content search, OCR, and MCP.
+- [Chinese product page](https://lter.space/dowse/): Current desktop features, settings, pagination, supported formats, installation, MCP setup, and FAQ.
+- [English product page](https://lter.space/dowse/en/): English overview of the current Windows desktop app, local indexing, OCR, and MCP.
+- [Chinese user guide](https://lter.space/dowse/guide/): First-run setup, daily search, query syntax, keyboard controls, settings, indexing, and troubleshooting.
+- [English user guide](https://lter.space/dowse/en/guide/): Practical desktop-app instructions and troubleshooting in English.
 - [Windows file-content search guide](https://lter.space/dowse/windows-file-content-search/): How Windows Search, Everything content queries, dnGrep, and persistent full-text indexes differ.
 - [Source repository](https://github.com/ltspace/dowse): Rust/Tauri/Svelte source, issues, releases, and design documents.
 - [Latest Windows release](https://github.com/ltspace/dowse/releases/latest): Installer and checksums.

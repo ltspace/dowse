@@ -6,14 +6,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::window_fx::TransparencyTier;
 
-/// 落盘在 `%LOCALAPPDATA%\dowse\config.json`，独立于索引目录。
+/// 落盘在 `%LOCALAPPDATA%\dowse\data\config.json`，独立于索引目录。
 /// 设计文档明确本里程碑不做设置界面——所有配置走托盘菜单和这个文件。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     /// 上一次成功建索引的目标目录，托盘"重建索引"复用这个。
     pub target_dir: Option<PathBuf>,
-    /// 玻璃效果开关，对应托盘菜单"关闭透明效果"。
-    #[serde(default = "default_true")]
+    /// 玻璃效果开关，对应托盘菜单"关闭透明效果"。新安装默认关闭，用户可在
+    /// 设置或托盘里主动打开；已有配置中显式保存的选择保持不变。
+    #[serde(default)]
     pub transparency_enabled: bool,
     /// 透明度三档（低/中/高），对应托盘菜单"透明度"子菜单。只在
     /// `transparency_enabled` 为真时才实际生效，但独立存储——用户在
@@ -40,10 +41,6 @@ pub struct AppConfig {
     pub lang: String,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 fn default_hotkey() -> String {
     "Alt+Backquote".to_string()
 }
@@ -56,7 +53,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             target_dir: None,
-            transparency_enabled: true,
+            transparency_enabled: false,
             transparency_tier: TransparencyTier::default(),
             autostart_user_disabled: false,
             hotkey: default_hotkey(),
@@ -70,7 +67,7 @@ fn config_path() -> Result<PathBuf> {
     Ok(dirs.data_local_dir().join("config.json"))
 }
 
-/// 索引目录固定放在 `%LOCALAPPDATA%\dowse\index`，跟被索引的目录无关，
+/// 索引目录固定放在 `%LOCALAPPDATA%\dowse\data\index`，跟被索引的目录无关，
 /// 和 dowse 命令行的约定保持一致，这样 CLI 建的索引浮窗也能直接用。
 pub fn index_dir() -> Result<PathBuf> {
     let dirs = directories::ProjectDirs::from("", "", "dowse").context("拿不到用户数据目录")?;
@@ -148,5 +145,25 @@ impl ConfigState {
         let mut guard = self.0.lock().expect("config mutex poisoned");
         guard.lang = lang;
         save(&guard)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_config_starts_with_transparency_disabled() {
+        assert!(!AppConfig::default().transparency_enabled);
+    }
+
+    #[test]
+    fn deserialization_defaults_missing_transparency_to_disabled_without_overriding_saved_choice() {
+        let missing: AppConfig = serde_json::from_str(r#"{"target_dir":null}"#).unwrap();
+        assert!(!missing.transparency_enabled);
+
+        let enabled: AppConfig =
+            serde_json::from_str(r#"{"target_dir":null,"transparency_enabled":true}"#).unwrap();
+        assert!(enabled.transparency_enabled);
     }
 }

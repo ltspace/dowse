@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Dowse — Local Windows File Content Search with OCR and MCP</title>
-  <meta name="description" content="Dowse is an open-source Windows file content search app for PDF, Office, code, and images, with offline OCR, Chinese tokenization, and read-only MCP tools.">
+  <title>Dowse — Local full-text file search for Windows</title>
+  <meta name="description" content="Dowse is an open-source Windows file search app for file names, PDF, Office, code, and image text, with offline OCR, Chinese tokenization, and read-only MCP tools.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
-  <meta name="theme-color" content="#fafafa">
+  <meta name="theme-color" content="#f7f7f5">
   <link rel="canonical" href="https://lter.space/dowse/en/">
   <link rel="alternate" hreflang="en" href="https://lter.space/dowse/en/">
   <link rel="alternate" hreflang="zh-CN" href="https://lter.space/dowse/">
@@ -17,9 +17,11 @@
   <script>
     (() => {
       try {
-        const force = new URLSearchParams(location.search).has("intro");
+        const introMode = new URLSearchParams(location.search).get("intro");
+        const force = introMode === "1";
+        const skip = introMode === "0";
         const seen = sessionStorage.getItem("dowse:intro:v1");
-        if ((force || !seen) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        if (!skip && (force || !seen) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
           document.documentElement.classList.add("will-intro");
         }
       } catch (_) {}
@@ -28,12 +30,12 @@
   <meta property="og:type" content="website">
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://lter.space/dowse/en/">
-  <meta property="og:title" content="Dowse — Local Windows File Content Search with OCR and MCP">
-  <meta property="og:description" content="Search file names, document contents, code, and text inside screenshots. Open source, fully local, and available to AI through read-only MCP tools.">
+  <meta property="og:title" content="Dowse — Local full-text file search for Windows">
+  <meta property="og:description" content="Search file names, PDF, Office, code, and text inside images. Open source, local, and available through read-only MCP tools.">
   <meta property="og:image" content="https://lter.space/dowse/assets/hero.png">
   <meta property="og:image:width" content="1290">
   <meta property="og:image:height" content="840">
-  <meta property="og:image:alt" content="Dowse searching the Northstar workspace with ranked results and a live document preview">
+  <meta property="og:image:alt" content="Dowse desktop search with results on the left and a document preview on the right">
   <meta name="twitter:card" content="summary_large_image">
   <script type="application/ld+json">
   {
@@ -45,7 +47,8 @@
     "url": "https://lter.space/dowse/en/",
     "downloadUrl": "https://github.com/ltspace/dowse/releases/latest",
     "codeRepository": "https://github.com/ltspace/dowse",
-    "description": "Open-source local full-text file search for Windows with document extraction, offline image OCR, Chinese tokenization, a global hotkey overlay, and read-only MCP tools.",
+    "image": "https://lter.space/dowse/assets/hero.png",
+    "description": "Open-source local full-text file search for Windows with document extraction, offline image OCR, Chinese tokenization, a global hotkey, and read-only MCP tools.",
     "applicationCategory": "UtilitiesApplication",
     "applicationSubCategory": "Desktop search",
     "operatingSystem": "Windows 10, Windows 11",
@@ -55,7 +58,7 @@
   }
   </script>
 </head>
-<body>
+<body class="home-page">
   <div class="intro" data-message="Welcome to dowse." role="button" tabindex="0" aria-label="Enter the Dowse website">
     <div class="terminal-shell">
       <div class="terminal-bar">
@@ -73,50 +76,115 @@
 
   <nav class="site-nav"><div class="wrap">
     <a class="brand" href="./">dowse</a>
-    <a href="#features">Features</a>
-    <a href="#compare">Compare</a>
-    <a href="#mcp">MCP</a>
-    <a href="#install">Install</a>
+    <a class="nav-detail" href="#features">Features</a>
+    <a class="nav-detail" href="#desktop">Desktop app</a>
+    <a class="nav-detail" href="#mcp">MCP</a>
+    <a href="guide/">Guide</a>
     <a href="../" hreflang="zh-CN">中文</a>
     <a href="https://github.com/ltspace/dowse">GitHub ↗</a>
   </div></nav>
 
-  <header><div class="wrap">
-    <div class="eyebrow">Windows · Local · Open source</div>
-    <h1>Find Windows files by what is inside them.</h1>
-    <p class="lead">Dowse is a native local full-text search app for Windows. Search file names, PDF and Office document contents, source code, and text inside screenshots from one keyboard-first overlay.</p>
+  <header class="home-hero"><div class="wrap">
+    <p class="kicker">Dowse for Windows</p>
+    <h1>Local full-text file search</h1>
+    <p class="lead">Build a local index for the folders you choose. Press <code>Alt+`</code> to search file names, PDF and Office contents, source code, and text inside images.</p>
     <div class="cta">
-      <a class="button" href="https://github.com/ltspace/dowse/releases/latest">Download for Windows</a>
-      <a class="button secondary" href="https://github.com/ltspace/dowse">View source</a>
+      <a class="button" href="https://github.com/ltspace/dowse/releases/latest">Download the Windows installer</a>
+      <a class="button secondary" href="guide/">Read the user guide</a>
     </div>
+    <p class="hero-note">Open source · No telemetry · Index and OCR data stay on your computer</p>
+    <figure class="hero-figure">
+      <img class="product-shot" src="../assets/hero.png" alt="Dowse desktop search with results on the left and a document preview on the right" width="1290" height="840">
+      <figcaption>Results include content snippets, live previews, type filters, and several sort orders.</figcaption>
+    </figure>
+    <ul class="quick-facts" aria-label="Dowse basics">
+      <li>Windows 10 / 11</li>
+      <li>Names and contents</li>
+      <li>Offline image OCR</li>
+      <li>MIT / Apache-2.0</li>
+    </ul>
   </div></header>
 
   <main class="wrap"><article>
-    <h2 id="features">Local file content search, not just file names</h2>
-    <p>Dowse extracts and indexes text from plain-text files, Markdown, source code, PDF, DOCX, XLSX, and PPTX. On Windows it also uses the built-in Windows.Media.Ocr engine to make text inside PNG, JPG, WebP, and BMP images searchable. Everything happens on your computer: there is no cloud parser and no telemetry.</p>
-    <p>The search engine uses tantivy for a persistent inverted index and BM25 ranking. Chinese text is tokenized with jieba instead of being treated as arbitrary trigrams, and older GBK-encoded text files are detected before indexing.</p>
+    <section class="home-section" id="features">
+      <div class="section-heading">
+        <h2>What it supports today</h2>
+        <p>The desktop app, CLI, and MCP server use the same local index. Dowse is intended for folders that hold long-lived material you need to search repeatedly by content.</p>
+      </div>
+      <dl class="capability-list">
+        <div><dt>File contents</dt><dd>Plain text, Markdown, source code, PDF, DOCX, XLSX, and PPTX. Older GBK text files are detected before indexing.</dd></div>
+        <div><dt>Text inside images</dt><dd>PNG, JPG, WebP, and BMP are recognized locally with Windows.Media.Ocr. Images are not uploaded.</dd></div>
+        <div><dt>Chinese search</dt><dd>jieba tokenization with BM25 ranking. Queries also support phrases, paths, dates, sizes, and extension filters.</dd></div>
+        <div><dt>Index updates</dt><dd>File changes are watched while Dowse runs and reconciled at startup. Adding a folder does not rebuild the existing index.</dd></div>
+        <div><dt>Result actions</dt><dd>Open with the keyboard, or use the native context menu to open, reveal, copy the path, or copy the file name.</dd></div>
+        <div><dt>Large result sets</dt><dd>Results are paged in groups of 50. The compact page control appears only when it is needed, and arrow keys can cross pages.</dd></div>
+      </dl>
+    </section>
 
-    <h2>Summon it with a hotkey</h2>
-    <p>Press <code>Alt+`</code> to open the acrylic search overlay, type a phrase, use the arrow keys to select a result, and press Enter to open it. Results include highlighted snippets and a live preview pane. Filters cover document, code, and image groups; results can be sorted by relevance, modification time, or size.</p>
-    <img class="product-shot" src="../assets/hero.png" alt="Dowse searching the Northstar workspace with ranked results and a live document preview" width="1290" height="840" loading="lazy">
+    <section class="home-section" id="desktop">
+      <div class="feature-media">
+        <div>
+          <h2>Settings are available from the window</h2>
+          <p>Click the gear in the top-right corner or press <code>Ctrl+,</code> anywhere in the window. New installs start with a solid background; transparency remains available as an option.</p>
+          <ul class="plain-list">
+            <li>Change the global shortcut</li>
+            <li>Enable transparency and choose its level</li>
+            <li>Configure launch at startup and interface language</li>
+            <li>Edit excluded folders, extra text extensions, and the per-file size limit</li>
+          </ul>
+          <p>The tray menu keeps the same common controls and now also links to the user guide and issue forms.</p>
+        </div>
+        <figure class="product-figure">
+          <img class="product-shot" src="../assets/settings.png" alt="Dowse settings for the global shortcut, transparency, startup, and interface language" width="1290" height="840" loading="lazy">
+          <figcaption>General settings and index rules are kept in one panel.</figcaption>
+        </figure>
+      </div>
+    </section>
 
-    <h2 id="compare">How Dowse differs from other Windows search tools</h2>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Tool</th><th>Primary approach</th><th>Best fit</th></tr></thead>
-      <tbody>
-        <tr><td>Dowse</td><td>Persistent file-name and content index, plus image OCR</td><td>Frequent searches across documents, code, Chinese text, and screenshots</td></tr>
-        <tr><td>Everything</td><td>Exceptional file-name index; content queries scan files on demand</td><td>Instant file-name lookup and occasional scoped content searches</td></tr>
-        <tr><td>Windows Search</td><td>Built-in index using configured locations and content filters</td><td>No third-party install and standard Windows document locations</td></tr>
-        <tr><td>dnGrep</td><td>On-demand text and regular-expression scanning</td><td>Focused directory searches, regex, and search-and-replace</td></tr>
-      </tbody>
-    </table></div>
+    <section class="home-section">
+      <div class="feature-media reverse">
+        <figure class="product-figure">
+          <img class="product-shot" src="../assets/ocr-preview.png" alt="Dowse showing an image preview and the text extracted by offline OCR" width="1290" height="840" loading="lazy">
+          <figcaption>Image previews include OCR text and highlighted matches.</figcaption>
+        </figure>
+        <div>
+          <h2>Everyday search controls</h2>
+          <p>Results update as you type. Use the arrow keys to move, Enter to open, <code>Ctrl+Enter</code> to reveal in Explorer, and <code>Ctrl+C</code> to copy the path.</p>
+          <ul class="plain-list">
+            <li>An empty query shows the last 10 searches; reuse or delete them from the keyboard</li>
+            <li>Filter results by document, code, or image</li>
+            <li>Sort by relevance, modified time, or file size</li>
+            <li>Pin the window when it should stay open after losing focus</li>
+          </ul>
+        </div>
+      </div>
+    </section>
 
-    <h2 id="mcp">Read-only local search for AI agents</h2>
-    <p><code>dowse mcp</code> exposes three read-only Model Context Protocol tools: ranked full-text search, a longer preview around a hit, and index status. Claude, Cursor, and other MCP clients can search the folders you indexed without granting a remote service access to your drive.</p>
-    <div class="code-label">Claude Code · one command</div>
-    <pre><code>claude mcp add --scope user dowse -- dowse mcp</code></pre>
-    <div class="code-label">Any MCP client · JSON configuration</div>
-    <pre><code>{
+    <section class="home-section">
+      <div class="section-heading">
+        <h2>Supported formats</h2>
+        <p>The desktop app indexes only folders you explicitly add. Default rules skip common dependency, build-output, and version-control directories; all rules can be changed in Settings.</p>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Category</th><th>Formats</th><th>How they are handled</th></tr></thead>
+        <tbody>
+          <tr><td>Text and code</td><td>TXT, Markdown, common source and configuration files</td><td>Detect encoding, then extract text directly</td></tr>
+          <tr><td>PDF</td><td>PDF files with a text layer</td><td>Extract the existing text layer; image-only PDFs are not OCR'd page by page yet</td></tr>
+          <tr><td>Office</td><td>DOCX, XLSX, PPTX</td><td>Parse text from Office Open XML</td></tr>
+          <tr><td>Images</td><td>PNG, JPG, WebP, BMP</td><td>Recognize locally with the installed Windows OCR language packs</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="home-section" id="mcp">
+      <div class="section-heading">
+        <h2>Read-only MCP server</h2>
+        <p><code>dowse mcp</code> exposes search, long preview, and index-status tools. It reads the existing index, can run beside the desktop app, and cannot edit or delete files on an agent's behalf.</p>
+      </div>
+      <div class="code-label">Claude Code</div>
+      <pre><code>claude mcp add --scope user dowse -- dowse mcp</code></pre>
+      <div class="code-label">Other MCP clients</div>
+      <pre><code>{
   "mcpServers": {
     "dowse": {
       "command": "dowse",
@@ -124,31 +192,38 @@
     }
   }
 }</code></pre>
+    </section>
 
-    <h2 id="install">Install Dowse</h2>
-    <ol class="steps">
-      <li>Download the latest Windows installer from GitHub Releases.</li>
-      <li>Choose the folders you want Dowse to index. Administrator rights are optional; they only unlock the NTFS MFT/USN fast path when available.</li>
-      <li>Press <code>Alt+`</code> and search for a phrase from inside a document or screenshot.</li>
-    </ol>
-    <p>CLI users with Rust 1.85 or newer can install the same search engine with <code>cargo install dowse</code>.</p>
-    <div class="cta">
-      <a class="button" href="https://github.com/ltspace/dowse/releases/latest">Get the latest release</a>
-      <a class="button secondary" href="https://docs.rs/dowse">Rust API documentation</a>
-    </div>
+    <section class="home-section" id="install">
+      <div class="section-heading">
+        <h2>Install and build the first index</h2>
+        <p>The desktop app does not require administrator privileges. The current installer is unsigned, so Windows SmartScreen may ask you to confirm its source the first time.</p>
+      </div>
+      <ol class="steps">
+        <li>Download the installer whose name ends in <code>setup.exe</code> from GitHub Releases.</li>
+        <li>Start Dowse, add one folder you search often, and let the first text-indexing pass finish.</li>
+        <li>Press <code>Alt+`</code> and search. If the folder contains many images, OCR can continue in the background.</li>
+      </ol>
+      <div class="cta">
+        <a class="button" href="https://github.com/ltspace/dowse/releases/latest">Get the latest release</a>
+        <a class="button secondary" href="guide/">Read the full guide</a>
+      </div>
 
-    <h2>Frequently asked questions</h2>
-    <div class="faq">
-      <details><summary>Does Dowse upload my files or search queries?</summary><p>No. Parsing, indexing, OCR, and queries run locally, and the application contains no telemetry. The local index should still be protected like the source files because it contains extracted text.</p></details>
-      <details><summary>Can Dowse search scanned PDF files?</summary><p>Dowse extracts the existing text layer from PDF files. Its current OCR pipeline indexes image files; it does not yet turn the pages of an image-only scanned PDF into searchable text.</p></details>
-      <details><summary>Does Dowse require administrator privileges?</summary><p>No. Normal indexing and search work as a regular user. Administrator access is an optional condition for the faster NTFS MFT and USN Journal path.</p></details>
-      <details><summary>Is Dowse open source?</summary><p>Yes. The desktop app, CLI, search library, and MCP server are available under MIT or Apache-2.0 licenses.</p></details>
-    </div>
+      <h2>Frequently asked questions</h2>
+      <div class="faq">
+        <details><summary>Does Dowse upload files or search queries?</summary><p>No. Parsing, indexing, OCR, and queries run locally, and the app contains no telemetry. The index contains extracted text, so protect it as you would the source files.</p></details>
+        <details><summary>Can it search scanned PDFs?</summary><p>Dowse extracts an existing PDF text layer. Its image OCR currently handles separate image files and does not convert every page of an image-only PDF.</p></details>
+        <details><summary>Does it require administrator privileges?</summary><p>No. Normal indexing and search work as a regular user. Administrator access only enables the faster NTFS MFT / USN path when available.</p></details>
+      </div>
+    </section>
   </article></main>
 
   <footer><div class="wrap">
-    <span>Dowse · Open-source local full-text search for Windows</span>
-    <a href="../" hreflang="zh-CN">中文</a><a href="https://github.com/ltspace/dowse">Source</a><a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">Privacy</a>
+    <span>Dowse · Local full-text file search for Windows</span>
+    <a href="guide/">User guide</a>
+    <a href="https://github.com/ltspace/dowse">Source</a>
+    <a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">Privacy</a>
+    <span class="footer-languages">README: <a href="https://github.com/ltspace/dowse/blob/main/README.md">English</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.zh-CN.md">简体中文</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.ja.md">日本語</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.ko.md">한국어</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.es.md">Español</a> · <a href="https://github.com/ltspace/dowse/blob/main/README.it.md">Italiano</a></span>
   </div></footer>
   <script src="../assets/intro.js"></script>
 </body>

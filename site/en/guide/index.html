@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dowse User Guide for Windows</title>
+  <meta name="description" content="A practical guide to Dowse for Windows: add indexed folders, search file contents, use filters and shortcuts, adjust index rules, and fix common problems.">
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+  <meta name="theme-color" content="#f7f7f5">
+  <link rel="canonical" href="https://lter.space/dowse/en/guide/">
+  <link rel="alternate" hreflang="en" href="https://lter.space/dowse/en/guide/">
+  <link rel="alternate" hreflang="zh-CN" href="https://lter.space/dowse/guide/">
+  <link rel="alternate" hreflang="x-default" href="https://lter.space/dowse/en/guide/">
+  <link rel="icon" href="../../assets/icon.png" type="image/png">
+  <link rel="stylesheet" href="../../assets/content.css">
+</head>
+<body>
+  <nav class="site-nav"><div class="wrap">
+    <a class="brand" href="../../en/">dowse</a>
+    <a href="#start">Get started</a>
+    <a href="#search">Search</a>
+    <a href="#shortcuts">Shortcuts</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+    <a href="../../guide/" hreflang="zh-CN">中文</a>
+  </div></nav>
+
+  <header><div class="wrap">
+    <div class="eyebrow">Dowse desktop app · User guide</div>
+    <h1>Search your local files with Dowse</h1>
+    <p class="lead">This guide covers the Windows desktop app. There is no search-engine setup to learn: choose your folders, let the first index finish, then use the hotkey and type any part of a name or passage you remember.</p>
+    <p class="meta">For the current release · Interface languages: English / 中文</p>
+  </div></header>
+
+  <main class="wrap"><article>
+    <div class="toc">
+      <b>On this page</b>
+      <ol>
+        <li><a href="#start">Install and build the first index</a></li>
+        <li><a href="#search">Everyday search and result actions</a></li>
+        <li><a href="#syntax">Search syntax</a></li>
+        <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+        <li><a href="#settings">Settings and index rules</a></li>
+        <li><a href="#maintenance">Maintain indexed folders</a></li>
+        <li><a href="#ocr-privacy">OCR and privacy</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ol>
+    </div>
+
+    <h2 id="start">Install and build the first index</h2>
+    <ol class="steps">
+      <li><strong>Install Dowse.</strong> Download the installer ending in <code>setup.exe</code> from <a href="https://github.com/ltspace/dowse/releases/latest">GitHub Releases</a>. The current installer is unsigned. If SmartScreen stops it, first confirm that the file came from the project release page, then choose “More info” and “Run anyway.”</li>
+      <li><strong>Open the search window.</strong> Dowse stays in the system tray after launch. Press <code>Alt+`</code> (the backtick key next to 1) to show it, or left-click its tray icon.</li>
+      <li><strong>Choose the first folder.</strong> On the empty screen, click “Choose a folder and build the index.” Start with a place you search often, such as Documents or a work folder. Dowse only searches folders you explicitly add.</li>
+      <li><strong>Let the text pass finish.</strong> The window shows the number of files processed and the current file. Text becomes searchable when that pass completes. If the folder contains images, OCR may continue in the background; a strip at the bottom shows its progress.</li>
+    </ol>
+
+    <div class="callout"><p><strong>Start with a useful boundary.</strong> Add the folders that actually contain your material instead of indexing an entire system drive. The first pass will be quicker and the results less noisy. You can add more folders from the tray later.</p></div>
+
+    <h3>Add more folders</h3>
+    <p>Right-click the tray icon and choose “Indexed folders” → “Add folder…”. The new folder is added to the existing index; it does not replace earlier folders. The submenu shows the current document count beside each root.</p>
+
+    <h2 id="search">Everyday search and result actions</h2>
+    <p>Press <code>Alt+`</code> and start typing. A query can be part of a file name or words from a PDF, Office document, source file, or text file. Multiple words must all match by default. Put a remembered sentence in double quotes when word order matters.</p>
+    <p>The left side shows names, paths, and matching passages; the right side shows a preview. Drag the divider to give either side more room. Results are paged in groups of 50. Page controls appear only when needed, and pressing <code>↓</code> after the last row moves to the next page.</p>
+
+    <h3>Filter and sort</h3>
+    <p>The quiet controls at the right of the search box filter by all files, documents, code, or images. The neighboring menu sorts by relevance, newest, oldest, or largest. A non-default choice remains visible so that you can tell why the list changed.</p>
+
+    <h3>Open, reveal, and copy</h3>
+    <ul>
+      <li>Double-click a result, or select it and press <code>Enter</code>, to open it in its default application.</li>
+      <li>Press <code>Ctrl+Enter</code> to reveal the file in File Explorer.</li>
+      <li>Press <code>Ctrl+C</code> to copy the full path.</li>
+      <li>Right-click a result to open it, reveal its folder, copy its path, or copy only its name.</li>
+    </ul>
+    <p>The pin in the top-right keeps Dowse visible when focus moves to another application. Pinning lasts for the current run and resets after Dowse restarts.</p>
+
+    <h3>Recent searches</h3>
+    <p>Clear the search box to see the last ten queries. Select one with the arrow keys and press <code>Enter</code> to run it again, or press <code>Delete</code> to remove the selected entry. This history is stored only on your computer.</p>
+
+    <h2 id="syntax">Search syntax</h2>
+    <p>Plain words are enough for most searches. Add these forms to the same query when you need a narrower result set.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Form</th><th>What it does</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td>Spaces</td><td>Require all terms (AND)</td><td><code>quarterly budget</code></td></tr>
+        <tr><td>Double quotes</td><td>Match an exact phrase</td><td><code>"release checklist"</code></td></tr>
+        <tr><td><code>path:</code></td><td>Match a file name or folder path; quote paths containing spaces</td><td><code>budget path:reports</code><br><code>path:"My Docs"</code></td></tr>
+        <tr><td><code>ext:</code></td><td>Limit results to one extension</td><td><code>deployment ext:md</code></td></tr>
+        <tr><td><code>mtime:</code></td><td>Filter by modification date with <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, or <code>&lt;=</code></td><td><code>contract mtime:&gt;=2026-01</code></td></tr>
+        <tr><td><code>size:</code></td><td>Filter by size; B, KB, MB, and GB are accepted</td><td><code>log size:&gt;10mb</code></td></tr>
+        <tr><td><code>-term</code> or <code>NOT term</code></td><td>Exclude results containing a term</td><td><code>proposal -deprecated</code></td></tr>
+        <tr><td><code>OR</code></td><td>Match either group; OR must be uppercase</td><td><code>quotation OR budget</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>Dates may use <code>YYYY-MM-DD</code> or <code>YYYY-MM</code>. Conditions inside a group are combined before uppercase <code>OR</code> separates groups. For example: <code>path:customers contract OR path:internal template</code>.</p>
+
+    <h2 id="shortcuts">Keyboard shortcuts</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td><code>Alt+`</code></td><td>Show or hide Dowse; this can be rebound in Settings</td></tr>
+        <tr><td><code>↑</code> / <code>↓</code></td><td>Move through results and cross page boundaries</td></tr>
+        <tr><td><code>Enter</code></td><td>Open the selected file</td></tr>
+        <tr><td><code>Ctrl+Enter</code></td><td>Reveal the selected file in File Explorer</td></tr>
+        <tr><td><code>Ctrl+C</code></td><td>Copy the selected file's full path</td></tr>
+        <tr><td><code>Ctrl+P</code></td><td>Open the file-type filter</td></tr>
+        <tr><td><code>Ctrl+S</code></td><td>Open the sort menu</td></tr>
+        <tr><td><code>Ctrl+D</code></td><td>Pin or unpin the window</td></tr>
+        <tr><td><code>Ctrl+/</code></td><td>Show the in-app shortcut sheet</td></tr>
+        <tr><td><code>Ctrl+,</code></td><td>Open Settings from anywhere in the window</td></tr>
+        <tr><td><code>Esc</code></td><td>Close a menu or panel, then hide the search window</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="settings">Settings and index rules</h2>
+    <p>Click the small gear in the top-right, press <code>Ctrl+,</code>, or choose “Settings…” from the tray menu.</p>
+
+    <h3>General</h3>
+    <ul>
+      <li><strong>Toggle shortcut:</strong> choose “Change,” press the new combination, then confirm it. The shortcut must contain Ctrl, Alt, Shift, or Win plus a main key. If another application already owns it, Dowse keeps the old shortcut.</li>
+      <li><strong>Transparency:</strong> turn the effect off completely, or enable it and choose low, medium, or high opacity.</li>
+      <li><strong>Launch at startup:</strong> decide whether Dowse starts when you sign in to Windows.</li>
+      <li><strong>Language:</strong> follow the system language or select English or 中文. Restart Dowse after changing this setting.</li>
+    </ul>
+
+    <h3>Index rules</h3>
+    <ul>
+      <li><strong>Excluded folders:</strong> enter folder names separated by commas or new lines. Defaults include <code>node_modules</code>, <code>target</code>, <code>.git</code>, <code>.venv</code>, and <code>__pycache__</code>. Dot-folders are always excluded.</li>
+      <li><strong>Extra text extensions:</strong> add project-specific plain-text formats such as <code>rst, adoc</code>. These extend the built-in list rather than replacing it; omit the leading dot.</li>
+      <li><strong>Maximum file size:</strong> the default is 20 MB. Larger files are skipped so that an unexpectedly large file cannot dominate an indexing run.</li>
+    </ul>
+    <p>New file changes use saved rules, but rebuild the index to make existing entries fully consistent. With one indexed root, “Rebuild now” is available in the panel. With several roots, rebuild each one from the tray menu.</p>
+
+    <h2 id="maintenance">Maintain indexed folders</h2>
+    <p>While Dowse is running, it watches for created, edited, moved, and deleted files. At the next start, it also reconciles changes made while the application was closed by comparing modification times and sizes. Routine use should not require scheduled rebuilds.</p>
+    <p>To rebuild or remove a root, right-click the tray icon, open “Indexed folders,” and expand the path:</p>
+    <ul>
+      <li><strong>Rebuild:</strong> scan that folder again. Use it after changing index rules or when the results are clearly out of sync with the drive.</li>
+      <li><strong>Remove:</strong> unregister the folder and remove its entries from the search index. It does not delete the original files.</li>
+      <li><strong>Add folder…:</strong> add another root to the same index.</li>
+    </ul>
+    <p>You can hide the window while indexing or OCR is in progress. The tray tooltip and the progress view shown when you reopen Dowse reflect the current state.</p>
+
+    <h2 id="ocr-privacy">OCR and privacy</h2>
+    <p>Dowse uses the Windows <code>Windows.Media.Ocr</code> engine for text inside PNG, JPG, WebP, and BMP images. Recognition happens locally; images are not sent to a cloud service. The Simplified Chinese Windows language pack also handles common mixed Chinese and English screenshots.</p>
+    <div class="callout"><p><strong>Scanned PDFs are different.</strong> Dowse extracts an existing PDF text layer, but it does not currently run OCR over every page of an image-only scanned PDF. Use a PDF tool to add a searchable text layer first.</p></div>
+    <p>File parsing, indexing, queries, and recent-search history stay on the device. The index and configuration live under <code>%LOCALAPPDATA%\dowse\data</code>. Because the index contains extracted text, protect it as you would the source files. Dowse has no telemetry and does not upload queries. See the full <a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">privacy policy</a>.</p>
+
+    <h2 id="troubleshooting">Troubleshooting</h2>
+    <div class="faq">
+      <details><summary>The hotkey does not show the window</summary><p>Check the system tray for the Dowse icon and click it to show the window. If another application owns the shortcut, right-click the icon, open “Settings…,” and choose another combination. You can also use “Show Dowse” from the tray menu.</p></details>
+      <details><summary>A file exists, but Dowse cannot find it</summary><p>First check that it is under a path listed in “Indexed folders.” Then review its extension, excluded parent folders, and the maximum file-size rule. Image text will not appear until the OCR pass reaches that file. Rebuild the root after changing rules. Legacy <code>.doc</code>, <code>.xls</code>, and <code>.ppt</code> files and encrypted or password-protected documents do not currently have their contents extracted.</p></details>
+      <details><summary>The name is searchable, but the PDF or Office text is not</summary><p>A PDF needs an existing text layer; image-only scanned pages are not automatically OCRed. Office content extraction supports DOCX, XLSX, and PPTX. Damaged, encrypted, or password-protected files are skipped. Open the file in its normal application first to confirm that the text is readable.</p></details>
+      <details><summary>An edited or deleted file still appears</summary><p>Leave Dowse running in the tray so its file watcher can apply changes. If a sync tool replaced many files in an unusual way, restart Dowse to run reconciliation. Rebuild that indexed root if the result remains stale.</p></details>
+      <details><summary>Does Dowse require administrator rights?</summary><p>No. Normal indexing, file watching, OCR, and search work as a standard user. Administrator access is only an optional condition for the faster NTFS path.</p></details>
+      <details><summary>How much disk space does the index use?</summary><p>The index stores searchable text, so its size depends on the number and contents of your documents. Remove roots you rarely search, exclude build output, and use a reasonable file-size limit if the scope becomes too broad.</p></details>
+    </div>
+
+    <h2 id="feedback">Report a problem or suggest an improvement</h2>
+    <p>Right-click the tray icon and open “Help &amp; Feedback” to return to this guide or open the issue page. You can also <a href="https://github.com/ltspace/dowse/issues/new/choose">report a bug or request a feature on GitHub</a> directly.</p>
+    <p>For a useful bug report, include the Dowse version, Windows version, steps to reproduce, and what you expected versus what happened. Crash and indexing diagnostics are in <code>%LOCALAPPDATA%\dowse\data\logs\dowse.log</code>. Check the file for local paths you do not want to publish before attaching it.</p>
+    <div class="cta">
+      <a class="button" href="https://github.com/ltspace/dowse/issues/new/choose">Open feedback</a>
+      <a class="button secondary" href="../../en/">Back to the Dowse home page</a>
+    </div>
+  </article></main>
+
+  <footer><div class="wrap">
+    <span>Dowse User Guide</span>
+    <a href="../../guide/" hreflang="zh-CN">中文</a>
+    <a href="../../en/">Product home</a>
+    <a href="https://github.com/ltspace/dowse">GitHub</a>
+    <a href="https://github.com/ltspace/dowse/blob/main/PRIVACY.md">Privacy</a>
+  </div></footer>
+</body>
+</html>

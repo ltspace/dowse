@@ -222,7 +222,7 @@ function installMockRuntime(lang, mode) {
 				case 'get_hotkey':
 					return 'Alt+Backquote';
 				case 'get_config':
-					return { hotkey: 'Alt+Backquote', transparency_enabled: true, transparency_tier: 'mid', autostart_enabled: true, lang };
+					return { hotkey: 'Alt+Backquote', transparency_enabled: false, transparency_tier: 'mid', autostart_enabled: true, lang };
 				case 'get_rules':
 					return { exclude_dirs: ['node_modules', 'target', '.git'], extra_text_exts: ['rst', 'adoc'], max_file_mb: 20 };
 				case 'file_icon':
