@@ -1,4 +1,4 @@
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Italiano](README.it.md)
 
 <p align="center">
   <img src="crates/dowse-app/src-tauri/icons/128x128@2x.png" width="96" height="96" alt="dowse logo">
@@ -138,7 +138,7 @@ npm install
 cargo tauri build      # produces the installer under target/release/bundle
 ```
 
-Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it. `Ctrl+,` opens the settings panel — general (hotkey rebinding, transparency, autostart, interface language) and index rules (excluded directories, extra text extensions, per-file size cap).
+Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Results are paginated in groups of 50; the compact `‹ 1 / N ›` control shows only when needed, and pressing `↓` past the last result or `↑` before the first moves between pages. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it. `Ctrl+,` opens the settings panel — general (hotkey rebinding, transparency, autostart, interface language) and index rules (excluded directories, extra text extensions, per-file size cap).
 
 ![Dowse settings panel in English, with controls for the global shortcut, transparency, startup behavior, and interface language](docs/screenshots/settings.png)
 

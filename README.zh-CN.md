@@ -1,4 +1,4 @@
-[English](README.md) | 简体中文
+[English](README.md) | 简体中文 | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Italiano](README.it.md)
 
 <p align="center">
   <img src="crates/dowse-app/src-tauri/icons/128x128@2x.png" width="96" height="96" alt="dowse logo">
@@ -138,7 +138,7 @@ cargo tauri build      # 安装包产出在 target/release/bundle 下
 ```
 
 浮窗应用：Alt+` 呼出，`↑↓` 选择，`Enter` 打开，
-`Ctrl+Enter` 在资源管理器中定位，`Ctrl+C` 复制路径，`Esc` 隐藏。输入条右侧有两个幽灵态下拉：
+`Ctrl+Enter` 在资源管理器中定位，`Ctrl+C` 复制路径，`Esc` 隐藏。搜索结果每 50 条一页；只有超过一页时才显示轻量的 `‹ 1 / N ›`，在本页最后一条继续按 `↓` 或在第一条按 `↑` 也可以直接跨页。输入条右侧有两个幽灵态下拉：
 类型筛选（`Ctrl+P`，全部/文档/代码/图片）和排序器（`Ctrl+S`，相关性/最新优先/最旧优先/
 最大优先），默认态几乎不占视觉存在感，选中非默认值才会显形。结果行右键弹出 Windows
 原生上下文菜单（打开/打开所在文件夹/复制完整路径/复制文件名）。输入条最右端的图钉按钮
