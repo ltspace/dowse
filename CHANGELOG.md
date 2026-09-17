@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Paginated overlay search results with a compact page control, total-result
+  count, and keyboard navigation across page boundaries.
+- Japanese, Korean, Spanish, and Italian README translations.
+
+### Changed
+
+- Refreshed the README screenshots at higher resolution with transparent
+  corners and added a deterministic screenshot-capture script.
+
 ## [1.0.0] - 2026-08-10
 
 ### Added
