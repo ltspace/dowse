@@ -45,6 +45,9 @@ interface Strings {
 	// 结果计数分成前后缀，中间夹一个带滚动动画的数字组件
 	resultsPrefix: string;
 	resultsSuffix: string;
+	previousPage: string;
+	nextPage: string;
+	pageStatus: (page: number, total: number) => string;
 	// 目录选择对话框标题
 	dialogPickIndexFolder: string;
 	dialogAddFolder: string;
@@ -177,6 +180,9 @@ const zh: Strings = {
 	searchPlaceholder: '搜文件名或内容…',
 	resultsPrefix: '结果 · ',
 	resultsSuffix: ' 条',
+	previousPage: '上一页',
+	nextPage: '下一页',
+	pageStatus: (page, total) => `第 ${page} 页，共 ${total} 页`,
 	dialogPickIndexFolder: '选择要索引的目录',
 	dialogAddFolder: '选择要添加的文件夹',
 	toastOpenFailed: (err) => `文件打开失败：${err}`,
@@ -290,6 +296,9 @@ const en: Strings = {
 	searchPlaceholder: 'Search names or contents…',
 	resultsPrefix: 'Results · ',
 	resultsSuffix: '',
+	previousPage: 'Previous page',
+	nextPage: 'Next page',
+	pageStatus: (page, total) => `Page ${page} of ${total}`,
 	dialogPickIndexFolder: 'Choose a folder to index',
 	dialogAddFolder: 'Choose a folder to add',
 	toastOpenFailed: (err) => `Could not open file: ${err}`,

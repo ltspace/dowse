@@ -32,6 +32,12 @@
 	import { loadHistory, recordHistory, removeHistoryEntry, clearHistory } from '$lib/searchHistory';
 	import { reduceIndexingView } from '$lib/indexingState';
 	import {
+		SEARCH_PAGE_SIZE,
+		clampPageIndex,
+		pageCount,
+		pageOffset
+	} from '$lib/pagination.js';
+	import {
 		DEFAULT_SPLIT_RATIO,
 		SPLIT_DIVIDER_WIDTH,
 		clampSplitWidth,
@@ -57,6 +63,9 @@
 
 	let query = $state('');
 	let hits = $state<SearchHit[]>([]);
+	let totalHits = $state(0);
+	let pageIndex = $state(0);
+	let searchPending = $state(false);
 	let selectedIndex = $state(0);
 	let hasIndex = $state<boolean | null>(null);
 	let numDocs = $state(0);
@@ -107,7 +116,7 @@
 		indexingOcrTotal = next.ocrTotal;
 	}
 
-	// 本次搜索耗时（发起请求到结果上屏），页脚小字用；null 表示还没有可展示
+	// 本次搜索耗时（发起请求到结果上屏），结果标题小字用；null 表示还没有可展示
 	// 的一次搜索（空查询/首次挂载）。刻意不做滚动动画——每次搜索都变，
 	// 动画反而晃眼。
 	let lastSearchMs = $state<number | null>(null);
@@ -149,6 +158,7 @@
 	const SPLIT_RATIO_KEY = 'dowse:results-preview-split';
 
 	let selectedHit = $derived(hits[selectedIndex] ?? null);
+	let totalPages = $derived(pageCount(totalHits));
 
 	// 文本阶段（'text'）无论触发源（浮窗按钮/托盘"重建索引"/托盘"更改索引
 	// 文件夹…"）都要接管成全屏引导层——`indexingPhase` 是跨触发源统一的
@@ -213,11 +223,23 @@
 	// 的日志文案，避免两处各写一份 30 而将来改漏一处。
 	const SEARCH_DEBOUNCE_MS = 30;
 	let searchToken = 0;
+	let previousSearchCriteria = '';
+	let pendingPageSelection: 'first' | 'last' = 'first';
 	$effect(() => {
 		const q = query;
 		const group = extGroup;
 		const sort = sortOption;
+		const requestedPage = pageIndex;
 		const token = ++searchToken;
+		const criteria = `${q}\u0000${group}\u0000${sort}`;
+		if (criteria !== previousSearchCriteria) {
+			previousSearchCriteria = criteria;
+			pendingPageSelection = 'first';
+			if (requestedPage !== 0) {
+				pageIndex = 0;
+				return;
+			}
+		}
 		// 击键到渲染性能埋点的起点：近似"触发搜索的输入事件"的时刻——
 		// $effect 因 query/extGroup/sortOption 变化而重跑，跟用户敲键盘/
 		// 切换筛选几乎同时发生。真正测的是下面 setTimeout 跑完之后（见
@@ -225,30 +247,57 @@
 		const keystrokeAt = performance.now();
 		if (q.trim().length === 0) {
 			hits = [];
+			totalHits = 0;
 			selectedIndex = 0;
 			lastSearchMs = null;
+			searchPending = false;
 			return;
 		}
 		const timer = setTimeout(async () => {
 			// 计时窗口：从这里"发起请求"到下面结果赋值"上屏"，不含防抖等待——
-			// 页脚毫秒数是给用户看引擎有多快，不是给他们看输了多久的字。
+			// 标题栏毫秒数是给用户看引擎有多快，不是给他们看输了多久的字。
 			const startedAt = performance.now();
+			searchPending = true;
 			try {
-				const results = await api.search(q, 50, group, sort);
+				const results = await api.search(
+					q,
+					SEARCH_PAGE_SIZE,
+					pageOffset(requestedPage),
+					group,
+					sort
+				);
 				if (token !== searchToken) return;
-				hits = results;
-				selectedIndex = 0;
+				const resolvedPages = pageCount(results.total);
+				const resolvedPage = clampPageIndex(requestedPage, resolvedPages);
+				if (resolvedPage !== requestedPage) {
+					pageIndex = resolvedPage;
+					return;
+				}
+				hits = results.hits;
+				totalHits = results.total;
+				selectedIndex = pendingPageSelection === 'last' ? Math.max(0, results.hits.length - 1) : 0;
+				pendingPageSelection = 'first';
 				lastSearchMs = performance.now() - startedAt;
 				reportSearchPerf(keystrokeAt, startedAt, token);
 			} catch (err) {
 				if (token !== searchToken) return;
 				hits = [];
+				totalHits = 0;
 				lastSearchMs = null;
 				console.error('search failed', err);
+			} finally {
+				if (token === searchToken) searchPending = false;
 			}
 		}, SEARCH_DEBOUNCE_MS);
 		return () => clearTimeout(timer);
 	});
+
+	function goToPage(nextPage: number, selection: 'first' | 'last' = 'first') {
+		const next = clampPageIndex(nextPage, totalPages);
+		if (next === pageIndex || searchPending) return;
+		pendingPageSelection = selection;
+		pageIndex = next;
+	}
 
 	/// 击键到渲染性能埋点：`hits` 赋值只是把新数据排进 Svelte 的响应式
 	/// 更新队列，不代表 DOM 已经画出来——`await tick()` 等 Svelte 把这次
@@ -613,12 +662,20 @@
 		}
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			if (hits.length > 0) selectedIndex = Math.min(selectedIndex + 1, hits.length - 1);
+			if (hits.length > 0 && selectedIndex === hits.length - 1 && pageIndex + 1 < totalPages) {
+				goToPage(pageIndex + 1);
+			} else if (hits.length > 0) {
+				selectedIndex = Math.min(selectedIndex + 1, hits.length - 1);
+			}
 			return;
 		}
 		if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			if (hits.length > 0) selectedIndex = Math.max(selectedIndex - 1, 0);
+			if (hits.length > 0 && selectedIndex === 0 && pageIndex > 0) {
+				goToPage(pageIndex - 1, 'last');
+			} else if (hits.length > 0) {
+				selectedIndex = Math.max(selectedIndex - 1, 0);
+			}
 			return;
 		}
 		if (e.key === 'Enter') {
@@ -1008,9 +1065,34 @@
 		{:else}
 			<div class="results">
 				<div class="results-heading">
-					<span>{t.resultsPrefix}<AnimatedNumber value={hits.length} />{t.resultsSuffix}</span>
-					{#if lastSearchMs !== null}
-						<span class="search-ms">{Math.round(lastSearchMs)}ms</span>
+					<span class="results-meta">
+						<span>{t.resultsPrefix}<AnimatedNumber value={totalHits} />{t.resultsSuffix}</span>
+						{#if lastSearchMs !== null}
+							<span class="search-ms">· {Math.round(lastSearchMs)}ms</span>
+						{/if}
+					</span>
+					{#if totalPages > 1}
+						<nav class="pagination" class:pending={searchPending} aria-label={t.pageStatus(pageIndex + 1, totalPages)}>
+							<button
+								type="button"
+								aria-label={t.previousPage}
+								title={t.previousPage}
+								disabled={pageIndex === 0 || searchPending}
+								onclick={() => goToPage(pageIndex - 1)}
+							>
+								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3-5 5 5 5" /></svg>
+							</button>
+							<span class="page-number" aria-live="polite">{pageIndex + 1} / {totalPages}</span>
+							<button
+								type="button"
+								aria-label={t.nextPage}
+								title={t.nextPage}
+								disabled={pageIndex + 1 >= totalPages || searchPending}
+								onclick={() => goToPage(pageIndex + 1)}
+							>
+								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+							</button>
+						</nav>
 					{/if}
 				</div>
 				<ResultList
@@ -1220,7 +1302,7 @@
 	.results-heading {
 		flex-shrink: 0;
 		display: flex;
-		align-items: baseline;
+		align-items: center;
 		justify-content: space-between;
 		gap: 8px;
 		padding: 12px 16px 8px;
@@ -1229,13 +1311,83 @@
 		color: var(--fg-tertiary);
 	}
 
-	/* 页脚毫秒数：不解释、不加图标，比小标题本身再淡一档，等宽数字继承
+	.results-meta {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 5px;
+		min-width: 0;
+		white-space: nowrap;
+	}
+
+	/* 标题栏毫秒数：不解释、不加图标，比小标题本身再淡一档，等宽数字继承
 	   全局 body 的 tabular-nums。刻意不做滚动动画（AnimatedNumber）——
 	   每次搜索都变，滚一下反而晃眼，见 +page.svelte 顶部 lastSearchMs 的注释。 */
 	.search-ms {
 		flex-shrink: 0;
 		opacity: 0.7;
 		letter-spacing: 0;
+	}
+
+	.pagination {
+		display: inline-flex;
+		align-items: center;
+		gap: 1px;
+		height: 24px;
+		margin: -4px -5px -4px auto;
+		letter-spacing: 0;
+		transition: opacity 90ms ease-out;
+	}
+
+	.pagination.pending {
+		opacity: 0.55;
+	}
+
+	.pagination button {
+		display: grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		padding: 0;
+		border: 0;
+		border-radius: var(--radius-chip);
+		background: transparent;
+		color: var(--fg-secondary);
+		cursor: default;
+		transition:
+			background 90ms ease-out,
+			color 90ms ease-out,
+			opacity 90ms ease-out;
+	}
+
+	.pagination button:hover:not(:disabled) {
+		background: var(--row-hover);
+		color: var(--fg-primary);
+	}
+
+	.pagination button:focus-visible {
+		outline: 1px solid var(--accent-border);
+		outline-offset: -1px;
+	}
+
+	.pagination button:disabled {
+		opacity: 0.24;
+	}
+
+	.pagination svg {
+		width: 12px;
+		height: 12px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.page-number {
+		min-width: 42px;
+		text-align: center;
+		font-variant-numeric: tabular-nums;
+		color: var(--fg-secondary);
 	}
 
 	.divider-v {
