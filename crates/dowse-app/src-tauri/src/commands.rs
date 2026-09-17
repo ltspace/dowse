@@ -34,6 +34,12 @@ pub struct SearchHitDto {
 }
 
 #[derive(Serialize)]
+pub struct SearchPageDto {
+    pub hits: Vec<SearchHitDto>,
+    pub total: usize,
+}
+
+#[derive(Serialize)]
 pub struct PreviewDto {
     pub segments: Vec<TextSegment>,
 }
@@ -128,21 +134,26 @@ pub fn search(
     search: State<SearchState>,
     query: String,
     limit: usize,
+    offset: usize,
     ext_group: Option<String>,
     sort: Option<String>,
-) -> Result<Vec<SearchHitDto>, String> {
+) -> Result<SearchPageDto, String> {
     let guard = search.0.lock().map_err(|_| "搜索状态异常".to_string())?;
     let Some(searcher) = guard.as_ref() else {
-        return Ok(Vec::new());
+        return Ok(SearchPageDto {
+            hits: Vec::new(),
+            total: 0,
+        });
     };
 
     let group = dowse::ext_group_by_name(ext_group.as_deref());
     let sort_mode = dowse::SortMode::parse(sort.as_deref());
 
-    let hits = searcher
-        .search_advanced(&query, limit, group, sort_mode)
+    let page = searcher
+        .search_paged(&query, limit, offset, group, sort_mode)
         .map_err(|e| e.to_string())?;
-    Ok(hits
+    let hits = page
+        .hits
         .into_iter()
         .map(|hit| {
             let name = file_name_of(&hit.path);
@@ -157,7 +168,11 @@ pub fn search(
                 score: hit.score,
             }
         })
-        .collect())
+        .collect();
+    Ok(SearchPageDto {
+        hits,
+        total: page.total,
+    })
 }
 
 /// 结果列表选中一行后，取更长的命中上下文给预览区。

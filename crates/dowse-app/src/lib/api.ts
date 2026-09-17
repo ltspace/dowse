@@ -10,7 +10,7 @@ import type {
 	IndexStatus,
 	LangOption,
 	PreviewResult,
-	SearchHit,
+	SearchPage,
 	SortOption,
 	TransparencyTier
 } from './types';
@@ -28,11 +28,12 @@ export function indexingStatus(): Promise<IndexingSnapshot> {
 
 export function search(
 	query: string,
-	limit = 30,
+	limit = 50,
+	offset = 0,
 	extGroup: ExtGroup = 'all',
 	sort: SortOption = 'relevance'
-): Promise<SearchHit[]> {
-	return invoke('search', { query, limit, extGroup, sort });
+): Promise<SearchPage> {
+	return invoke('search', { query, limit, offset, extGroup, sort });
 }
 
 export function preview(path: string, query: string): Promise<PreviewResult | null> {

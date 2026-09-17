@@ -18,6 +18,11 @@ export interface SearchHit {
 	score: number;
 }
 
+export interface SearchPage {
+	hits: SearchHit[];
+	total: number;
+}
+
 export interface PreviewResult {
 	segments: TextSegment[];
 }
