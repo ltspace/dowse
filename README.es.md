@@ -74,7 +74,7 @@ Los resultados se dividen en páginas de 50. El discreto control `‹ 1 / N ›`
 claude mcp add --scope user dowse -- dowse mcp
 ```
 
-Ofrece tres herramientas: `search`, `preview` e `index_status`. `search` admite paginación con `limit` / `offset`, total de resultados, filtro por extensión y ordenación.
+Ofrece cuatro herramientas: `search`, `preview`, `read_file_chunk` e `index_status`. `search` admite paginación con `limit` / `offset`, total de resultados, filtro por extensión y ordenación; `read_file_chunk` pagina de forma acotada el texto ya almacenado en el índice.
 
 ## Tecnologías
 

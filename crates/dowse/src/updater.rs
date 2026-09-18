@@ -110,6 +110,11 @@ impl IndexUpdater {
         mut on_progress: impl FnMut(IndexProgress),
     ) -> Result<BatchOutcome> {
         self.commit_with_retry(|this| {
+            let roots = crate::meta::registered_roots(&this.index_dir)?
+                .iter()
+                .map(|root| crate::meta::best_effort_normalize(root))
+                .collect::<Vec<_>>();
+            let rules = crate::rules::active_rules();
             let mut outcome = BatchOutcome::default();
             let mut touched_image = false;
             let mut processed = 0usize;
@@ -117,11 +122,21 @@ impl IndexUpdater {
                 match change.op {
                     PendingOp::Upsert => {
                         Self::tally_upsert(
-                            this.upsert_one(&change.path, &mut touched_image)?,
+                            this.upsert_one_from_event(
+                                &change.path,
+                                &roots,
+                                &rules,
+                                &mut touched_image,
+                            )?,
                             &mut outcome,
                         );
                     }
                     PendingOp::UpsertTree => {
+                        if Self::event_path_is_excluded(&change.path, &roots, &rules, true) {
+                            outcome.removed += this.delete_tree(&change.path)?;
+                            outcome.skipped += 1;
+                            continue;
+                        }
                         // 目录整体新建/移入：真正"这个目录下有哪些文件"的完整 walk
                         // 在这里做（消费侧线程），不在 notify 回调线程里做——大目录
                         // 阻塞秒级会让 OS 的目录变更缓冲溢出丢事件，见
@@ -186,6 +201,38 @@ impl IndexUpdater {
             *touched_image = true;
         }
         add_file_document(&self.writer, &self.fields, path, &self.index_dir)
+    }
+
+    /// notify/对账产生的单文件事件不像目录 walk 那样天然经过排除规则，写入前补齐
+    /// 同一口径。若旧版本曾误收录该路径，先删掉再返回 skipped，顺手完成自愈。
+    fn upsert_one_from_event(
+        &self,
+        path: &Path,
+        roots: &[PathBuf],
+        rules: &crate::IndexRules,
+        touched_image: &mut bool,
+    ) -> Result<AddOutcome> {
+        if Self::event_path_is_excluded(path, roots, rules, false) {
+            self.delete_exact(path);
+            return Ok(AddOutcome::Skipped);
+        }
+        self.upsert_one(path, touched_image)
+    }
+
+    fn event_path_is_excluded(
+        path: &Path,
+        roots: &[PathBuf],
+        rules: &crate::IndexRules,
+        path_is_dir: bool,
+    ) -> bool {
+        let normalized_path = crate::meta::best_effort_normalize(path);
+        roots.iter().any(|root| {
+            if path_is_dir {
+                rules.dir_under_excluded_dir(&normalized_path, root)
+            } else {
+                rules.path_under_excluded_dir(&normalized_path, root)
+            }
+        })
     }
 
     /// 把一次 [`upsert_one`](Self::upsert_one) 的结果累加进 [`BatchOutcome`]：
@@ -460,6 +507,38 @@ mod tests {
             outcome.upserted, 1,
             "重开后的写入端应能正常完成一次增量提交"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn events_under_excluded_dir_are_skipped() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let root = tempfile::tempdir()?;
+        std::fs::write(root.path().join("seed.md"), "seed")?;
+        rebuild_index(index_dir.path(), root.path())?;
+
+        let excluded = root.path().join("target");
+        std::fs::create_dir(&excluded)?;
+        let generated = excluded.join("generated.rs");
+        std::fs::write(&generated, "forbiddenmarker")?;
+
+        let mut updater = IndexUpdater::open(index_dir.path())?;
+        let outcome = updater.apply(&[
+            PendingChange {
+                path: excluded.canonicalize()?,
+                op: PendingOp::UpsertTree,
+            },
+            PendingChange {
+                path: generated.canonicalize()?,
+                op: PendingOp::Upsert,
+            },
+        ])?;
+        assert_eq!(outcome.upserted, 0);
+        assert_eq!(outcome.skipped, 2);
+        drop(updater);
+
+        let searcher = crate::Searcher::open(index_dir.path())?;
+        assert!(searcher.search("forbiddenmarker", 10)?.is_empty());
         Ok(())
     }
 }

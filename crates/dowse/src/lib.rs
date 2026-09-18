@@ -114,7 +114,9 @@ pub use roots::{
     index_root_incremental_with_progress, rebuild_root, rebuild_root_with_progress, remove_root,
 };
 pub use rules::{IndexRules, load_rules, save_rules};
-pub use searcher::{PreviewHit, SearchHit, SearchPage, Searcher, SortMode, normalize_ranges};
+pub use searcher::{
+    IndexedContentChunk, PreviewHit, SearchHit, SearchPage, Searcher, SortMode, normalize_ranges,
+};
 pub use status::{IndexStatus, index_status};
 pub use updater::{BatchOutcome, IndexUpdater};
 pub use volume::ntfs_fast_path_available;

@@ -22,7 +22,7 @@
 - Offline OCR for PNG, JPG/JPEG, WebP, and BMP on Windows.
 - jieba tokenization and BM25 ranking for Chinese content.
 - Optional NTFS MFT enumeration and USN Journal updates; normal indexing works without administrator rights.
-- Read-only MCP tools: `search`, `preview`, and `index_status`.
+- Read-only MCP tools: `search`, `preview`, `read_file_chunk`, and `index_status`.
 
 ## Important limitations
 

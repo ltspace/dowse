@@ -141,7 +141,7 @@ pub fn registered_roots(index_dir: &Path) -> Result<Vec<PathBuf>> {
 /// 往往落在磁盘上（能直接展开成长名），而候选可能指向一个还不存在的子目录
 /// （`canonicalize` 直接失败、只能保留短名），两侧拼法一错位，纯前缀比较就
 /// 漏判真实存在的嵌套。给两侧都跑同一套归一，才能把它们拉到同一种拼法再比。
-fn best_effort_normalize(path: &Path) -> PathBuf {
+pub(crate) fn best_effort_normalize(path: &Path) -> PathBuf {
     let resolved = path.canonicalize().unwrap_or_else(|_| {
         for ancestor in path.ancestors() {
             if let (Ok(base), Ok(rest)) = (ancestor.canonicalize(), path.strip_prefix(ancestor)) {

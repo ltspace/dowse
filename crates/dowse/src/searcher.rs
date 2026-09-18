@@ -2,7 +2,7 @@
 //! [`Searcher::search`]/[`Searcher::search_filtered`]/[`Searcher::search_advanced`]
 //! 执行查询并返回 [`SearchHit`]（含 BM25 分数、命中片段、高亮区间），
 //! [`SortMode`] 控制按相关性还是按 mtime/size 排序。也提供按路径取更大窗口
-//! 预览内容的能力（[`PreviewHit`]）。
+//! 预览内容（[`PreviewHit`]）和分块读取已索引正文（[`IndexedContentChunk`]）的能力。
 
 use std::ops::{Bound, Range};
 use std::path::Path;
@@ -221,6 +221,21 @@ pub struct PreviewHit {
     pub mtime: i64,
     /// 文件扩展名（不含点，小写），无扩展名时是空串。
     pub ext: String,
+}
+
+/// 按 Unicode 字符分页的一段已索引正文。
+///
+/// 内容来自 Tantivy 里的只读快照，不会重新打开原文件。这样既保持 MCP 的只读边界，
+/// 也保证调用方只能读取已经明确纳入索引的文档。
+pub struct IndexedContentChunk {
+    /// 本页正文。
+    pub content: String,
+    /// 本页从全文第几个 Unicode 字符开始。
+    pub offset_chars: usize,
+    /// 本页实际返回的 Unicode 字符数。
+    pub returned_chars: usize,
+    /// 下一页起点；没有下一页时为 None。
+    pub next_offset_chars: Option<usize>,
 }
 
 /// 一页搜索结果：当前页命中列表加上"匹配总数"。
@@ -791,6 +806,48 @@ impl Searcher {
     /// 调用方（MCP 工具处理函数）应在每次请求前调用一次，保证读到浮窗侧最新的索引状态。
     pub fn reload(&self) -> Result<()> {
         self.reader.reload().context("索引 reader 重载失败")
+    }
+
+    /// 按精确路径分块读取已索引正文。
+    ///
+    /// `offset_chars` 和 `max_chars` 都按 Unicode 字符计数，避免调用方处理 UTF-8 字节
+    /// 边界。路径不在索引里时返回 `None`；offset 超过全文长度时返回空的末页。
+    pub fn read_indexed_content_chunk(
+        &self,
+        path: &str,
+        offset_chars: usize,
+        max_chars: usize,
+    ) -> Result<Option<IndexedContentChunk>> {
+        if max_chars == 0 {
+            bail!("max_chars 必须大于 0");
+        }
+        let searcher = self.reader.searcher();
+        let path_query = TermQuery::new(
+            Term::from_field_text(self.fields.path, path),
+            IndexRecordOption::Basic,
+        );
+        let docs = searcher.search(&path_query, &TopDocs::with_limit(1).order_by_score())?;
+        let Some((_, addr)) = docs.into_iter().next() else {
+            return Ok(None);
+        };
+
+        let doc: TantivyDocument = searcher.doc(addr)?;
+        let content = doc
+            .get_first(self.fields.content)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let mut chars = content.chars().skip(offset_chars);
+        let chunk: String = chars.by_ref().take(max_chars).collect();
+        let returned_chars = chunk.chars().count();
+        let end = offset_chars.saturating_add(returned_chars);
+        let has_more = chars.next().is_some();
+
+        Ok(Some(IndexedContentChunk {
+            content: chunk,
+            offset_chars,
+            returned_chars,
+            next_offset_chars: has_more.then_some(end),
+        }))
     }
 
     /// 按路径取该文档更长的预览上下文（约 1500 字），命中词区间跟 search() 同一契约。
@@ -1663,6 +1720,30 @@ mod tests {
             .expect("路径存在，应该退回开头预览而不是 None");
         assert!(!preview.snippet.is_empty());
         assert!(preview.highlighted.is_empty(), "回退分支不应该产生假的高亮");
+        Ok(())
+    }
+
+    #[test]
+    fn read_indexed_content_chunk_pages_by_unicode_chars() -> Result<()> {
+        let index_dir = tempfile::tempdir()?;
+        let target_dir = tempfile::Builder::new().prefix("dowse-test-").tempdir()?;
+        std::fs::write(target_dir.path().join("note.md"), "甲乙丙丁abc")?;
+        crate::rebuild_index(index_dir.path(), target_dir.path())?;
+
+        let searcher = Searcher::open(index_dir.path())?;
+        let path = &searcher.search("甲乙", 1)?[0].path;
+        let first = searcher
+            .read_indexed_content_chunk(path, 0, 3)?
+            .expect("已索引路径应该能读取");
+        assert_eq!(first.content, "甲乙丙");
+        assert_eq!(first.returned_chars, 3);
+        assert_eq!(first.next_offset_chars, Some(3));
+
+        let second = searcher
+            .read_indexed_content_chunk(path, first.next_offset_chars.unwrap(), 10)?
+            .expect("第二页仍应命中同一文档");
+        assert_eq!(second.content, "丁abc");
+        assert_eq!(second.next_offset_chars, None);
         Ok(())
     }
 

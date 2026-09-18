@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The read-only MCP server can now page through content already stored in the
+  index with `read_file_chunk`, without opening arbitrary filesystem paths.
+
+### Changed
+
+- MCP tools now publish output schemas, identify the server as dowse with the
+  package version, and cap search result pages at 100 hits.
+
+### Fixed
+
+- Live file and directory events now apply the same excluded-directory rules
+  as full indexing, preventing build output such as `target/` from entering the index.
+
 ## [1.1.0] - 2026-09-17
 
 ### Added

@@ -159,11 +159,11 @@ cargo tauri build      # 安装包产出在 target/release/bundle 下
 claude mcp add --scope user dowse -- dowse mcp
 ```
 
-三个工具：`search`（查询词、条数上限、`sort` 排序：相关性/修改时间/体积、逗号分隔的
-多扩展名 `ext` 过滤、`offset` 分页并返回 `total_hits` 总数）、`preview`（单条命中的完整摘要+
-元信息）、`index_status`（文档总数、索引健康状态、当前索引规则）。这个 server 绝不碰索引写入端——每次
-调用前只做一次 reader reload，所以可以和浮窗应用或正在跑的 `dowse watch` 同时存在，
-不会有写入冲突。
+四个工具：`search`（查询词、有上限的 `limit`/`offset` 分页、`sort` 排序：相关性/修改时间/体积、逗号分隔的
+多扩展名 `ext` 过滤并返回 `total_hits` 总数）、`preview`（单条命中的长摘要和
+元信息）、`read_file_chunk`（从索引快照中受限、分页读取正文）、`index_status`（文档总数、索引健康状态、
+当前索引规则）。这个 server 绝不碰索引写入端，也不会打开任意磁盘路径——每次调用前只做一次 reader reload，
+所以可以和浮窗应用或正在跑的 `dowse watch` 同时存在，不会有写入冲突。
 
 ## 架构
 

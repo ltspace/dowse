@@ -115,12 +115,27 @@ impl IndexRules {
     /// 口径一致（否则 node_modules 之类在快车道会照进索引）。只看中间目录段，
     /// 不看文件名本身。
     pub(crate) fn path_under_excluded_dir(&self, path: &Path, root: &Path) -> bool {
+        self.path_has_excluded_dir(path, root, false)
+    }
+
+    /// 目录事件自身或它的任一祖先目录是否应被排除。和
+    /// [`Self::path_under_excluded_dir`] 的区别只在于：这里最后一段也是目录，
+    /// 因而参与判断。
+    pub(crate) fn dir_under_excluded_dir(&self, path: &Path, root: &Path) -> bool {
+        self.path_has_excluded_dir(path, root, true)
+    }
+
+    fn path_has_excluded_dir(&self, path: &Path, root: &Path, include_last: bool) -> bool {
         let Ok(rel) = path.strip_prefix(root) else {
             return false;
         };
         let comps: Vec<Component> = rel.components().collect();
-        // 最后一段是文件名本身，不算目录，排除判定只看它前面的目录段。
-        for comp in comps.iter().take(comps.len().saturating_sub(1)) {
+        let dir_count = if include_last {
+            comps.len()
+        } else {
+            comps.len().saturating_sub(1)
+        };
+        for comp in comps.iter().take(dir_count) {
             if let Component::Normal(name) = comp
                 && self.is_dir_excluded(&name.to_string_lossy())
             {

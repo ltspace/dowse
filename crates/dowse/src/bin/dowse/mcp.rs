@@ -11,9 +11,11 @@ use std::path::PathBuf;
 use dowse::{
     IndexStatus, PreviewHit, SearchHit, Searcher, SortMode, index_status as core_index_status,
 };
-use rmcp::handler::server::tool::IntoCallToolResult;
+use rmcp::handler::server::tool::{IntoCallToolResult, schema_for_output};
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::{CallToolResponse, CallToolResult, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CallToolResponse, CallToolResult, Implementation, ServerCapabilities, ServerInfo,
+};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,13 @@ const HL_CLOSE: &str = "»";
 /// search 工具的默认返回条数。
 const DEFAULT_SEARCH_LIMIT: usize = 10;
 
+/// 避免失控的 agent 一次把整个索引搬进上下文。
+const MAX_SEARCH_LIMIT: usize = 100;
+const MAX_SEARCH_OFFSET: usize = 10_000;
+
+const DEFAULT_READ_CHARS: usize = 4_000;
+const MAX_READ_CHARS: usize = 8_000;
+
 // ---------- 工具参数 ----------
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -37,9 +46,11 @@ pub struct SearchParams {
     /// `-词` 或 `NOT 词`（排除）。带空格的操作数加引号，如 `path:"我的 文档"`
     pub query: String,
     /// 最多返回几条，默认 10；和 offset 搭配翻页
+    #[schemars(range(min = 1, max = MAX_SEARCH_LIMIT))]
     pub limit: Option<usize>,
     /// 跳过前多少条命中再取，默认 0；和 limit 搭配翻页（取第 2 页就传 offset=limit）。
     /// 返回里的 total_hits 是匹配总数，offset + 本页条数 < total_hits 就说明后面还有
+    #[schemars(range(max = MAX_SEARCH_OFFSET))]
     pub offset: Option<usize>,
     /// 只保留这些扩展名的结果（不含点）。逗号分隔可给多个，如 "md" 或 "md,pdf,txt"；
     /// 不需要按扩展名过滤就整个字段别传（传空串或纯逗号会报参数错误）
@@ -56,6 +67,17 @@ pub struct PreviewParams {
     pub path: String,
     /// 定位高亮用的查询词，通常和 search 时用的一致
     pub query: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReadFileChunkParams {
+    /// 目标文件的完整路径，必须来自 search 结果
+    pub path: String,
+    /// 从第几个 Unicode 字符开始，默认 0
+    pub offset_chars: Option<usize>,
+    /// 本次最多返回多少个 Unicode 字符，默认 4000，上限 8000
+    #[schemars(range(min = 1, max = MAX_READ_CHARS))]
+    pub max_chars: Option<usize>,
 }
 
 // ---------- 工具返回 ----------
@@ -96,6 +118,18 @@ pub struct PreviewOutput {
     pub mtime_unix_ms: i64,
     /// 文件扩展名（不含点，小写），无扩展名是空串
     pub kind: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ReadFileChunkOutput {
+    /// 本页已索引正文；来自索引快照，不会重新读取原文件
+    pub content: String,
+    /// 本页从全文第几个 Unicode 字符开始
+    pub offset_chars: usize,
+    /// 本页实际返回的 Unicode 字符数
+    pub returned_chars: usize,
+    /// 下一页起点；为 null 时表示已读完
+    pub next_offset_chars: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -210,7 +244,7 @@ fn index_unavailable_result(err: &anyhow::Error) -> CallToolResult {
     }))
 }
 
-/// 打开 searcher 并 reload 到最新提交的段。三个工具的公共开场：
+/// 打开 searcher 并 reload 到最新提交的段。读取类工具的公共开场：
 /// 每次请求都重新打开+reload，不缓存 Searcher 实例——浮窗侧随时可能提交新的段，
 /// 常驻一个 Searcher 会读到过期数据（见 docs/DESIGN-M5-MCP.md 第二节的并发约束）。
 ///
@@ -226,7 +260,7 @@ fn open_and_reload(index_dir: &std::path::Path) -> Result<Searcher, CallToolResu
 }
 
 /// rmcp 3 为 MRTR 引入了 `CallToolResponse`，`Json<T>` 的转换结果也因此
-/// 从 `CallToolResult` 变成了 `CallToolResponse`。这里的三个工具都是同步完成的
+/// 从 `CallToolResult` 变成了 `CallToolResponse`。这里的工具都是同步完成的
 /// 只读工具，因此只接受 `Complete` 分支，并保持工具路由的返回类型为
 /// `CallToolResult`。
 fn json_tool_result<T>(value: T) -> Result<CallToolResult, McpError>
@@ -255,6 +289,7 @@ impl DowseMcpServer {
 
     #[tool(
         description = "在本地全文索引里搜索，返回命中列表；命中词用 «» 标出。查询串支持内联操作符：path:关键词（按路径）、mtime:>2026-01-01 / mtime:<=2026-07（按修改日期，比较符 > >= < <=，日期 YYYY-MM-DD 或 YYYY-MM）、size:>10mb / size:<500kb（按体积，单位 kb/mb/gb）、大写 OR 分组（组内空格为 AND）、-词 或 NOT 词 排除；带空格的操作数加引号如 path:\"我的 文档\"。默认按相关度排序，可用 sort 改按修改时间/体积排；ext 可按扩展名过滤（逗号分隔多个）；limit/offset 翻页，返回里的 total_hits 是匹配总数。先用这个工具定位候选文件，再用 preview 看更长的上下文。",
+        output_schema = schema_for_output::<SearchOutput>(),
         annotations(title = "全文搜索", read_only_hint = true)
     )]
     async fn search(
@@ -271,10 +306,19 @@ impl DowseMcpServer {
             return Err(McpError::invalid_params("query 不能为空", None));
         }
         let limit = limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
-        if limit == 0 {
-            return Err(McpError::invalid_params("limit 必须大于 0", None));
+        if !(1..=MAX_SEARCH_LIMIT).contains(&limit) {
+            return Err(McpError::invalid_params(
+                format!("limit 必须在 1..={MAX_SEARCH_LIMIT} 之间"),
+                None,
+            ));
         }
         let offset = offset.unwrap_or(0);
+        if offset > MAX_SEARCH_OFFSET {
+            return Err(McpError::invalid_params(
+                format!("offset 不能大于 {MAX_SEARCH_OFFSET}"),
+                None,
+            ));
+        }
         let sort_mode = parse_sort(sort.as_deref())?;
 
         // ext 是单个逗号分隔字符串（"md" 或 "md,pdf"），按逗号拆开后走和 CLI 同一套
@@ -320,6 +364,7 @@ impl DowseMcpServer {
 
     #[tool(
         description = "取某个文件在索引里命中查询词的完整上下文（约 1500 字，比 search 返回的摘要长得多），附带文件大小/修改时间/类型。path 用 search 结果里的 path 字段。",
+        output_schema = schema_for_output::<PreviewOutput>(),
         annotations(title = "文件预览", read_only_hint = true)
     )]
     async fn preview(
@@ -355,7 +400,54 @@ impl DowseMcpServer {
     }
 
     #[tool(
+        description = "按 Unicode 字符分页读取某个文件的已索引正文。path 必须取自 search 结果；内容来自只读索引快照，不会直接读取任意磁盘路径。默认从 offset_chars=0 开始返回最多 4000 字，单次上限 8000；若 next_offset_chars 非空，用它继续读取下一页。",
+        output_schema = schema_for_output::<ReadFileChunkOutput>(),
+        annotations(title = "分块读取已索引正文", read_only_hint = true)
+    )]
+    async fn read_file_chunk(
+        &self,
+        Parameters(ReadFileChunkParams {
+            path,
+            offset_chars,
+            max_chars,
+        }): Parameters<ReadFileChunkParams>,
+    ) -> Result<CallToolResult, McpError> {
+        if path.trim().is_empty() {
+            return Err(McpError::invalid_params("path 不能为空", None));
+        }
+        let max_chars = max_chars.unwrap_or(DEFAULT_READ_CHARS);
+        if !(1..=MAX_READ_CHARS).contains(&max_chars) {
+            return Err(McpError::invalid_params(
+                format!("max_chars 必须在 1..={MAX_READ_CHARS} 之间"),
+                None,
+            ));
+        }
+
+        let searcher = match open_and_reload(&self.index_dir) {
+            Ok(s) => s,
+            Err(tool_error) => return Ok(tool_error),
+        };
+        match searcher
+            .read_indexed_content_chunk(&path, offset_chars.unwrap_or(0), max_chars)
+            .map_err(|e| McpError::internal_error(format!("读取索引正文失败：{e}"), None))?
+        {
+            Some(chunk) => json_tool_result(ReadFileChunkOutput {
+                content: chunk.content,
+                offset_chars: chunk.offset_chars,
+                returned_chars: chunk.returned_chars,
+                next_offset_chars: chunk.next_offset_chars,
+            }),
+            None => Ok(CallToolResult::structured_error(json!({
+                "error": "path_not_found",
+                "message": format!("索引里找不到这个路径：{path}"),
+                "hint": "文件可能已被删除、改名，或改动后索引还没重新收录；可以先用 search 重新定位",
+            }))),
+        }
+    }
+
+    #[tool(
         description = "查看本地索引的概况：文档总数、已注册的索引根目录、索引落盘体积、最近一次更新时间，以及当前生效的索引规则（排除目录/追加文本扩展名/单文件体积上限）。不需要参数。",
+        output_schema = schema_for_output::<IndexStatusOutput>(),
         annotations(title = "索引状态", read_only_hint = true)
     )]
     async fn index_status(&self) -> Result<CallToolResult, McpError> {
@@ -369,12 +461,19 @@ impl DowseMcpServer {
 #[tool_handler]
 impl ServerHandler for DowseMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "dowse 是本地全盘全文搜索索引的只读查询接口。典型用法：先调 search 定位候选文件，\
-             再用命中的 path 调 preview 看更长上下文；也可以先调 index_status 看看索引里有多少东西。\
-             这里没有任何会修改索引的工具——索引的建立/重建由用户在 dowse-app 浮窗或 `dowse index` \
-             CLI 里手动触发。",
-        )
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(
+                Implementation::new("dowse", env!("CARGO_PKG_VERSION"))
+                    .with_title("dowse — Local File Search")
+                    .with_description("Windows 本地文件全文搜索的只读 MCP server")
+                    .with_website_url("https://lter.space/dowse/"),
+            )
+            .with_instructions(
+                "dowse 是本地全文搜索索引的只读接口。先用 search 定位文件；用 preview 查看命中附近上下文，\
+                 需要更多正文时按 next_offset_chars 分页调用 read_file_chunk；也可以先用 index_status 检查索引范围与更新时间。\
+                 read_file_chunk 只返回已经入索引的内容，不直接读取任意路径。这里没有修改文件或索引的工具——\
+                 建立/重建索引由用户在 dowse-app 或 `dowse index` CLI 中触发。",
+            )
     }
 }
 
@@ -421,7 +520,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_rejects_zero_limit() {
+    async fn search_rejects_unsafe_pagination() {
         let server = DowseMcpServer::new(PathBuf::from("does-not-matter"));
         let err = server
             .search(Parameters(SearchParams {
@@ -434,6 +533,30 @@ mod tests {
             .await
             .expect_err("limit=0 应该报参数错误");
         assert!(err.message.contains("limit"));
+
+        let err = server
+            .search(Parameters(SearchParams {
+                query: "笔记".to_owned(),
+                limit: Some(MAX_SEARCH_LIMIT + 1),
+                offset: None,
+                ext: None,
+                sort: None,
+            }))
+            .await
+            .expect_err("过大的 limit 应该报参数错误");
+        assert!(err.message.contains(&MAX_SEARCH_LIMIT.to_string()));
+
+        let err = server
+            .search(Parameters(SearchParams {
+                query: "笔记".to_owned(),
+                limit: None,
+                offset: Some(MAX_SEARCH_OFFSET + 1),
+                ext: None,
+                sort: None,
+            }))
+            .await
+            .expect_err("过大的 offset 应该报参数错误");
+        assert!(err.message.contains(&MAX_SEARCH_OFFSET.to_string()));
     }
 
     #[tokio::test]
@@ -576,7 +699,7 @@ mod tests {
         let path = search_out.hits[0].path.clone();
         let preview_result = server
             .preview(Parameters(PreviewParams {
-                path,
+                path: path.clone(),
                 query: "限流器".to_owned(),
             }))
             .await
@@ -588,6 +711,33 @@ mod tests {
         assert!(preview_out.snippet.contains(HL_OPEN));
         assert_eq!(preview_out.kind, "md");
         assert!(preview_out.size > 0);
+
+        let first_chunk: ReadFileChunkOutput = server
+            .read_file_chunk(Parameters(ReadFileChunkParams {
+                path: path.clone(),
+                offset_chars: None,
+                max_chars: Some(5),
+            }))
+            .await
+            .expect("已索引文件应该能分块读取")
+            .into_typed()
+            .expect("read_file_chunk 应返回结构化内容");
+        assert_eq!(first_chunk.content, "系统采用分");
+        assert_eq!(first_chunk.returned_chars, 5);
+        assert!(first_chunk.next_offset_chars.is_some());
+
+        let tail: ReadFileChunkOutput = server
+            .read_file_chunk(Parameters(ReadFileChunkParams {
+                path,
+                offset_chars: first_chunk.next_offset_chars,
+                max_chars: Some(MAX_READ_CHARS),
+            }))
+            .await
+            .expect("下一页应该能继续读取")
+            .into_typed()
+            .expect("下一页应返回结构化内容");
+        assert!(tail.content.contains("限流器"));
+        assert_eq!(tail.next_offset_chars, None);
 
         let status_result = server
             .index_status()
@@ -604,6 +754,20 @@ mod tests {
         // 没建 rules.json 时应回落到默认规则：单文件上限 20MB、排除列表非空。
         assert_eq!(status_out.rules.max_file_mb, 20);
         assert!(!status_out.rules.exclude_dirs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_file_chunk_rejects_oversized_page() {
+        let server = DowseMcpServer::new(PathBuf::from("does-not-matter"));
+        let err = server
+            .read_file_chunk(Parameters(ReadFileChunkParams {
+                path: "C:\\somewhere\\note.md".to_owned(),
+                offset_chars: None,
+                max_chars: Some(MAX_READ_CHARS + 1),
+            }))
+            .await
+            .expect_err("超过单页上限应该报参数错误");
+        assert!(err.message.contains(&MAX_READ_CHARS.to_string()));
     }
 
     #[test]

@@ -74,7 +74,7 @@ cargo tauri build
 claude mcp add --scope user dowse -- dowse mcp
 ```
 
-`search`、`preview`、`index_status` の 3 ツールを提供します。`search` は `limit` / `offset` ページング、合計件数、拡張子フィルター、並べ替えに対応しています。
+`search`、`preview`、`read_file_chunk`、`index_status` の 4 ツールを提供します。`search` は `limit` / `offset` ページング、合計件数、拡張子フィルター、並べ替えに対応し、`read_file_chunk` はインデックス済み本文だけを上限付きで分割取得します。
 
 ## 技術スタック
 

@@ -25,20 +25,22 @@ claude mcp add --scope user dowse -- dowse mcp
 
 | 工具 | 参数 | 返回 |
 |------|------|------|
-| search | query，limit（默认 10），ext（可选扩展名过滤） | 命中数组：path、score、snippet（含高亮标记）、kind |
+| search | query，limit（默认 10、上限 100），offset（上限 10000），ext，sort | 当前页命中、total_hits、total_docs |
 | preview | path，query | 该文件命中上下文（约 1500 字）+ 元信息（大小/mtime/kind） |
+| read_file_chunk | path，offset_chars，max_chars（默认 4000、上限 8000） | 已索引正文当前页、实际字符数、下一页偏移 |
 | index_status | 无 | 文档总数、已注册索引根、索引落盘体积、最近一次更新时间 |
 
 **不提供**：rebuild_index、add_root 等一切变更操作。变更是人的决策，
 留在浮窗和 CLI 里；agent 只读，这条是安全边界，不是功能取舍。
 
 返回一律结构化 JSON；snippet 的高亮用前后缀标记（不是字节区间），
-agent 直接可读。
+agent 直接可读。所有工具都声明 outputSchema。read_file_chunk 只查询 Tantivy 里已存的
+正文，不重新打开原文件，也不能借任意路径绕过索引范围。
 
 ## 四、随附一份 SKILL.md
 
 面向 Claude Code 的技能说明放仓库 `skill/SKILL.md`：一段话说明 dowse 是什么、
-三个工具怎么组合用（先 search 后 preview）、结果里 path 可直接喂给
+四个工具怎么组合用（先 search，再按需 preview/read_file_chunk）、结果里 path 可直接喂给
 Read/资源管理器。参照 wx-cli 用 skills CLI 分发的做法，公开后支持
 `npx skills add ltspace/dowse`。
 
@@ -49,7 +51,8 @@ Read/资源管理器。参照 wx-cli 用 skills CLI 分发的做法，公开后�
 2. 浮窗侧新建文件、增量索引落盘后，MCP 侧下一次 search 能命中（reload 生效）。
 3. 浮窗未运行时 MCP 独立可用（只依赖索引文件存在）。
 4. 索引不存在时，工具返回结构化错误与一句建库指引，不 panic。
-5. 三个工具的 schema 校验：漏参/错型有明确报错。
+5. 四个工具的输入和输出 schema 可发现；漏参/错型有明确报错。
+6. read_file_chunk 能按 Unicode 字符稳定翻页，且索引外路径不能读取。
 
 ## 六、明确不做（本里程碑）
 

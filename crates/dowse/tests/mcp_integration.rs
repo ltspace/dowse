@@ -11,6 +11,12 @@ use rmcp::model::CallToolRequestParams;
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
 use tokio::process::Command;
 
+/// CI 默认测本次 cargo 构建的二进制；本机安装验收可用环境变量指向实际安装产物。
+fn mcp_binary() -> std::ffi::OsString {
+    std::env::var_os("DOWSE_MCP_BIN")
+        .unwrap_or_else(|| std::ffi::OsString::from(env!("CARGO_BIN_EXE_dowse")))
+}
+
 /// 建一个只有一篇文档的小索引，供子进程查询。
 fn build_test_index() -> (tempfile::TempDir, tempfile::TempDir) {
     let index_dir = tempfile::tempdir().expect("创建索引临时目录失败");
@@ -34,12 +40,11 @@ fn build_test_index() -> (tempfile::TempDir, tempfile::TempDir) {
 async fn stdio_handshake_lists_tools_and_search_returns_structured_hit() {
     let (index_dir, _target_dir) = build_test_index();
 
-    let bin = env!("CARGO_BIN_EXE_dowse");
     let index_dir_arg = index_dir.path().to_string_lossy().into_owned();
 
     let client = ()
         .serve(
-            TokioChildProcess::new(Command::new(bin).configure(|cmd| {
+            TokioChildProcess::new(Command::new(mcp_binary()).configure(|cmd| {
                 cmd.arg("mcp").env("DOWSE_INDEX_DIR", &index_dir_arg);
             }))
             .expect("构造子进程 transport 失败"),
@@ -49,8 +54,14 @@ async fn stdio_handshake_lists_tools_and_search_returns_structured_hit() {
 
     let server_info = client.peer_info();
     println!("[handshake] initialize 返回的 server info: {server_info:#?}");
+    let implementation = server_info
+        .as_ref()
+        .and_then(|info| info.server_info.as_ref())
+        .expect("initialize 应返回 serverInfo");
+    assert_eq!(implementation.name, "dowse");
+    assert_eq!(implementation.version, env!("CARGO_PKG_VERSION"));
 
-    // tools/list：三个只读工具都应该在，且不应该有任何变更类工具。
+    // tools/list：四个只读工具都应该在，且不应该有任何变更类工具。
     let tools = client
         .list_tools(Default::default())
         .await
@@ -67,10 +78,45 @@ async fn stdio_handshake_lists_tools_and_search_returns_structured_hit() {
         "缺 preview 工具: {names:?}"
     );
     assert!(
+        names.contains(&"read_file_chunk".to_string()),
+        "缺 read_file_chunk 工具: {names:?}"
+    );
+    assert!(
         names.contains(&"index_status".to_string()),
         "缺 index_status 工具: {names:?}"
     );
-    assert_eq!(names.len(), 3, "工具清单应该刻意少，只有这三个: {names:?}");
+    assert_eq!(names.len(), 4, "工具清单应该刻意少，只有这四个: {names:?}");
+    assert!(
+        tools.tools.iter().all(|tool| tool.output_schema.is_some()),
+        "所有工具都应该声明 outputSchema: {:#?}",
+        tools.tools
+    );
+    let search_tool = tools
+        .tools
+        .iter()
+        .find(|tool| tool.name == "search")
+        .unwrap();
+    assert_eq!(
+        search_tool.input_schema["properties"]["limit"]["minimum"],
+        1
+    );
+    assert_eq!(
+        search_tool.input_schema["properties"]["limit"]["maximum"],
+        100
+    );
+    assert_eq!(
+        search_tool.input_schema["properties"]["offset"]["maximum"],
+        10000
+    );
+    let read_tool = tools
+        .tools
+        .iter()
+        .find(|tool| tool.name == "read_file_chunk")
+        .unwrap();
+    assert_eq!(
+        read_tool.input_schema["properties"]["max_chars"]["maximum"],
+        8000
+    );
 
     // tools/call search：真查一次，断言返回是结构化 JSON，snippet 带高亮标记。
     let result = client
@@ -106,6 +152,21 @@ async fn stdio_handshake_lists_tools_and_search_returns_structured_hit() {
     );
     assert_eq!(structured["total_docs"], 1);
 
+    let path = hits[0]["path"].as_str().unwrap().to_owned();
+    let chunk = client
+        .call_tool(
+            CallToolRequestParams::new("read_file_chunk").with_arguments(
+                serde_json::json!({"path": path, "max_chars": 5})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .expect("tools/call read_file_chunk 失败");
+    assert_ne!(chunk.is_error, Some(true));
+    assert_eq!(chunk.structured_content.unwrap()["returned_chars"], 5);
+
     client.cancel().await.expect("关闭 MCP client 失败");
 }
 
@@ -115,12 +176,11 @@ async fn tools_call_index_status_on_missing_index_returns_tool_level_error_with_
     // 而不是子进程崩溃或协议层报错——见 docs/DESIGN-M5-MCP.md 第五节验收清单第 4 条。
     let empty_dir = tempfile::tempdir().expect("创建空临时目录失败");
 
-    let bin = env!("CARGO_BIN_EXE_dowse");
     let index_dir_arg = empty_dir.path().to_string_lossy().into_owned();
 
     let client = ()
         .serve(
-            TokioChildProcess::new(Command::new(bin).configure(|cmd| {
+            TokioChildProcess::new(Command::new(mcp_binary()).configure(|cmd| {
                 cmd.arg("mcp").env("DOWSE_INDEX_DIR", &index_dir_arg);
             }))
             .expect("构造子进程 transport 失败"),

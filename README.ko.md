@@ -74,7 +74,7 @@ cargo tauri build
 claude mcp add --scope user dowse -- dowse mcp
 ```
 
-`search`, `preview`, `index_status` 세 가지 도구를 제공합니다. `search`는 `limit` / `offset` 페이지네이션, 전체 결과 수, 확장자 필터와 정렬을 지원합니다.
+`search`, `preview`, `read_file_chunk`, `index_status` 네 가지 도구를 제공합니다. `search`는 `limit` / `offset` 페이지네이션, 전체 결과 수, 확장자 필터와 정렬을 지원하며, `read_file_chunk`는 이미 인덱싱된 본문만 제한된 크기로 나누어 반환합니다.
 
 ## 기술 스택
 
