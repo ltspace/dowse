@@ -29,7 +29,7 @@
 	import IndexingStrip from '$lib/components/IndexingStrip.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import { formatHotkey } from '$lib/hotkey';
-	import { t, LANG_OVERRIDE_KEY } from '$lib/i18n';
+	import { t } from '$lib/i18n';
 	import { loadHistory, recordHistory, removeHistoryEntry, clearHistory } from '$lib/searchHistory';
 	import { reduceIndexingView } from '$lib/indexingState';
 	import {
@@ -888,20 +888,6 @@
 		api.getHotkey().then((raw) => {
 			hotkeyLabel = formatHotkey(raw);
 		});
-		// 语言启动镜像自愈：config.lang 是权威（Rust 托盘 i18n 也读它），把它
-		// 同步进 localStorage，供下次启动时 i18n.ts 同步读取决定界面语言（见
-		// i18n.ts 顶部说明）。即使有人手改了 config.json，这一步也能在下一次
-		// 启动前把镜像纠正过来——本轮语言本就"重启后生效"，一拍延迟可接受。
-		api
-			.getConfig()
-			.then((cfg) => {
-				try {
-					localStorage.setItem(LANG_OVERRIDE_KEY, cfg.lang);
-				} catch {
-					// localStorage 不可用就算了，i18n.ts 会回落系统语言。
-				}
-			})
-			.catch(() => {});
 
 		document.addEventListener('click', handleDocumentClick);
 

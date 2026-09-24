@@ -1,16 +1,7 @@
-// 界面文案的中英双语字典。判定只做一次（模块首次求值时），没有运行时切换——
-// t 是一个"启动时定死"的同步 const。只收界面可见文案（按钮、占位符、下拉项、
-// toast、空态、快捷键提示、tooltip、aria-label 等）；注释和开发者面向的日志
-// 不在此列，仍按仓库惯例保留中文。
-//
-// 语言来源（0.9.0 起）：设置面板可以把界面语言钉死为中/英，或 "auto" 跟随
-// 系统。权威存储在 Rust 侧 config.lang（托盘 i18n 也读它）。但这里的 t 是同步
-// const、等不了异步 IPC，所以用 localStorage 存一份"上次已知的语言选择"作
-// **同步启动镜像**：模块首次求值时同步读它决定语言；app 挂载后再异步从 config
-// 拉一次写回镜像（见 +page.svelte 的启动同步、以及设置面板改语言时的即时写入）。
-// 配合"改语言重启后生效"的交互，语言本来就只在下次启动生效，这份一拍延迟正好
-// 落在可接受范围内。镜像缺失/为 "auto" 时回落到 navigator.language，跟 0.7.0
-// 起的纯跟随系统行为完全一致。
+// 界面中英双语字典。根布局先读取 config.lang，再挂载页面；设置修改仍在重启后生效。
+// localStorage 仅作为读取配置失败时的启动兜底，不覆盖后端的权威设置。
+import type { LangOption } from './types';
+
 export const LANG_OVERRIDE_KEY = 'dowse.lang-override';
 
 function resolveIsZh(): boolean {
@@ -25,7 +16,7 @@ function resolveIsZh(): boolean {
 	return navigator.language.toLowerCase().startsWith('zh');
 }
 
-export const isZh = resolveIsZh();
+export let isZh = resolveIsZh();
 
 interface Strings {
 	// 类型筛选下拉
@@ -399,4 +390,15 @@ const en: Strings = {
 	rpRebuildNoIndexHint: 'No index folder yet — add one from the empty state or the tray menu first.'
 };
 
-export const t: Strings = isZh ? zh : en;
+export let t: Strings = isZh ? zh : en;
+
+// 必须在页面组件创建前调用，避免组件初始化时捕获旧语言。
+export function initializeLanguage(lang: LangOption): void {
+	isZh = lang === 'zh' || (lang === 'auto' && navigator.language.toLowerCase().startsWith('zh'));
+	t = isZh ? zh : en;
+	try {
+		localStorage.setItem(LANG_OVERRIDE_KEY, lang);
+	} catch {
+		// 缓存不可用不影响本次启动使用 config.lang。
+	}
+}

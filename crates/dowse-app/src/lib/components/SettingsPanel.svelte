@@ -270,9 +270,7 @@
 		api
 			.setLang(next)
 			.then(() => {
-				// 同步前端 i18n 的启动镜像：下次启动 i18n.ts 同步读它决定语言
-				// （见 i18n.ts 顶部说明）。写失败无所谓——+page.svelte 启动时还会
-				// 从 config 兜底同步一次。
+				// 更新启动兜底缓存；重启时根布局仍以 config.lang 为准。
 				try {
 					localStorage.setItem(LANG_OVERRIDE_KEY, next);
 				} catch {

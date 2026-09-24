@@ -81,7 +81,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Create draft release
+      - name: Create or refresh release assets
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
@@ -90,4 +90,11 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $assets = @(Get-ChildItem -Recurse -Path target/release/bundle -Include *.exe,*.msi | ForEach-Object { $_.FullName })
           $assets += (Resolve-Path checksums.txt).Path
-          gh release create $tag --draft --title $tag --notes "" @assets
+          gh release view $tag --json id --jq .id *> $null
+          if ($LASTEXITCODE -eq 0) {
+            # 同版本修订保留现有发布说明和公开状态；更新说明由发布者审核后写入。
+            gh release upload $tag @assets --clobber
+          } else {
+            gh release create $tag --draft --title $tag --notes "" @assets
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
