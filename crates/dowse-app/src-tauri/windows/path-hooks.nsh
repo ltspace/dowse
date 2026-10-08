@@ -6,6 +6,12 @@
 ; 自动广播 WM_SETTINGCHANGE，新开的终端立即能看到（已开着的终端要重开）。
 ; 写 HKCU 用户级 PATH，与 per-user 安装模式一致，不需要管理员权限。
 
+!include "${__FILEDIR__}\legacy-install.nsh"
+
+!macro NSIS_HOOK_PREINSTALL
+  !insertmacro DOWSE_MIGRATE_LEGACY_INSTALL
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   DetailPrint "Adding $INSTDIR to user PATH"
   nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$p=[Environment]::GetEnvironmentVariable($\'Path$\',$\'User$\'); $$l=@($$p -split $\';$\' | Where-Object {$$_}); if($$l -notcontains $\'$INSTDIR$\'){[Environment]::SetEnvironmentVariable($\'Path$\', (($$l+$\'$INSTDIR$\') -join $\';$\'), $\'User$\')}"'
