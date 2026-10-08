@@ -3,6 +3,7 @@
 	import type { SearchHit, TextSegment } from '../types';
 	import { kindOf } from '$lib/fileKind';
 	import { middleEllipsis } from '../pathTruncate';
+	import ImageViewer from './ImageViewer.svelte';
 	import FileIcon from './FileIcon.svelte';
 	import Segments from './Segments.svelte';
 	import { t } from '../i18n';
@@ -27,6 +28,8 @@
 	// 任意选的，没法预先收窄成一个固定范围）。同一路径每次 $derived 都会重新
 	// 转换一次 URL，代价很小，不用额外缓存。
 	let imageSrc = $derived(hit && isImage ? convertFileSrc(hit.path) : null);
+	let viewer = $state<{ src: string; name: string } | null>(null);
+	let failedSrc = $state<string | null>(null);
 </script>
 
 <div class="preview">
@@ -38,21 +41,24 @@
 			<span class="name"><Segments segments={hit.name_segments} /></span>
 		</div>
 		<div class="path">{middleEllipsis(hit.display_path)}</div>
-		<div class="body">
+		<div class="body" class:image-body={isImage}>
 			{#if isImage}
 				{#if imageSrc}
-					<img class="image-preview" src={imageSrc} alt={hit.name} />
+					<button class="image-preview" disabled={failedSrc === imageSrc} aria-label={t.imageEnlarge}
+						onclick={() => { if (imageSrc && hit) viewer = { src: imageSrc, name: hit.name }; }}>
+						{#if failedSrc === imageSrc}<span>{t.imageLoadFailed}</span>
+						{:else}<img src={imageSrc} alt={hit.name} onerror={() => failedSrc = imageSrc} />{/if}
+						<span class="enlarge">{t.imageEnlarge}</span>
+					</button>
 				{/if}
-				{#if loading}
-					<p class="hint">{t.ocrLoading}</p>
-				{:else if segments && segments.length > 0}
-					<p class="ocr-caption">{t.ocrCaption}</p>
+				<details class="ocr-details">
+					<summary>{t.ocrCaption}</summary>
 					<div class="ocr-text-wrap">
-						<p class="context ocr-text"><Segments {segments} /></p>
+						{#if loading}<p class="hint">{t.ocrLoading}</p>
+						{:else if segments && segments.length > 0}<p class="context ocr-text"><Segments {segments} /></p>
+						{:else}<p class="hint">{t.ocrEmpty}</p>{/if}
 					</div>
-				{:else}
-					<p class="hint">{t.ocrEmpty}</p>
-				{/if}
+				</details>
 			{:else if loading}
 				<p class="hint">{t.previewLoading}</p>
 			{:else if segments && segments.length > 0}
@@ -63,6 +69,10 @@
 		</div>
 	{/if}
 </div>
+
+{#if viewer}
+	<ImageViewer src={viewer.src} name={viewer.name} onclose={() => viewer = null} />
+{/if}
 
 <style>
 	.preview {
@@ -101,6 +111,7 @@
 
 	.body {
 		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
 	}
 
@@ -118,23 +129,54 @@
 		font-size: 12px;
 	}
 
-	.image-preview {
-		display: block;
-		max-width: 100%;
-		max-height: 260px;
-		object-fit: contain;
-		border-radius: 6px;
-		border: 1px solid var(--divider);
-		margin-bottom: 10px;
+	.image-body {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		overflow: hidden;
 	}
-
-	/* 分区小标题规格：跟 +page.svelte 的 .results-heading 同一档——11px、
-	   微字距、三级灰，跟正文（.context）明确区分出"这是个标签，不是正文"。 */
-	.ocr-caption {
-		margin: 0 0 4px;
+	.image-preview {
+		position: relative;
+		flex: 1;
+		min-height: 60px;
+		width: 100%;
+		padding: 0;
+		border: 1px solid var(--divider);
+		border-radius: 6px;
+		background: var(--row-hover);
+		color: var(--fg-secondary);
+		cursor: zoom-in;
+		overflow: hidden;
+	}
+	.image-preview img {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+	}
+	.image-preview:disabled {
+		cursor: default;
+	}
+	.enlarge {
+		position: absolute;
+		right: 6px;
+		bottom: 6px;
+		background: var(--solid-bg);
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		padding: 4px 8px;
 		font-size: 11px;
-		letter-spacing: 0.04em;
-		color: var(--fg-tertiary);
+	}
+	.ocr-details {
+		flex: none;
+		max-height: 45%;
+		overflow-y: auto;
+	}
+	summary {
+		cursor: pointer;
+		color: var(--fg-secondary);
+		font-size: 11px;
+		padding: 4px 0;
 	}
 
 	/* OCR 文字段限高约 6~8 行，超出内部滚动——手机截图的状态栏文字、大段

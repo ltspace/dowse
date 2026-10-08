@@ -56,6 +56,15 @@ interface Strings {
 	previewSelectHint: string;
 	ocrLoading: string;
 	ocrCaption: string;
+	imageViewer: string;
+	closeImageViewer: string;
+	imageFit: string;
+	imageFitWidth: string;
+	imageZoomIn: string;
+	imageZoomOut: string;
+	imageLoadFailed: string;
+	imageEnlarge: string;
+
 	ocrEmpty: string;
 	previewLoading: string;
 	previewEmpty: string;
@@ -187,6 +196,15 @@ const zh: Strings = {
 	previewSelectHint: '选中结果后在此查看预览。',
 	ocrLoading: '识别文字加载中…',
 	ocrCaption: '图中文字（OCR 识别）',
+	imageViewer: '图片查看',
+	closeImageViewer: '返回预览',
+	imageFit: '适应窗口',
+	imageFitWidth: '适应宽度',
+	imageZoomIn: '放大',
+	imageZoomOut: '缩小',
+	imageLoadFailed: '图片加载失败',
+	imageEnlarge: '放大查看',
+
 	ocrEmpty: '没有识别到文字，或者还在后台排队处理。',
 	previewLoading: '加载中…',
 	previewEmpty: '没有可预览的文本内容。',
@@ -303,6 +321,15 @@ const en: Strings = {
 	previewSelectHint: 'Select a result to preview it here.',
 	ocrLoading: 'Loading recognized text…',
 	ocrCaption: 'Text in image (OCR)',
+	imageViewer: 'Image viewer',
+	closeImageViewer: 'Back to preview',
+	imageFit: 'Fit window',
+	imageFitWidth: 'Fit width',
+	imageZoomIn: 'Zoom in',
+	imageZoomOut: 'Zoom out',
+	imageLoadFailed: 'Could not load image',
+	imageEnlarge: 'Enlarge image',
+
 	ocrEmpty: 'No text recognized, or still queued in the background.',
 	previewLoading: 'Loading…',
 	previewEmpty: 'No previewable text content.',
