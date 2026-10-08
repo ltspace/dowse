@@ -2,13 +2,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// 统一的"抑制自动隐藏"状态。
 ///
-/// `lib.rs` 的 `WindowEvent::Focused(false)` 处理原本是"失焦即隐藏"（Spotlight/
-/// Raycast 习惯，见 lib.rs 上的说明）；v0.5.0 加了两个会让窗口临时/长期失焦、
+/// Windows 由 `native_autohide` 按顶层窗口停用处理自动隐藏；其他平台由
+/// `lib.rs` 的 `WindowEvent::Focused(false)` 处理。以下两个场景允许临时/长期失焦、
 /// 但不该触发这条自动隐藏的场景：
 ///
 /// - 结果行右键弹出的原生菜单（Win32 `TrackPopupMenu`）——菜单显示期间 WebView2
-///   的渲染表面会失去输入焦点，实测确实会连带触发窗口的 Focused(false)，
-///   不加这层豁免会出现"右键刚弹出菜单，窗口自己先隐藏了"的坏体验。
+///   保留菜单操作期间的隐藏豁免，避免原生菜单的激活变化收起主窗口。
 /// - 用户点了图钉手动固定——固定期间点窗口外/切到别的应用都不该收起浮窗，
 ///   直到用户自己再点一次图钉或按 Esc / 全局快捷键收起。
 ///

@@ -7,6 +7,8 @@ mod highlight;
 mod i18n;
 mod indexing_status;
 mod logging;
+#[cfg(windows)]
+mod native_autohide;
 mod perf;
 mod rebuild;
 mod state;
@@ -16,7 +18,9 @@ mod window_fx;
 
 use std::sync::Mutex;
 
-use tauri::{Manager, WindowEvent};
+use tauri::Manager;
+#[cfg(not(windows))]
+use tauri::WindowEvent;
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -156,6 +160,9 @@ pub fn run() {
             // popup，选中项通过这里回调；托盘菜单是另一套独立的事件注册，见 tray.rs。
             window.on_menu_event(context_menu::handle_context_menu_event);
 
+            #[cfg(windows)]
+            native_autohide::install(&window)?;
+
             let cfg = app.state::<ConfigState>().get();
             let level = window_fx::apply_with_fallback(
                 &window,
@@ -192,19 +199,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 进程常驻，浮窗只是 show/hide：失焦即隐藏，符合 Spotlight/Raycast 的习惯，
-            // 也避免用户切到别的窗口后浮窗还悬在最上层碍事。
-            //
-            // v0.5.0 加了"抑制自动隐藏"的豁免（见 autohide.rs）：结果行右键弹出
-            // 原生菜单期间、以及用户点了图钉固定期间，这次失焦不该触发隐藏。
-            // 注意这里只影响这一条自动隐藏路径——Esc（前端直接调
-            // `getCurrentWindow().hide()`）和全局呼出快捷键的 `hide_window()`
-            // 都不经过这里，固定状态不会拦住用户主动收起浮窗。
+            // Windows uses top-level activation, not WebView keyboard focus.
+            // Native move/resize temporarily moves focus away from the WebView.
+            #[cfg(windows)]
+            let _ = (window, event);
+            #[cfg(not(windows))]
             if let WindowEvent::Focused(false) = event {
-                if window.state::<AutoHideSuppressor>().is_suppressed() {
-                    return;
+                if !window.state::<AutoHideSuppressor>().is_suppressed() {
+                    let _ = window.hide();
                 }
-                let _ = window.hide();
             }
         })
         .run(tauri::generate_context!())
