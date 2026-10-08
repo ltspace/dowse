@@ -67,6 +67,13 @@ pub fn run() {
     let toggle = parse_shortcut(&config::load().hotkey);
 
     tauri::Builder::default()
+        // Register first: a second launch must not create another tray,
+        // index watcher or global shortcut registration.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                window_fx::show_window(&window);
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
