@@ -33,7 +33,6 @@ use perf::HotkeyPerfState;
 use rebuild::RebuildGuard;
 use state::SearchState;
 use watcher::WatchController;
-use window_fx::EffectLevelState;
 
 /// 当前生效的全局呼出快捷键。启动时初始化成配置里的键，设置面板"改键"
 /// （`commands::set_hotkey`）注册成功后更新它——全局快捷键回调据此判断收到
@@ -130,15 +129,11 @@ pub fn run() {
             commands::reveal_in_folder,
             commands::rebuild_index,
             commands::add_root,
-            commands::get_effect_level,
-            commands::get_glass_alpha,
             commands::get_hotkey,
             commands::get_rules,
             commands::set_rules,
             commands::get_config,
             commands::set_hotkey,
-            commands::set_transparency_enabled,
-            commands::set_transparency_tier,
             commands::set_autostart,
             commands::set_lang,
             commands::file_icon,
@@ -171,12 +166,8 @@ pub fn run() {
             native_autohide::install(&window)?;
 
             let cfg = app.state::<ConfigState>().get();
-            let level = window_fx::apply_with_fallback(
-                &window,
-                cfg.transparency_enabled,
-                cfg.transparency_tier,
-            );
-            app.manage(EffectLevelState::new(level));
+            #[cfg(windows)]
+            window_fx::apply_rounded_corners(&window);
             let _ = window_fx::position_upper_center(&window);
 
             // 设计文档："开机自启（可在托盘菜单关掉）"——默认开。只在用户没有

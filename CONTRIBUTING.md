@@ -33,8 +33,7 @@ npm run build
 ```
 
 CI runs the Rust commands on `windows-latest` and the frontend commands in a
-separate Linux job. The automated frontend build cannot verify Windows Acrylic,
-window behavior, or animation quality, so UI changes still need a manual Windows
+separate Linux job. The automated frontend build cannot verify native Windows window behavior or animation quality, so UI changes still need a manual Windows
 smoke test before merge.
 
 ## Commit style

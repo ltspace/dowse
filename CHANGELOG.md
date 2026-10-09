@@ -6,7 +6,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-09
+
+### Fixed
+
+- Keep native and framework window visibility synchronized so the overlay can be
+  summoned again after losing focus; defer hiding outside the activation callback
+  and ignore stale hide requests.
+- Escape hides the main window after returning from the image viewer, while
+  dialogs and settings continue to consume Escape first.
+- Remove the whole-panel fade and scale animation on summon to prevent flashing.
+
+### Changed
+
+- Always use an opaque window. Remove Acrylic/Mica effects, transparency settings,
+  tray controls and obsolete configuration fields; preserve other saved preferences.
+- Add browser regression checks for image viewing, Escape handling and stable
+  panel opacity, plus a native Windows reopen smoke-test script.
+
+
 ## [1.2.0] - 2026-10-09
+
+Withdrawn due to window reactivation and Escape regressions; superseded by 1.2.1.
 
 ### Added
 
@@ -452,7 +473,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
 - The index root directory is no longer skipped by exclusion rules.
 
-[Unreleased]: https://github.com/ltspace/dowse/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/ltspace/dowse/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/ltspace/dowse/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ltspace/dowse/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ltspace/dowse/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ltspace/dowse/compare/v0.10.0...v1.0.0

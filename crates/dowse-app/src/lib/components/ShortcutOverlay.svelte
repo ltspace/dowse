@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Ctrl+/ 呼出的快捷键速查——玻璃卡片，跟主面板同一视觉语言（--glass-tint /
+	// Ctrl+/ 呼出的快捷键速查——不透明卡片，跟主面板同一视觉语言（--panel-bg /
 	// --panel-border / --radius-row），kbd 键帽直接复用 ShortcutBar 的样式。
 	// 按任意键或点击（包括点在卡片本身上）即散：键盘那半由父组件
 	// （+page.svelte 的 handleKeydown，浮层打开期间拦截所有按键）负责，
@@ -79,7 +79,7 @@
 		gap: 14px;
 		padding: 20px 26px;
 		text-align: left;
-		background: var(--glass-tint);
+		background: var(--panel-bg);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-row);
 		box-shadow: var(--panel-shadow);

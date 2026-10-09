@@ -138,9 +138,9 @@ npm install
 cargo tauri build      # produces the installer under target/release/bundle
 ```
 
-Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Results are paginated in groups of 50; the compact `‹ 1 / N ›` control shows only when needed, and pressing `↓` past the last result or `↑` before the first moves between pages. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it. `Ctrl+,` opens the settings panel — general (hotkey rebinding, transparency, autostart, interface language) and index rules (excluded directories, extra text extensions, per-file size cap).
+Overlay app: `Alt+\`` to summon, `↑↓` to select, `Enter` to open, `Ctrl+Enter` to reveal in Explorer, `Ctrl+C` to copy path, `Esc` to hide. Results are paginated in groups of 50; the compact `‹ 1 / N ›` control shows only when needed, and pressing `↓` past the last result or `↑` before the first moves between pages. Two nearly invisible dropdowns sit at the right of the search bar — file type filter (`Ctrl+P`) and sort order (`Ctrl+S`, relevance / newest / oldest / largest); both stay faint until you select a non-default value. Right-click a result row for a native Explorer-style context menu (open / reveal in folder / copy path / copy name). A pin toggle at the top-right keeps the window open when it loses focus (session-only, resets on restart). With an empty input, the overlay lists your recent searches (last 10, stored locally) — `↑↓`/`Enter` to reuse one, `Delete` to remove it. `Ctrl+,` opens the settings panel — general (hotkey rebinding, autostart, interface language) and index rules (excluded directories, extra text extensions, per-file size cap).
 
-![Dowse settings panel in English, with controls for the global shortcut, transparency, startup behavior, and interface language](docs/screenshots/settings.png)
+![Dowse settings panel in English, with controls for the global shortcut, startup behavior, and interface language](docs/screenshots/settings.png)
 
 ![Preview pane for an image result: the source image rendered inline next to its OCR-extracted text with the matched terms highlighted](docs/screenshots/ocr-preview.png)
 
@@ -182,7 +182,7 @@ Index updates run on a two-tier scheme: while running, file system events drive 
 | # | Scope | Status |
 |---|---|---|
 | 1 | CLI indexing and search: Chinese segmentation, GBK detection, highlighting | ✅ Done |
-| 2 | Overlay: global hotkey, Acrylic material, keyboard navigation | ✅ Done |
+| 2 | Overlay: global hotkey, opaque panel, keyboard navigation | ✅ Done |
 | 3 | Incremental indexing: file watching, startup reconciliation | ✅ Done |
 | 4 | OCR pipeline: screenshot text into the index | ✅ Done |
 | 5 | MCP server | ✅ Done |

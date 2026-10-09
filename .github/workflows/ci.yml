@@ -49,6 +49,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Test image viewer and window keyboard interactions
+        run: npm run test:ui
+
   test:
     runs-on: windows-latest
     steps:
