@@ -6,24 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-09
+
 ### Added
 
-- The read-only MCP server can now page through content already stored in the
-  index with `read_file_chunk`, without opening arbitrary filesystem paths.
+- Expand image previews into a window-filling viewer with fit-window, fit-width,
+  actual-size, zoom and drag-to-pan controls. Escape returns to the original preview.
 
 ### Changed
 
-- MCP tools now publish output schemas, identify the server as dowse with the
-  package version, and cap search result pages at 100 hits.
+- Image previews use the available pane space instead of a fixed 260-pixel height;
+  OCR text can be expanded separately.
+- Updated frontend dependencies and patched source-map-js and cookie advisories.
 
 ### Fixed
 
-- Live file and directory events now apply the same excluded-directory rules
-  as full indexing, preventing build output such as `target/` from entering the index.
+- Keep the Windows overlay visible during native window dragging and resizing.
+- Migrate legacy `dowse-app` installations while preserving configuration and index
+  data; repeated launches now activate the existing desktop instance.
+- Use rmcp's concrete initialization response type instead of the legacy
+  `ServerInfo` alias.
 
 ## [1.1.0] - 2026-09-17
 
 ### Added
+
+- The read-only MCP server can page through indexed content with `read_file_chunk`.
 
 - Paginated overlay search results with a compact page control, total-result
   count, and keyboard navigation across page boundaries.
@@ -32,6 +40,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GitHub's bug/feature request chooser.
 
 ### Changed
+
+- MCP tools publish output schemas, report the package version, and cap search
+  result pages at 100 hits.
 
 - Refreshed the README screenshots at higher resolution with transparent
   corners and added a deterministic screenshot-capture script.
@@ -44,6 +55,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and English user guides.
 
 ### Fixed
+
+- Live file and directory events apply the same excluded-directory rules as full indexing.
 
 - Settings can now be opened with `Ctrl+,` from anywhere in the overlay, from
   the new top-right settings button, or from the tray menu.
@@ -439,7 +452,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
 - The index root directory is no longer skipped by exclusion rules.
 
-[Unreleased]: https://github.com/ltspace/dowse/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ltspace/dowse/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ltspace/dowse/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ltspace/dowse/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ltspace/dowse/compare/v0.10.0...v1.0.0
 [0.10.0]: https://github.com/ltspace/dowse/compare/v0.9.0...v0.10.0
