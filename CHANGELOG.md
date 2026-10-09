@@ -473,7 +473,8 @@ Withdrawn due to window reactivation and Escape regressions; superseded by 1.2.1
 - Fixed a slice panic caused by overlapping jieba segments in highlight ranges.
 - The index root directory is no longer skipped by exclusion rules.
 
-[Unreleased]: https://github.com/ltspace/dowse/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/ltspace/dowse/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/ltspace/dowse/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ltspace/dowse/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ltspace/dowse/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ltspace/dowse/compare/v0.10.0...v1.0.0
