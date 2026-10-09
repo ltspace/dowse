@@ -111,7 +111,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1px;
-		background: var(--glass-tint);
+		background: var(--panel-bg);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-row);
 		box-shadow: var(--panel-shadow);

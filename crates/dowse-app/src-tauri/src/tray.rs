@@ -15,7 +15,7 @@ use crate::config::ConfigState;
 use crate::indexing_status::{IndexingPhase, IndexingStatus};
 use crate::rebuild::RebuildGuard;
 use crate::state::SearchState;
-use crate::window_fx::{self, EffectLevelState, TransparencyTier};
+use crate::window_fx;
 
 /// 任务栏是浅色还是深色，决定托盘剪影用哪一版（见图标说明第 4 节）。只在
 /// 托盘图标构建时读一次，不做动态监听——运行中途切系统主题需要重启应用
@@ -99,10 +99,6 @@ const MENU_SHOW: &str = "show";
 const MENU_SETTINGS: &str = "settings";
 const MENU_FOLDERS_ADD: &str = "folders_add";
 const MENU_AUTOSTART: &str = "autostart";
-const MENU_TRANSPARENCY: &str = "transparency";
-const MENU_TRANSPARENCY_LOW: &str = "transparency_low";
-const MENU_TRANSPARENCY_MID: &str = "transparency_mid";
-const MENU_TRANSPARENCY_HIGH: &str = "transparency_high";
 const MENU_HELP_GUIDE: &str = "help_guide";
 const MENU_HELP_FEEDBACK: &str = "help_feedback";
 const MENU_QUIT: &str = "quit";
@@ -146,7 +142,7 @@ impl TrayBusy {
 }
 
 /// 托盘图标 + 右键菜单：呼出 / 设置 / "索引文件夹"子菜单（每根一项 + 添加文件夹…）
-/// / 开机自启开关 / 透明效果开关 / 透明度三档子菜单 / 帮助与反馈 / 退出。进程常驻，浮窗
+/// / 开机自启开关 / 帮助与反馈 / 退出。进程常驻，浮窗
 /// 只是 show/hide——托盘是用户确认"它还活着"、看一眼索引状态、做少数配置的
 /// 入口。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
@@ -180,7 +176,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// 从当前状态（配置/自启/根列表/忙碌态）整份重建菜单树，换到托盘图标上。
-/// 添加/移除/重建根完成后、忙碌态切换、透明度/自启配置变化时都调这个——
+/// 添加/移除/重建根完成后、忙碌态切换、自启配置变化时都调这个——
 /// 单一入口，不用惦记"这次变化该更新菜单里的哪几项"。
 pub fn refresh_menu(app: &AppHandle) {
     let Some(handles) = app.try_state::<TrayHandles>() else {
@@ -199,7 +195,6 @@ pub fn refresh_menu(app: &AppHandle) {
 }
 
 fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
-    let cfg = app.state::<ConfigState>().get();
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let s = crate::i18n::strings();
 
@@ -210,28 +205,6 @@ fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let autostart_item = CheckMenuItemBuilder::with_id(MENU_AUTOSTART, s.menu_autostart)
         .checked(autostart_enabled)
         .build(app)?;
-    let transparency_item =
-        CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY, s.menu_transparency_off)
-            .checked(!cfg.transparency_enabled)
-            .build(app)?;
-
-    let tier = cfg.transparency_tier;
-    let tier_low = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_LOW, s.tier_low)
-        .checked(tier == TransparencyTier::Low)
-        .build(app)?;
-    let tier_mid = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_MID, s.tier_mid)
-        .checked(tier == TransparencyTier::Mid)
-        .build(app)?;
-    let tier_high = CheckMenuItemBuilder::with_id(MENU_TRANSPARENCY_HIGH, s.tier_high)
-        .checked(tier == TransparencyTier::High)
-        .build(app)?;
-    let tier_submenu = Submenu::with_items(
-        app,
-        s.tier_submenu,
-        true,
-        &[&tier_low, &tier_mid, &tier_high],
-    )?;
-
     let guide_item = MenuItemBuilder::with_id(MENU_HELP_GUIDE, s.help_guide).build(app)?;
     let feedback_item = MenuItemBuilder::with_id(MENU_HELP_FEEDBACK, s.help_feedback).build(app)?;
     let help_submenu =
@@ -247,8 +220,6 @@ fn build_menu(app: &AppHandle, busy: bool) -> tauri::Result<Menu<tauri::Wry>> {
             &folders_submenu,
             &PredefinedMenuItem::separator(app)?,
             &autostart_item,
-            &transparency_item,
-            &tier_submenu,
             &PredefinedMenuItem::separator(app)?,
             &help_submenu,
             &PredefinedMenuItem::separator(app)?,
@@ -349,43 +320,6 @@ pub fn set_busy(app: &AppHandle, busy: bool) {
     refresh_menu(app);
 }
 
-/// 透明效果开关的单一实现：托盘"关闭透明效果"菜单项和设置面板的
-/// `set_transparency_enabled` 命令都走这里，`refresh_menu` 保证托盘勾选态
-/// 跟面板永远同步，`dowse://effect-level` 事件让前端 CSS 兜底层跟上。
-/// 传入的是目标状态（不是 toggle），托盘那边自己先算出"取反"再调进来。
-pub fn apply_transparency_enabled(app: &AppHandle, enabled: bool) {
-    let config = app.state::<ConfigState>();
-    let _ = config.set_transparency_enabled(enabled);
-    let tier = config.get().transparency_tier;
-    if let Some(window) = app.get_webview_window("main") {
-        let level = window_fx::apply_with_fallback(&window, enabled, tier);
-        app.state::<EffectLevelState>().set(level);
-        let _ = window.emit("dowse://effect-level", level);
-    }
-    refresh_menu(app);
-}
-
-/// 透明度三档的单一实现：托盘子菜单和设置面板的 `set_transparency_tier`
-/// 命令共用。挡位无论透明效果当前开没开都先落盘；只有开着时才立刻重新申请
-/// Acrylic 把新 alpha 送进 DWM 层。CSS 层的 alpha（`dowse://glass-alpha`）
-/// 不管开没开都广播——纯色档下前端会被 `data-effect='solid'` 覆盖，更新
-/// 变量无副作用，还能保证下次切回玻璃档时前端已是最新值。`refresh_menu`
-/// 让托盘三档勾选态跟面板同步。
-pub fn apply_transparency_tier(app: &AppHandle, tier: TransparencyTier) {
-    let config = app.state::<ConfigState>();
-    let _ = config.set_transparency_tier(tier);
-
-    let transparency_enabled = config.get().transparency_enabled;
-    if transparency_enabled && let Some(window) = app.get_webview_window("main") {
-        let level = window_fx::apply_with_fallback(&window, true, tier);
-        app.state::<EffectLevelState>().set(level);
-        let _ = window.emit("dowse://effect-level", level);
-    }
-
-    let _ = app.emit("dowse://glass-alpha", tier.glass_alpha());
-    refresh_menu(app);
-}
-
 /// 开机自启的单一实现：托盘"开机自启"菜单项和设置面板的 `set_autostart`
 /// 命令共用。传入目标状态（托盘那边先读当前态再取反调进来）。`enable` 落地
 /// 后同步记下 `autostart_user_disabled`——下次启动"默认开"逻辑只在"用户没
@@ -429,18 +363,6 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             // 托盘是 toggle 语义：读当前态、取反，交给共用实现落地。
             let enabled = app.autolaunch().is_enabled().unwrap_or(false);
             let _ = apply_autostart(app, !enabled);
-        }
-        MENU_TRANSPARENCY => {
-            let now_enabled = !app.state::<ConfigState>().get().transparency_enabled;
-            apply_transparency_enabled(app, now_enabled);
-        }
-        MENU_TRANSPARENCY_LOW | MENU_TRANSPARENCY_MID | MENU_TRANSPARENCY_HIGH => {
-            let tier = match id {
-                MENU_TRANSPARENCY_LOW => TransparencyTier::Low,
-                MENU_TRANSPARENCY_MID => TransparencyTier::Mid,
-                _ => TransparencyTier::High,
-            };
-            apply_transparency_tier(app, tier);
         }
         MENU_HELP_GUIDE => {
             let url = match crate::i18n::lang() {

@@ -7,9 +7,7 @@
 
 	import * as api from '$lib/api';
 	import type {
-		EffectLevel,
 		ExtGroup,
-		GlassAlpha,
 		IndexingPhase,
 		IndexingSnapshot,
 		IndexProgress,
@@ -149,7 +147,6 @@
 	});
 
 	let inputEl: HTMLInputElement | undefined = $state();
-	let panelEl: HTMLDivElement | undefined = $state();
 	let caretFlourishEl: HTMLSpanElement | undefined = $state();
 	let controlsEl: HTMLDivElement | undefined = $state();
 	let bodyEl: HTMLDivElement | undefined = $state();
@@ -432,6 +429,17 @@
 	 * `code` also covers keyboard layouts/IMEs whose localized `key` is not `,`.
 	 */
 	function handleWindowKeydown(e: KeyboardEvent) {
+		// Dialogs and menus handle Escape first. Only unhandled events reach this
+		// fallback, including focus restored to the preview button after a viewer.
+		if (e.defaultPrevented || e.isComposing) return;
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			if (shortcutOverlayOpen) shortcutOverlayOpen = false;
+			else if (settingsPanelOpen) closeSettingsPanel();
+			else if (typeMenuOpen || sortMenuOpen) closeMenus();
+			else api.hideWindow().catch((err) => console.error('hideWindow failed', err));
+			return;
+		}
 		if (!e.ctrlKey || (e.key !== ',' && e.code !== 'Comma')) return;
 		e.preventDefault();
 		openSettingsPanel();
@@ -708,28 +716,6 @@
 		inputEl?.select();
 	}
 
-	// 面板可视不透明度收拢到这一个入口：两个数字（明/暗主题各一个 alpha）
-	// 直接写进 CSS 变量，具体哪个生效由 app.css 的 prefers-color-scheme
-	// 媒体查询决定，这里不用猜当前是明是暗。托盘切透明度档位时走
-	// dowse://glass-alpha 事件复用同一个函数。
-	function applyGlassAlpha(alpha: GlassAlpha) {
-		document.documentElement.style.setProperty('--glass-alpha-light', String(alpha.light));
-		document.documentElement.style.setProperty('--glass-alpha-dark', String(alpha.dark));
-	}
-
-	// 呼出的手感：轻微放大 + 淡入，全程压在 120ms 以内的弹簧物理，不是缓动曲线。
-	// 用显式 keyframe（而不是读当前样式）保证每次呼出都从同一个起点播，
-	// 不会因为上一次动画没播完就被打断而出现错位。
-	function playShowAnimation() {
-		if (!panelEl) return;
-		animate(
-			panelEl,
-			{ opacity: [0, 1], scale: [0.98, 1] },
-			{ type: 'spring', bounce: 0.2, duration: 0.12 }
-		);
-		playCaretFlourish();
-	}
-
 	// 呼出瞬间的光标手感：一根装饰性的竖条从 0 高度弹到全高，跟输入框呼出
 	// 动画同一时刻起播。呼出时上次查询词会被全选（focusAndSelectAll），
 	// 原生光标本来就被选区盖住看不见，这根竖条负责传达"已经就绪、可以打字
@@ -881,10 +867,6 @@
 		refreshIndexingStatus();
 		focusAndSelectAll();
 
-		api.getEffectLevel().then((level: EffectLevel) => {
-			document.documentElement.dataset.effect = level;
-		});
-		api.getGlassAlpha().then(applyGlassAlpha);
 		api.getHotkey().then((raw) => {
 			hotkeyLabel = formatHotkey(raw);
 		});
@@ -898,17 +880,11 @@
 			// 核心验收场景（症状 2/3）。
 			refreshIndexingStatus();
 			focusAndSelectAll();
-			playShowAnimation();
+			playCaretFlourish();
 			closeMenus();
 			reportShownPerf();
 		});
 		const unlistenOpenSettings = listen('dowse://open-settings', openSettingsPanel);
-		const unlistenEffect = listen<EffectLevel>('dowse://effect-level', (evt) => {
-			document.documentElement.dataset.effect = evt.payload;
-		});
-		const unlistenGlassAlpha = listen<GlassAlpha>('dowse://glass-alpha', (evt) => {
-			applyGlassAlpha(evt.payload);
-		});
 		const unlistenRebuildDone = listen<number>('dowse://rebuild-done', (evt) => {
 			refreshIndexStatus();
 			// 托盘触发的重建（"重建索引"/"更改索引文件夹…"）没有走本地的
@@ -953,8 +929,6 @@
 			document.removeEventListener('click', handleDocumentClick);
 			unlistenShown.then((f) => f());
 			unlistenOpenSettings.then((f) => f());
-			unlistenEffect.then((f) => f());
-			unlistenGlassAlpha.then((f) => f());
 			unlistenRebuildDone.then((f) => f());
 			unlistenRebuildError.then((f) => f());
 			unlistenRootRemoved.then((f) => f());
@@ -967,7 +941,7 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
-<div class="panel" bind:this={panelEl}>
+<div class="panel">
 	{#each [
 		['North', 'n'],
 		['NorthEast', 'ne'],
@@ -1156,23 +1130,13 @@
 </div>
 
 <style>
-	/* v0.4.1 曾经让 .panel 内缩 16px（inset: var(--panel-margin)）给
-	   box-shadow 留渲染空间——结论错了，撤销，别再试：DWM 的 Acrylic/Mica
-	   是整个窗口生效的合成效果，不认 CSS 布局留出来的"空白"，缩出来的这一
-	   圈边距照样被渲染成玻璃，视觉上就成了"外面一圈裸玻璃画框、里面一个
-	   .panel 边框"的双框。整窗玻璃和"用内缩+CSS阴影模拟悬浮"这个方案在
-	   物理上不兼容，不是哪个数值没调对，任何再往这个方向调 inset 数值的
-	   尝试都会复现同一个问题。
-	   悬浮感的代价就此放弃——.panel 满铺整个窗口（inset: 0），只留一圈
-	   1px 半透明描边勾出边界，不再画阴影。position: absolute 以窗口
-	   （初始包含块）为参照，而不是随便找一个祖先元素——html/body 都没有
-	   设 position，天然就是这个参照系。 */
+	/* 不透明面板满铺窗口，圆角与原生窗口裁切对齐。 */
 	.panel {
 		position: absolute;
 		inset: 0;
 		display: flex;
 		flex-direction: column;
-		background: var(--glass-tint);
+		background: var(--panel-bg);
 		border-radius: var(--radius-window);
 		border: 1px solid var(--panel-border);
 		overflow: hidden;

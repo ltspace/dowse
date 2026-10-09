@@ -16,7 +16,7 @@ use crate::logging;
 use crate::perf::HotkeyPerfState;
 use crate::rebuild::{IndexStatsDto, RebuildGuard};
 use crate::state::SearchState;
-use crate::window_fx::{self, EffectLevel, EffectLevelState, GlassAlpha, TransparencyTier};
+use crate::window_fx;
 
 #[derive(Serialize)]
 pub struct SearchHitDto {
@@ -61,23 +61,6 @@ fn file_name_of(path: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string())
-}
-
-/// 前端启动时查一次当前生效的材质级别（Acrylic/Mica/纯色），
-/// 决定要不要自己叠一层纯色背景兜底。托盘切换透明开关之后的更新走
-/// `dowse://effect-level` 事件，这个 command 只覆盖启动时的初值。
-#[tauri::command]
-pub fn get_effect_level(state: State<EffectLevelState>) -> EffectLevel {
-    state.get()
-}
-
-/// 前端启动时查一次当前透明度挡位对应的 CSS alpha（明/暗两套主题各一个
-/// 数），用来给 `--glass-alpha-light`/`--glass-alpha-dark` 赋初值。托盘切
-/// 挡位之后的更新走 `dowse://glass-alpha` 事件，这个 command 只覆盖启动时
-/// 的初值——跟 `get_effect_level` 是同一套"启动查询 + 事件更新"分工。
-#[tauri::command]
-pub fn get_glass_alpha(config: State<ConfigState>) -> GlassAlpha {
-    config.get().transparency_tier.glass_alpha()
 }
 
 /// 快捷键速查浮层（Ctrl+/）要显示"呼出"这一行实际绑定的全局快捷键，而不是
@@ -330,26 +313,21 @@ pub fn set_rules(
 /// `target_dir` 这类跟设置面板无关的内部字段泄漏给前端；二是"开机自启"要的
 /// 是自启插件报告的**真实系统态**（`autolaunch().is_enabled()`），而 config
 /// 里只存了"用户是否主动关过"（`autostart_user_disabled`）这个语义不同的位，
-/// 不能拿来直接当勾选态用。`transparency_tier` 按 `serde(rename_all=lowercase)`
-/// 序列化成 "low"/"mid"/"high"，跟前端 `TransparencyTier` 类型对齐。
+/// 不能拿来直接当勾选态用。
 #[derive(Serialize)]
 pub struct SettingsDto {
     pub hotkey: String,
-    pub transparency_enabled: bool,
-    pub transparency_tier: TransparencyTier,
     pub autostart_enabled: bool,
     pub lang: String,
 }
 
-/// 设置面板打开时拉一次通用区的全部初值（改键/透明/自启/语言）。
+/// 设置面板打开时拉一次通用区的全部初值（改键/自启/语言）。
 #[tauri::command]
 pub fn get_config(app: tauri::AppHandle) -> SettingsDto {
     let cfg = app.state::<ConfigState>().get();
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
     SettingsDto {
         hotkey: cfg.hotkey,
-        transparency_enabled: cfg.transparency_enabled,
-        transparency_tier: cfg.transparency_tier,
         autostart_enabled,
         lang: cfg.lang,
     }
@@ -398,19 +376,6 @@ pub fn set_hotkey(app: tauri::AppHandle, hotkey: String) -> Result<(), String> {
             Err(format!("这个组合键可能已被其它程序占用，注册失败：{err}"))
         }
     }
-}
-
-/// 设置面板"透明效果"开关：复用托盘同一条实现（`tray::apply_transparency_enabled`），
-/// 托盘勾选态与面板因此天然同步。
-#[tauri::command]
-pub fn set_transparency_enabled(app: tauri::AppHandle, enabled: bool) {
-    crate::tray::apply_transparency_enabled(&app, enabled);
-}
-
-/// 设置面板"透明度"三档：复用托盘同一条实现（`tray::apply_transparency_tier`）。
-#[tauri::command]
-pub fn set_transparency_tier(app: tauri::AppHandle, tier: TransparencyTier) {
-    crate::tray::apply_transparency_tier(&app, tier);
 }
 
 /// 设置面板"开机自启"：复用托盘同一条实现（`tray::apply_autostart`），失败

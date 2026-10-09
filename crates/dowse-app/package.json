@@ -1,6 +1,6 @@
 {
   "name": "dowse-app",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "",
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "screenshots:readme": "node scripts/capture-readme-screenshots.mjs",
+    "test:ui": "node scripts/check-image-interactions.mjs",
     "test:unit": "node --test tests/*.test.mjs",
     "tauri": "tauri"
   },

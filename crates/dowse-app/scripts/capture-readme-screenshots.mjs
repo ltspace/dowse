@@ -1,9 +1,10 @@
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { extname, join, resolve } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 
 const APP_WIDTH = 860;
 const APP_HEIGHT = 560;
@@ -13,6 +14,9 @@ const buildDir = join(appDir, 'build');
 const outputDir = resolve(appDir, '..', '..', 'docs', 'screenshots');
 
 const chromeCandidates = [
+	'/usr/bin/google-chrome',
+	'/usr/bin/chromium',
+	'/usr/bin/chromium-browser',
 	'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
 	'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
 	'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
@@ -46,7 +50,7 @@ function serveBuild() {
 			const url = new URL(request.url ?? '/', 'http://127.0.0.1');
 			const relative = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
 			const candidate = resolve(buildDir, relative);
-			const root = `${resolve(buildDir)}\\`;
+			const root = `${resolve(buildDir)}${sep}`;
 			const file = candidate.startsWith(root) ? candidate : join(buildDir, 'index.html');
 			let body;
 			try {
@@ -122,7 +126,7 @@ async function waitForDebugger(port) {
 	throw new Error('Timed out waiting for the browser debugger.');
 }
 
-function installMockRuntime(lang, mode) {
+export function installMockRuntime(lang, mode) {
 	localStorage.clear();
 	localStorage.setItem('dowse.lang-override', lang);
 	window.__screenshotErrors = [];
@@ -215,14 +219,10 @@ function installMockRuntime(lang, mode) {
 					return { has_index: true, num_docs: 15100, roots: ['C:\\Users\\demo\\Documents\\Northstar'] };
 				case 'indexing_status':
 					return { phase: 'idle', text_processed: 0, text_current_file: '', ocr_processed: 0, ocr_total: 0 };
-				case 'get_effect_level':
-					return 'solid';
-				case 'get_glass_alpha':
-					return { light: 0.4, dark: 0.28 };
 				case 'get_hotkey':
 					return 'Alt+Backquote';
 				case 'get_config':
-					return { hotkey: 'Alt+Backquote', transparency_enabled: false, transparency_tier: 'mid', autostart_enabled: true, lang };
+					return { hotkey: 'Alt+Backquote', autostart_enabled: true, lang };
 				case 'get_rules':
 					return { exclude_dirs: ['node_modules', 'target', '.git'], extra_text_exts: ['rst', 'adoc'], max_file_mb: 20 };
 				case 'file_icon':
@@ -257,7 +257,7 @@ function installMockRuntime(lang, mode) {
 	};
 }
 
-async function evaluate(client, expression) {
+export async function evaluate(client, expression) {
 	const result = await client.call('Runtime.evaluate', {
 		expression,
 		awaitPromise: true,
@@ -315,7 +315,7 @@ async function removeTemporaryProfile(profileDir) {
 	throw new Error(`Could not remove temporary browser profile: ${profileDir}`);
 }
 
-async function main() {
+export async function withBrowser(run) {
 	await stat(join(buildDir, 'index.html')).catch(() => {
 		throw new Error('Run `npm run build` before capturing README screenshots.');
 	});
@@ -362,16 +362,7 @@ async function main() {
 			color: { r: 0, g: 0, b: 0, a: 0 }
 		});
 		const baseUrl = `http://127.0.0.1:${appPort}/`;
-		for (const target of [
-			{ file: 'hero.png', lang: 'en', mode: 'hero' },
-			{ file: 'hero.zh-CN.png', lang: 'zh', mode: 'hero' },
-			{ file: 'settings.png', lang: 'en', mode: 'settings' },
-			{ file: 'settings.zh-CN.png', lang: 'zh', mode: 'settings' },
-			{ file: 'ocr-preview.png', lang: 'en', mode: 'ocr' },
-			{ file: 'ocr-preview.zh-CN.png', lang: 'zh', mode: 'ocr' }
-		]) {
-			await capture(client, baseUrl, target);
-		}
+		await run(client, baseUrl);
 	} finally {
 		client?.close();
 		child.kill();
@@ -383,4 +374,17 @@ async function main() {
 	}
 }
 
-await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	await withBrowser(async (client, baseUrl) => {
+		for (const target of [
+			{ file: 'hero.png', lang: 'en', mode: 'hero' },
+			{ file: 'hero.zh-CN.png', lang: 'zh', mode: 'hero' },
+			{ file: 'settings.png', lang: 'en', mode: 'settings' },
+			{ file: 'settings.zh-CN.png', lang: 'zh', mode: 'settings' },
+			{ file: 'ocr-preview.png', lang: 'en', mode: 'ocr' },
+			{ file: 'ocr-preview.zh-CN.png', lang: 'zh', mode: 'ocr' }
+		]) {
+			await capture(client, baseUrl, target);
+		}
+	});
+}

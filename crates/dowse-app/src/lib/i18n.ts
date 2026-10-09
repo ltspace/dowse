@@ -131,12 +131,6 @@ interface Strings {
 	setHotkeyNeedModifier: string;
 	setHotkeySaved: string;
 	setHotkeyFailed: (err: string) => string;
-	// 通用区 - 透明效果 + 三档
-	setTransparencyLabel: string;
-	setTierLabel: string;
-	setTierLow: string;
-	setTierMid: string;
-	setTierHigh: string;
 	// 通用区 - 开机自启
 	setAutostartLabel: string;
 	// 通用区 - 界面语言
@@ -145,7 +139,7 @@ interface Strings {
 	setLangZh: string;
 	setLangEn: string;
 	setLangRestartHint: string;
-	// 通用区 - 开/关两态（透明/自启共用）
+	// 通用区 - 开/关两态（开机自启）
 	setOn: string;
 	setOff: string;
 	// 索引规则面板（Ctrl+, 打开）
@@ -261,11 +255,6 @@ const zh: Strings = {
 	setHotkeyNeedModifier: '至少需要一个修饰键（Ctrl / Alt / Shift / Win）。',
 	setHotkeySaved: '快捷键已更新。',
 	setHotkeyFailed: (err) => `改键失败：${err}`,
-	setTransparencyLabel: '透明效果',
-	setTierLabel: '透明度',
-	setTierLow: '低',
-	setTierMid: '中',
-	setTierHigh: '高',
 	setAutostartLabel: '开机自启',
 	setLangLabel: '界面语言',
 	setLangAuto: '跟随系统',
@@ -386,11 +375,6 @@ const en: Strings = {
 	setHotkeyNeedModifier: 'Needs at least one modifier (Ctrl / Alt / Shift / Win).',
 	setHotkeySaved: 'Shortcut updated.',
 	setHotkeyFailed: (err) => `Rebind failed: ${err}`,
-	setTransparencyLabel: 'Transparency',
-	setTierLabel: 'Opacity',
-	setTierLow: 'Low',
-	setTierMid: 'Medium',
-	setTierHigh: 'High',
 	setAutostartLabel: 'Launch at startup',
 	setLangLabel: 'Language',
 	setLangAuto: 'System',

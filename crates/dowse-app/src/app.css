@@ -1,29 +1,3 @@
-/* dowse 浮窗视觉基调：Raycast 量级的玻璃透明度 + 苹果式克制。
-   窗口本体透明，真正的模糊由 DWM 的 Acrylic/Mica 供给——这层 CSS 只负责
-   在玻璃上叠一层薄的中性色调（不是自己画假磨砂），以及"关闭透明效果"
-   或降级到纯色时的兜底背景。
-
-   v0.4.1 之前的教训：面板背后其实叠着两层不透明度贡献者——这层 CSS 的
-   `--glass-tint`，和 Rust 侧 window_fx.rs 里 `neutral_acrylic_tint` 送给
-   DWM 合成器的 tint alpha。只调 CSS 这一层、DWM 那层焊死不动的话，用户
-   把这里的 alpha 从 0.55 调到 0.32 会"观感丝毫没变"——被焊死的那层盖过去
-   了。v0.4.1 把两层收拢到同一个入口：`--glass-alpha-light`/
-   `--glass-alpha-dark` 这两个数字由 Rust 侧 `TransparencyTier` 枚举统一
-   决定，托盘"透明度"三档一次性把两层一起搬，前端只管把这两个数字接进
-   `--glass-tint` 的 alpha 通道，不再自己另定一套。三档的具体数值表见
-   window_fx.rs 上 `TransparencyTier` 的文档注释。
-
-   品牌色：很淡的水蓝（呼应"探水杖"的意象），只用在活跃元素上——
-   选中态背景/描边、输入框光标与聚焦态、命中词高亮。大面积的玻璃和
-   底色始终保持中性，不做成蓝色主题。唯一的例外是纯色降级档（见下面
-   `:root[data-effect='solid']`）：玻璃不可用时的这块兜底不透明底色，
-   刻意带一点水蓝倾向而不是死黑/死白，好让"降级"也不至于太生硬。
-
-   字体：Inter（拉丁，OFL-1.1）+ MiSans（中文，Xiaomi 开源免费商用，经
-   dsrkafuu/misans 打包再分发，Apache-2.0）。字体文件与各自 LICENSE 见
-   ./assets/fonts/，Inter 排在字体栈最前面吃掉拉丁字形，中文自然落到 MiSans；
-   两者都没装上/加载失败时再退到系统字体。 */
-
 @import url('./assets/fonts/fonts.css');
 
 :root {
@@ -36,30 +10,17 @@
 	   自然回落到上面 --font-ui 的 MiSans。 */
 	--font-mono: 'Cascadia Mono', Consolas, monospace;
 
-	/* 面板可视不透明度的单一控制点：托盘选了哪一档透明度，Rust 侧就把这
-	   两个数字通过 `dowse://glass-alpha` 事件（或启动时的 get_glass_alpha
-	   查询）写进这里的内联样式，覆盖下面的默认值。默认值对应"中"档，
-	   跟 v0.4.0 发布时的观感基本一致，纯前端开发（没有 Tauri 后端）时也
-	   能看到合理的效果。 */
-	--glass-alpha-light: 0.4;
-	--glass-alpha-dark: 0.28;
-
-	/* 浅色（跟随系统） */
+	/* 固定浅色不透明背景 */
 	--fg-primary: #101014;
 	--fg-secondary: #6b6b75;
 	--fg-tertiary: #9494a0;
 	--divider: rgba(0, 0, 0, 0.08);
-	--glass-tint: rgba(255, 255, 255, var(--glass-alpha-light));
-	--solid-bg: #f3f3f6;
+	--panel-bg: linear-gradient(180deg, #f8fbfe 0%, #e6f2fb 100%);
+	--solid-bg: #eef6fb;
 	--row-hover: rgba(0, 0, 0, 0.035);
 	--scrollbar-thumb: rgba(0, 0, 0, 0.16);
 
-	/* 窗口本体是透明的，原生阴影关掉了（tauri.conf.json 里 shadow: false）。
-	   v0.4.1 试过给 .panel 内缩一圈再叠 box-shadow 模拟悬浮感，结果 DWM
-	   的整窗玻璃把这圈内缩渲染成了一圈裸玻璃"画框"（双框 bug，v0.4.2 撤销，
-	   细节见 +page.svelte 里 .panel 规则上的注释）——CSS 阴影方案跟整窗玻璃
-	   物理上不兼容，不再尝试。悬浮感现在只靠这一条描边，.panel 满铺整个
-	   窗口，不留内缩空间。 */
+	/* 面板满铺窗口，以描边区分桌面背景。 */
 	--panel-border: rgba(0, 0, 0, 0.07);
 
 	--accent-soft: rgba(58, 154, 194, 0.14);
@@ -79,70 +40,10 @@
 
 	/* Win11 系统原生窗口圆角半径，跟 DWM 的 DWMWCP_ROUND 裁切对齐——
 	   面板自己的圆角和窗口本体被裁掉的形状必须是同一个数，否则四角
-	   会露出"玻璃直角 - 面板圆角"的三角形缝隙。 */
+	   会露出"窗口直角 - 面板圆角"的三角形缝隙。 */
 	--radius-window: 8px;
 	--radius-row: 8px;
 	--radius-chip: 5px;
-}
-
-/* 纯色降级档（玻璃申请失败，或系统/用户关掉了透明效果）：这一档必须完全
-   不透明——它是玻璃不可用时的兜底，不加 alpha，不受 --glass-alpha-* 那两个
-   透明度数字影响，直接把 --glass-tint 钉死成不透明色。
-
-   v0.4.x 时这一档不分明暗主题、统一钉成死黑灰（#1c1c20），亮色主题下也会
-   被拽成一块黑灰色面板，观感突兀；中间版本改成明暗主题各给一套（亮色水蓝白 /
-   暗色水蓝黑），但暗色那一档用户反馈"还是太暗"——纯色档要的是清爽通透，
-   不是换一种深色。现在统一收口：不管系统是亮色还是暗色主题，纯色档都固定
-   走这一条浅色水蓝白，不再随 `prefers-color-scheme: dark` 分支（下面的
-   dark 媒体查询里已经不再覆盖这一段，专门留了说明）。顶部到底部叠一层极淡
-   的竖向渐变（近白 → 浅水蓝）增加通透感，前景色/分割线/滚动条则反过来
-   固定用深色系半透明，确保浅底上文字始终清楚可读。 */
-:root[data-effect='solid'] {
-	--glass-tint: linear-gradient(180deg, #f8fbfe 0%, #e6f2fb 100%);
-	--solid-bg: #eef6fb;
-	--fg-primary: #101014;
-	--fg-secondary: #6b6b75;
-	--fg-tertiary: #9494a0;
-	--divider: rgba(0, 0, 0, 0.08);
-	--panel-border: rgba(0, 0, 0, 0.07);
-	--row-hover: rgba(0, 0, 0, 0.035);
-	--scrollbar-thumb: rgba(0, 0, 0, 0.16);
-	--accent-soft: rgba(58, 154, 194, 0.14);
-	--accent-border: rgba(58, 154, 194, 0.4);
-	--accent-strong: #1e7da6;
-	--accent-caret: #2a8cba;
-	--shortcut-chip-bg: rgba(0, 0, 0, 0.055);
-}
-
-@media (prefers-color-scheme: dark) {
-	:root {
-		--fg-primary: #f5f5f7;
-		--fg-secondary: #9d9da6;
-		--fg-tertiary: #77777f;
-		--divider: rgba(255, 255, 255, 0.1);
-		--glass-tint: rgba(18, 18, 22, var(--glass-alpha-dark));
-		--solid-bg: #1c1c20;
-		--panel-border: rgba(255, 255, 255, 0.07);
-		--row-hover: rgba(255, 255, 255, 0.045);
-		--scrollbar-thumb: rgba(255, 255, 255, 0.18);
-
-		/* 暗色下水蓝提亮一档，保证在深色玻璃上仍然够清楚 */
-		--accent-soft: rgba(112, 199, 232, 0.16);
-		--accent-border: rgba(112, 199, 232, 0.45);
-		--accent-strong: #7fcbe8;
-		--accent-caret: #7fcbe8;
-
-		--shortcut-chip-bg: rgba(255, 255, 255, 0.07);
-
-		--toast-bg: rgba(241, 241, 244, 0.94);
-		--toast-fg: #1c1c20;
-	}
-
-	/* 注意：这里故意不再放 `:root[data-effect='solid']` 的暗色主题覆盖。
-	   纯色降级档现在不分明暗系统主题，统一吃上面那一条浅色水蓝白定义
-	   （见文件靠前处的 `:root[data-effect='solid']` 及其注释）——删掉这段
-	   覆盖，选择器特异度相同、这里又没有更晚的同选择器规则，浅色定义在
-	   暗色系统下也不会被二次覆盖。 */
 }
 
 * {
@@ -153,7 +54,7 @@ html,
 body {
 	margin: 0;
 	padding: 0;
-	background: transparent;
+	background: var(--solid-bg);
 	overflow: hidden;
 }
 
