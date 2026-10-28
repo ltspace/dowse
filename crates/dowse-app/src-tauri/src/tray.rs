@@ -287,9 +287,18 @@ fn root_doc_count(app: &AppHandle, root: &std::path::Path) -> u64 {
 /// 默认的呼出提示，文本/OCR 两个阶段各自换成"索引中 N 篇"/"图片识别 N / M"，
 /// 窗口不用开着也能瞟一眼进度（症状 2/3 的验收场景之一）。
 pub fn refresh_tooltip(app: &AppHandle) {
+    // set_tooltip waits for the UI thread when called from a worker. Posting the
+    // entire update lets OCR exit even while the UI is waiting for workers.
+    let app_for_update = app.clone();
+    let _ = app.run_on_main_thread(move || refresh_tooltip_on_main(&app_for_update));
+}
+
+fn refresh_tooltip_on_main(app: &AppHandle) {
     let Some(handles) = app.try_state::<TrayHandles>() else {
         return;
     };
+    // Read at execution time: a queued OCR update must not overwrite a newer
+    // rebuilding/idle state with a snapshot captured before shutdown.
     let snapshot = app.state::<IndexingStatus>().snapshot();
     let s = crate::i18n::strings();
     let tooltip = match snapshot.phase {
@@ -506,4 +515,58 @@ fn remove_folder(app: &AppHandle, idx: usize) {
             }
         }
     });
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, mpsc};
+    use std::time::Duration;
+
+    #[test]
+    #[allow(deprecated)] // Pump the real Windows runtime without launching the app.
+    fn tooltip_worker_exits_before_ui_processes_update() {
+        let mut context = tauri::generate_context!();
+        context.config_mut().app.windows.clear();
+        context.config_mut().identifier = "com.dowse.tooltip-regression".into();
+        let mut app = tauri::Builder::default()
+            .any_thread()
+            .manage(IndexingStatus::new())
+            .build(context)
+            .unwrap();
+        // No application plugins, watcher, index or visible window are started.
+        let icon = TrayIconBuilder::new().build(app.handle()).unwrap();
+        icon.set_visible(false).unwrap();
+        app.manage(TrayHandles { icon });
+        app.state::<IndexingStatus>().begin_ocr(12);
+
+        let handle = app.handle().clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let ui_ran = Arc::new(AtomicBool::new(false));
+        let ui_flag = ui_ran.clone();
+        let worker = std::thread::spawn(move || {
+            refresh_tooltip(&handle);
+            handle
+                .run_on_main_thread(move || ui_flag.store(true, Ordering::Release))
+                .unwrap();
+            done_tx.send(()).unwrap();
+        });
+
+        // This is the old deadlock condition: UI waits for worker without pumping
+        // messages. The worker must finish despite the pending tooltip update.
+        let exited_before_pump = done_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+        let ran_before_pump = ui_ran.load(Ordering::Acquire);
+        app.state::<IndexingStatus>().begin_text();
+        // Drain even on failure, so the old blocking implementation can exit.
+        for _ in 0..3 {
+            app.run_iteration(|_, _| {});
+        }
+        worker.join().unwrap();
+        assert!(
+            exited_before_pump,
+            "tooltip update waited for UI and blocked worker shutdown"
+        );
+        assert!(!ran_before_pump);
+        assert!(ui_ran.load(Ordering::Acquire));
+    }
 }

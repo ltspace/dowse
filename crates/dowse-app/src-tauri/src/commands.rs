@@ -234,18 +234,16 @@ pub fn reveal_in_folder(_path: String) -> Result<(), String> {
 /// `RebuildGuard` 防止这个命令和托盘的重建入口并发触发——已经有一次在跑
 /// 就直接报错，不会互相踩踏。
 #[tauri::command]
-pub fn rebuild_index(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto, String> {
-    if !app.state::<RebuildGuard>().try_begin() {
-        return Err("已有一次建索引正在进行中，请稍候".to_string());
-    }
-    let target = PathBuf::from(&dir).canonicalize().map_err(|_| {
-        app.state::<RebuildGuard>().end();
-        "目录不存在".to_string()
-    })?;
-
-    let result = crate::rebuild::perform_rebuild(&app, target);
-    app.state::<RebuildGuard>().end();
-    result
+pub async fn rebuild_index(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto, String> {
+    let guard = app.state::<RebuildGuard>().inner().clone();
+    guard
+        .run(move || {
+            let target = PathBuf::from(&dir)
+                .canonicalize()
+                .map_err(|_| "目录不存在".to_string())?;
+            crate::rebuild::perform_rebuild(&app, target)
+        })
+        .await
 }
 
 /// 添加一个索引根（多根索引，里程碑 7）。浮窗空态"添加文件夹"链接走这个
@@ -253,15 +251,11 @@ pub fn rebuild_index(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto
 /// 都用 `RebuildGuard` 防并发、都靠 `dowse://rebuild-progress` 事件直播进度，
 /// 唯一区别是这个不动现有索引内容，只对新根做一次目录树 upsert。
 #[tauri::command]
-pub fn add_root(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto, String> {
-    if !app.state::<RebuildGuard>().try_begin() {
-        return Err("已有一次建索引正在进行中，请稍候".to_string());
-    }
-    let target = PathBuf::from(&dir);
-
-    let result = crate::rebuild::perform_add_root(&app, target);
-    app.state::<RebuildGuard>().end();
-    result
+pub async fn add_root(app: tauri::AppHandle, dir: String) -> Result<IndexStatsDto, String> {
+    let guard = app.state::<RebuildGuard>().inner().clone();
+    guard
+        .run(move || crate::rebuild::perform_add_root(&app, PathBuf::from(dir)))
+        .await
 }
 
 /// 图钉固定开关：前端点了图钉按钮就调这个命令，把会话级的"抑制失焦自动

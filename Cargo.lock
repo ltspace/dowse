@@ -1266,6 +1266,7 @@ dependencies = [
  "anyhow",
  "directories",
  "dowse",
+ "embed-resource",
  "png 0.18.1",
  "serde",
  "serde_json",

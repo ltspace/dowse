@@ -4,6 +4,7 @@
 //! 某一处状态"的偏差（症状 5：选完目录之后要能看得见、改得了）。
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
@@ -28,11 +29,20 @@ fn emit_indexing_settled(app: &AppHandle) {
 /// 防止"重建索引"/"更改索引文件夹"/浮窗按钮三个入口并发触发重建——全量重建
 /// 期间旧索引目录会被删掉重建，重叠执行会互相踩踏（Windows 删目录、tantivy
 /// 写入端都不是可重入的）。
-pub struct RebuildGuard(AtomicBool);
+#[derive(Clone)]
+pub struct RebuildGuard(Arc<AtomicBool>);
+
+struct RebuildPermit(RebuildGuard);
+
+impl Drop for RebuildPermit {
+    fn drop(&mut self) {
+        self.0.end();
+    }
+}
 
 impl RebuildGuard {
     pub fn new() -> Self {
-        Self(AtomicBool::new(false))
+        Self(Arc::new(AtomicBool::new(false)))
     }
 
     /// 尝试拿到独占重建权，已经有一次在跑就返回 false（调用方据此提示用户
@@ -45,6 +55,25 @@ impl RebuildGuard {
 
     pub fn end(&self) {
         self.0.store(false, Ordering::Release);
+    }
+
+    /// Keep filesystem work and watcher/OCR joins off the window and async-runtime
+    /// threads. The worker owns the permit, so dropping the IPC future cannot
+    /// unlock an operation that is still running. Unwinding also releases it.
+    pub async fn run<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce() -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        if !self.try_begin() {
+            return Err("已有一次建索引正在进行中，请稍候".to_string());
+        }
+        let permit = RebuildPermit(self.clone());
+        tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            operation()
+        })
+        .await
+        .map_err(|err| format!("索引后台任务异常: {err}"))?
     }
 }
 
@@ -386,4 +415,89 @@ pub fn perform_rebuild_root(app: &AppHandle, root: PathBuf) -> Result<IndexStats
         ocr_pending,
         skipped_oversize: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::Future;
+    use std::sync::mpsc;
+    use std::task::{Context, Poll, Wake, Waker};
+    use std::time::Duration;
+
+    struct NoopWake;
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    #[test]
+    fn indexing_yields_and_keeps_exclusion_until_worker_finishes() {
+        let guard = RebuildGuard::new();
+        let caller = std::thread::current().id();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut task = Box::pin(guard.run(move || {
+            started_tx.send(std::thread::current().id()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            Ok(42)
+        }));
+        let waker = Waker::from(Arc::new(NoopWake));
+        let first_poll = task.as_mut().poll(&mut Context::from_waker(&waker));
+        let worker = started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let concurrent = tauri::async_runtime::block_on(guard.run(|| Ok(())));
+        release_tx.send(()).unwrap();
+        let result = tauri::async_runtime::block_on(task);
+
+        assert!(matches!(first_poll, Poll::Pending));
+        assert_ne!(caller, worker);
+        assert!(concurrent.unwrap_err().contains("已有一次"));
+        assert_eq!(result.unwrap(), 42);
+        assert!(guard.try_begin());
+        guard.end();
+    }
+
+    #[test]
+    fn dropping_ipc_future_does_not_unlock_running_worker() {
+        let guard = RebuildGuard::new();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut task = Box::pin(guard.run(move || {
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            Ok(())
+        }));
+        let waker = Waker::from(Arc::new(NoopWake));
+        assert!(
+            task.as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        drop(task);
+        let still_busy = !guard.try_begin();
+        release_tx.send(()).unwrap();
+        assert!(
+            still_busy,
+            "dropping a response must not allow overlapping writes"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !guard.try_begin() {
+            assert!(
+                Instant::now() < deadline,
+                "finished worker did not release permit"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        guard.end();
+    }
+
+    #[test]
+    fn worker_error_and_panic_release_exclusion() {
+        let guard = RebuildGuard::new();
+        let error = tauri::async_runtime::block_on(guard.run(|| Err::<(), _>("test error".into())));
+        assert_eq!(error.unwrap_err(), "test error");
+        let panic = tauri::async_runtime::block_on(guard.run(|| -> Result<(), String> {
+            panic!("injected indexing panic");
+        }));
+        assert!(panic.unwrap_err().contains("索引后台任务异常"));
+        assert!(tauri::async_runtime::block_on(guard.run(|| Ok(()))).is_ok());
+    }
 }
